@@ -319,16 +319,6 @@ def main():
             print("(2) von niemanden abgeschlossen sind")
             status_einschraenkung = input("Auswahl: ")
 
-            # TODO kann nicht beides ausführen!
-
-            # if isinstance(selected_activity, dict):
-            #     print("Inhalt der selected_activity-Map:")
-            #     for key, value in selected_activity.items():
-            #         process_aufgaben_parallel(base_url, common_params, {selected_course: courses[selected_course]}, {selected_group: groups[selected_group]}, {key: value}, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver)
-            # else:
-            #     print("selected_activity ist keine Map (kein Dictionary).")
-            #     process_aufgaben_parallel(base_url, common_params, {selected_course: courses[selected_course]}, {selected_group: groups[selected_group]}, {selected_activity: activities[selected_activity]}, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver)
-
             activity_dict = selected_activity if isinstance(selected_activity, dict) else {selected_activity: activities[selected_activity]}
             process_aufgaben_parallel(base_url, common_params, {selected_course: courses[selected_course]}, {selected_group: groups[selected_group]}, activity_dict, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver)
 
