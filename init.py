@@ -43,134 +43,146 @@ def build_url(base_url, common_params, course, group, activity):
     query_params = f"course={course}&activityinclude={activity}&group={group}{common_params}"
     return f"{base_url}?{query_params}"
 
-def determine_color(prozent_abgeschlossen, thresholds):
-    if prozent_abgeschlossen > thresholds['green']:
-        return ANSIColors.GREEN
-    elif prozent_abgeschlossen > thresholds['yellow']:
-        return ANSIColors.YELLOW
-    elif prozent_abgeschlossen > thresholds['orange']:
-        return ANSIColors.ORANGE
-    elif prozent_abgeschlossen > thresholds['red']:
-        return ANSIColors.RED
-    else:
-        return ANSIColors.RESET
+def determine_color(prozent_abgeschlossen, thresholds, order):
+    color_order = ['green', 'yellow', 'orange', 'red'] if order == 1 else ['red', 'orange', 'yellow', 'green']
+    
+    for color in color_order:
+        if prozent_abgeschlossen > thresholds[color]:
+            return getattr(ANSIColors, color.upper())
+    
+    return ANSIColors.RESET
+
 
 def print_checklist_results_header():
     print(f"{'Gesamt':<8}{'Abg':<8}{'% Abg':<10}{'Offen':<8}{'% Offen':<10}{'Thema'}")
 
-def process_single_checkliste(course_name, group_name, activity_name, base_url, common_params, course, group, activity, username, password, namen_anzeigen, status_einschraenkung, thresholds):
+def print_assign_results_header():
+    print(f"{'Gesamt':<6}\t{'Abg':<10}{'Offen':<5}\t\t{'Thema'}")
+
+
+
+def process_single_checkliste(course_name, group_name, activity_name, base_url, common_params, course, group, activity, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver):
     url_with_group = build_url(base_url, common_params, course, group, activity)
     
-    driver = create_webdriver()
-    try:
-        print(f"Kurs: {course_name}")
-        print(f"  Gruppe: {group_name}")
-        print(f"    {activity_name} - Checklisten")
-        driver.get(url_with_group)
-        
-        if "login" in driver.current_url:
-            login(driver, username, password)
+    print(f"Kurs: {course_name}")
+    print(f"  Gruppe: {group_name}")
+    print(f"    {activity_name} - Checklisten")
+    driver.get(url_with_group)
+    
+    if "login" in driver.current_url:
+        login(driver, username, password)
 
-        WebDriverWait(driver, WAIT_TIME).until(EC.presence_of_element_located((By.ID, "completion-progress")))
+    WebDriverWait(driver, WAIT_TIME).until(EC.presence_of_element_located((By.ID, "completion-progress")))
 
-        # Extrahiere die Checklisten-Spaltenüberschriften
-        headers = driver.find_elements(By.CSS_SELECTOR, "th.completion-header a")
-        checklist_titles = [header.get_attribute('title') for header in headers]
+    # Extrahiere die Checklisten-Spaltenüberschriften
+    headers = driver.find_elements(By.CSS_SELECTOR, "th.completion-header a")
+    checklist_titles = [header.get_attribute('title') for header in headers]
+    checklist_links = [header.get_attribute('href') for header in headers]  # Extrahiere die Links
 
-        print_checklist_results_header()
+    print_checklist_results_header()
 
-        rows = driver.find_elements(By.CSS_SELECTOR, "tbody tr")
-        checklist_results = {title: {'abgeschlossen': [], 'nicht_abgeschlossen': []} for title in checklist_titles}
+    rows = driver.find_elements(By.CSS_SELECTOR, "tbody tr")
+    checklist_results = {title: {'abgeschlossen': [], 'nicht_abgeschlossen': []} for title in checklist_titles}
 
-        for row in rows:
-            person_name = row.find_element(By.CSS_SELECTOR, "th a").text
-            progress_cells = row.find_elements(By.CSS_SELECTOR, "td.completion-progresscell a img")
+    for row in rows:
+        person_name = row.find_element(By.CSS_SELECTOR, "th a").text
+        progress_cells = row.find_elements(By.CSS_SELECTOR, "td.completion-progresscell a img")
 
-            for index, cell in enumerate(progress_cells):
-                status = "abgeschlossen" if "completion-auto-y" in cell.get_attribute('src') else "nicht_abgeschlossen"
-                checklist_title = checklist_titles[index]
+        for index, cell in enumerate(progress_cells):
+            status = "abgeschlossen" if "completion-auto-y" in cell.get_attribute('src') else "nicht_abgeschlossen"
+            checklist_title = checklist_titles[index]
 
-                checklist_results[checklist_title][status].append(person_name)
+            checklist_results[checklist_title][status].append(person_name)
 
-        for title, results in checklist_results.items():
-            total = len(results['abgeschlossen']) + len(results['nicht_abgeschlossen'])
-            abgeschlossen = len(results['abgeschlossen'])
-            nicht_abgeschlossen = len(results['nicht_abgeschlossen'])
-            prozent_abgeschlossen = (abgeschlossen / total) * 100 if total > 0 else 0
-            prozent_nicht_abgeschlossen = (nicht_abgeschlossen / total) * 100 if total > 0 else 0
+    for title, results in checklist_results.items():
+        total = len(results['abgeschlossen']) + len(results['nicht_abgeschlossen'])
+        abgeschlossen = len(results['abgeschlossen'])
+        nicht_abgeschlossen = len(results['nicht_abgeschlossen'])
+        prozent_abgeschlossen = (abgeschlossen / total) * 100 if total > 0 else 0
+        prozent_nicht_abgeschlossen = (nicht_abgeschlossen / total) * 100 if total > 0 else 0
 
-            if (status_einschraenkung == '1' and abgeschlossen == 0) or (status_einschraenkung == '2' and abgeschlossen > 0):
-                continue
+        if (status_einschraenkung == '1' and abgeschlossen == 0) or (status_einschraenkung == '2' and abgeschlossen > 0):
+            continue
 
-            color = determine_color(prozent_abgeschlossen, thresholds)
+        color = determine_color(prozent_abgeschlossen, thresholds, 1)
+        # Verwende den spezifischen Link für die Checkliste
+        specific_link = checklist_links[index] if index < len(checklist_links) else "Link nicht gefunden"
+        #  print(f"{total:<8}{abgeschlossen:<8}{color}{prozent_abgeschlossen:.2f}%{ANSIColors.RESET:<10}{nicht_abgeschlossen:<8}{prozent_nicht_abgeschlossen:.2f}%\t{title} - {specific_link}")
+        print(f"{total:>8}{abgeschlossen:>8}{color}{int(prozent_abgeschlossen):>3}%{ANSIColors.RESET:<10}{nicht_abgeschlossen:>8}{int(prozent_nicht_abgeschlossen):>3}%\t{title} - {specific_link}")
 
-            print(f"{total:<8}{abgeschlossen:<8}{color}{prozent_abgeschlossen:.2f}%{ANSIColors.RESET:<10}{nicht_abgeschlossen:<8}{prozent_nicht_abgeschlossen:.2f}%\t{title} - {url_with_group}")
+        if namen_anzeigen and abgeschlossen > 0:
+            print("Abgeschlossen:")
+            for name in results['abgeschlossen']:
+                print(f"  - {name}")
 
-            if namen_anzeigen and abgeschlossen > 0:
-                print("Abgeschlossen:")
-                for name in results['abgeschlossen']:
-                    print(f"  - {name}")
 
-    finally:
-        driver.quit()
 
-def process_single_aufgabe(course_name, group_name, activity_name, base_url, common_params, course, group, activity, username, password, thresholds):
+
+def process_single_aufgabe(course_name, group_name, activity_name, base_url, common_params, course, group, activity, username, password, thresholds, driver):
     url_with_group = build_url(base_url, common_params, course, group, activity)
     
-    driver = create_webdriver()
-    try:
-        print(f"Kurs: {course_name}")
-        print(f"  Gruppe: {group_name}")
-        print(f"    {activity_name} - Aufgaben")
-        driver.get(url_with_group)
-        
-        if "login" in driver.current_url:
-            login(driver, username, password)
 
-        WebDriverWait(driver, WAIT_TIME).until(EC.presence_of_element_located((By.ID, "completion-progress")))
-        link_urls = extract_links_from_table(driver)
+    print(f"Kurs: {course_name}")
+    print(f"  Gruppe: {group_name}")
+    print(f"    {activity_name} - Aufgaben")
+    driver.get(url_with_group)
+    
+    if "login" in driver.current_url:
+        login(driver, username, password)
 
-        total_links = len(link_urls)
-        completed_count = 0
+    WebDriverWait(driver, WAIT_TIME).until(EC.presence_of_element_located((By.ID, "completion-progress")))
+    link_urls = extract_links_from_table(driver)
 
-        for link_url in link_urls:
-            link_url_with_group = build_url(link_url, '', '', group, '')
-            driver.get(link_url_with_group)
+    total_links = len(link_urls)
+    completed_count = 0
+    eingereicht_sum = 0
+    bewertet_sum = 0
+    persons = 0
 
-            # Alternative Selektoren ausprobieren
-            try:
-                WebDriverWait(driver, WAIT_TIME).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table.generaltable.table-bordered")))
-            except TimeoutException:
-                print("Tabelle nicht gefunden, versuche alternativen Selektor")
-                WebDriverWait(driver, WAIT_TIME).until(EC.presence_of_element_located((By.XPATH, "//table[contains(@class, 'generaltable')]")))
+    print_assign_results_header()
 
-            heading = extract_heading(driver)
-            teilnehmer, abgegeben, bewertung_wert = extract_task_info(driver)
 
-            if abgegeben != -1:
-                abgegeben_prozent = (abgegeben / teilnehmer) * 100 if teilnehmer > 0 else 0
-                if abgegeben == teilnehmer:
-                    completed_count += 1
+    for link_url in link_urls:
+        link_url_with_group = build_url(link_url, '', '', group, '')
+        driver.get(link_url_with_group)
 
-                bewertung_farbe = ANSIColors.RED if bewertung_wert > 0 else ANSIColors.GREEN
-                abgeschlossen_farbe = ANSIColors.RED if abgegeben == 0 else ANSIColors.YELLOW
+        # Alternative Selektoren ausprobieren
+        try:
+            WebDriverWait(driver, WAIT_TIME).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table.generaltable.table-bordered")))
+        except TimeoutException:
+            print("Tabelle nicht gefunden, versuche alternativen Selektor")
+            WebDriverWait(driver, WAIT_TIME).until(EC.presence_of_element_located((By.XPATH, "//table[contains(@class, 'generaltable')]")))
 
-                print_task_info(heading, teilnehmer, abgegeben, abgegeben_prozent, bewertung_wert, link_url_with_group, abgeschlossen_farbe, bewertung_farbe)
+        heading = extract_heading(driver)
+        teilnehmer, abgegeben, bewertung_wert = extract_task_info(driver)
 
-        print_summary(total_links, completed_count)
-    finally:
-        driver.quit()
+        if abgegeben != -1:
+            persons = teilnehmer
+            eingereicht_sum += abgegeben
+            bewertet_sum += bewertung_wert
+            abgegeben_prozent = (abgegeben / teilnehmer) * 100 if teilnehmer > 0 else 0
+            if abgegeben == teilnehmer:
+                completed_count += 1
 
-def process_aufgaben_parallel(base_url, common_params, courses, groups, activities, username, password, namen_anzeigen, status_einschraenkung, thresholds):
+            # Einheitliche Ausgabeformatierung
+            color = determine_color(abgegeben_prozent, thresholds, 1)
+            color_bewertung_offen = determine_color(bewertung_wert, thresholds, 0)
+
+            print(f"{teilnehmer:>6}\t{color}{abgegeben:>3} ({int(abgegeben_prozent):>3}%) {color_bewertung_offen}{bewertung_wert:>5}\t{ANSIColors.RESET}{heading} - {link_url_with_group}")
+
+
+    print_summary(total_links, completed_count, eingereicht_sum, bewertet_sum, persons)
+
+def process_aufgaben_parallel(base_url, common_params, courses, groups, activities, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver):
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = []
         for course_name, course_id in courses.items():
             for group_name, group_id in groups.items():
                 for activity_name, activity_id in activities.items():
                     if activity_name == "assignments":
-                        futures.append(executor.submit(process_single_aufgabe, course_name, group_name, activity_name, base_url, common_params, course_id, group_id, activity_id, username, password, thresholds))
+                        futures.append(executor.submit(process_single_aufgabe, course_name, group_name, activity_name, base_url, common_params, course_id, group_id, activity_id, username, password, thresholds, driver))
                     elif activity_name == "checklist":
-                        futures.append(executor.submit(process_single_checkliste, course_name, group_name, activity_name, base_url, common_params, course_id, group_id, activity_id, username, password, namen_anzeigen, status_einschraenkung, thresholds))
+                        futures.append(executor.submit(process_single_checkliste, course_name, group_name, activity_name, base_url, common_params, course_id, group_id, activity_id, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver))
         for future in futures:
             future.result()  # Warten auf die Fertigstellung aller Threads
 
@@ -199,25 +211,57 @@ def print_task_info(heading, teilnehmer, abgegeben, abgegeben_prozent, bewertung
     print(f"\t\tGesamt: {teilnehmer}\tAbgeschlossen: {abgeschlossen_farbe}{abgegeben} ({abgegeben_prozent:.2f}%){ANSIColors.RESET}\t\tOffen: {bewertung_farbe}{bewertung_wert}{ANSIColors.RESET}")
     print(f"\t\t{link_url}\n")
 
-def print_summary(total_links, completed_count):
-    open_count = total_links - completed_count
-    completed_percent = (completed_count / total_links) * 100 if total_links > 0 else 0
-    print(f"Anzahl: {total_links}\tAbgeschlossen: {ANSIColors.YELLOW if completed_count > 0 else ANSIColors.RED}{completed_count} ({completed_percent:.2f}%){ANSIColors.RESET}\t\tOffen: {open_count}")
+
+def print_summary(anzahl_aufgaben, anzahl_abgeschlossner_aufgaben, anzahl_eingereicht, anzahl_bewertet, anzahl_teilnehmer):
+    anzahl_eingereicht_prozent = anzahl_eingereicht / (anzahl_aufgaben * anzahl_teilnehmer) * 100
+    anzahl_bewertet_prozent = anzahl_bewertet / anzahl_eingereicht * 100
+
+    print("\n")
+    print(f"\tGesamt: \t{anzahl_aufgaben}")
+    print(f"\tAbgeschlossen: {anzahl_abgeschlossner_aufgaben}")
+    print(f"\tEingereicht:\t{anzahl_eingereicht}\t({anzahl_eingereicht_prozent:.2f}%)")
+    print(f"\tBewertung offen:\t{anzahl_bewertet}\t({anzahl_bewertet_prozent:.2f}%)")
+    print("\n")
+    
 
 def get_user_selection(courses, groups, activities):
-    print("Welche Klasse soll angezeigt werden?")
     options = []
-    index = 0
+    
+    # TODO: Fehlerhafte Usereingabe abfangen.
+    # Kursauswahl
+    if len(courses) > 1:
+        print("Welcher Kurs soll angezeigt werden?")
+        for index, course_name in enumerate(courses):
+            print(f"({index}) {course_name}")
+        selected_course_index = int(input("Auswahl: "))
+        selected_course = list(courses.keys())[selected_course_index]
+    else:
+        selected_course = list(courses.keys())[0]
 
-    for course_name in courses:
-        for group_name in groups:
-            for activity_name in activities:
-                options.append((course_name, group_name, activity_name))
-                print(f"({index}) {course_name} - {group_name} - {activity_name}")
-                index += 1
+    # TODO: Fehlerhafte Usereingabe abfangen.
+    # Gruppenauswahl
+    if len(groups) > 1:
+        print("Welche Gruppe soll angezeigt werden?")
+        for index, group_name in enumerate(groups):
+            print(f"({index}) {group_name}")
+        selected_group_index = int(input("Auswahl: "))
+        selected_group = list(groups.keys())[selected_group_index]
+    else:
+        selected_group = list(groups.keys())[0]
 
-    auswahl = int(input("Auswahl: "))
-    selected_course, selected_group, selected_activity = options[auswahl]
+    # TODO: Fehlerhafte Usereingabe abfangen.
+    # Aktivitätenauswahl
+    print("Welche Aktivität soll angezeigt werden?")
+    for index, activity_name in enumerate(activities):
+        print(f"({index}) {activity_name}")
+    print(f"({len(activities)}) Alle Aktivitäten")
+    selected_activity_index = int(input("Auswahl: "))
+    
+    if selected_activity_index == len(activities):
+        selected_activity = activities  # Alle Aktivitäten
+    else:
+        selected_activity = list(activities.keys())[selected_activity_index]
+
     return selected_course, selected_group, selected_activity
 
 def main():
@@ -231,31 +275,39 @@ def main():
     activities = {key: value for key, value in config['activities'].items()}
     thresholds = {key: int(value) for key, value in config['thresholds'].items()}
 
-    while True:
-        selected_course, selected_group, selected_activity = get_user_selection(courses, groups, activities)
+    # Webdriver zu Beginn erstellen
+    driver = create_webdriver()
 
-        # Benutzerabfrage für Checklisten-Optionen
-        namen_anzeigen = False
-        status_einschraenkung = '0'
-        if selected_activity == "checklist":
-            print("Namen anzeigen")
-            print("(0) Nein")
-            print("(1) Ja")
-            namen_antwort = input("Eingabe: ")
-            namen_anzeigen = namen_antwort == '1'
+    try:
+        while True:
+            selected_course, selected_group, selected_activity = get_user_selection(courses, groups, activities)
 
-            print("Checklisten-Status einschränken")
-            print("(0) Keine Einschränkung")
-            print("(1) nur Checklisten die mind. 1 Mal abgeschlossen sind")
-            print("(2) nur Checklisten, die von niemanden abgeschlossen sind")
-            status_einschraenkung = input("Auswahl: ")
+            # Benutzerabfrage für Checklisten-Optionen
+            namen_anzeigen = False
+            status_einschraenkung = '0'
 
-        process_aufgaben_parallel(base_url, common_params, {selected_course: courses[selected_course]}, {selected_group: groups[selected_group]}, {selected_activity: activities[selected_activity]}, username, password, namen_anzeigen, status_einschraenkung, thresholds)
+            if selected_activity == "checklist":
+                print("Namen anzeigen")
+                print("(0) Nein")
+                print("(1) Ja")
+                namen_antwort = input("Eingabe: ")
+                namen_anzeigen = namen_antwort == '1'
 
-        # Abbruchoption
-        exit_input = input("Geben Sie '0' ein, um das Programm zu beenden oder drücken Sie 'Enter', um fortzufahren: ")
-        if exit_input == '0':
-            break
+                print("Checklisten-Status einschränken")
+                print("(0) Keine Einschränkung")
+                print("(1) nur Checklisten die mind. 1 Mal abgeschlossen sind")
+                print("(2) nur Checklisten, die von niemanden abgeschlossen sind")
+                status_einschraenkung = input("Auswahl: ")
+
+            # Hier die Korrektur
+            process_aufgaben_parallel(base_url, common_params, {selected_course: courses[selected_course]}, {selected_group: groups[selected_group]}, {selected_activity: activities[selected_activity]}, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver)
+
+            # Abbruchoption 
+            exit_input = input("Geben Sie '0' ein, um das Programm zu beenden oder drücken Sie 'Enter', um fortzufahren: ")
+            if exit_input == '0':
+                break
+    finally:
+        driver.quit()  # Webdriver am Ende schließen
 
 if __name__ == "__main__":
     main()
