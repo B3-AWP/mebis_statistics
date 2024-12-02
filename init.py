@@ -178,7 +178,8 @@ def process_single_aufgabe(course_name, group_name, activity_name, base_url, com
 
             print(f"{teilnehmer:>6}\t{color}{abgegeben:>3} ({int(abgegeben_prozent):>3}%) {color_bewertung_offen}{bewertung_wert:>5}\t{ANSIColors.RESET}{heading}")
             print(f"\t\t\t\t\tAufgabe:\t {link_url_with_group}")
-            print(f"\t\t\t\t\tbewerten:\t {link_url_with_group}&action=grader")
+            print(f"\t\t\t\t\tbewerten:\t {link_url_with_group}&action=grader") if bewertung_wert > 0 else None
+
 
 
 # https://lernplattform.mebis.bycs.de/mod/assign/view.php?id=56996200&action=grader&userid=6500745
