@@ -172,7 +172,12 @@ def process_single_aufgabe(course_name, group_name, activity_name, base_url, com
             color = determine_color(abgegeben_prozent, thresholds, 1)
             color_bewertung_offen = determine_color(bewertung_wert, thresholds, 0)
 
-            print(f"{teilnehmer:>6}\t{color}{abgegeben:>3} ({int(abgegeben_prozent):>3}%) {color_bewertung_offen}{bewertung_wert:>5}\t{ANSIColors.RESET}{heading} - {link_url_with_group}")
+            print(f"{teilnehmer:>6}\t{color}{abgegeben:>3} ({int(abgegeben_prozent):>3}%) {color_bewertung_offen}{bewertung_wert:>5}\t{ANSIColors.RESET}{heading}")
+            print(f"\t\t\t\t\tAufgabe:\t {link_url_with_group}")
+            print(f"\t\t\t\t\tbewerten:\t {link_url_with_group}&action=grader")
+
+
+# https://lernplattform.mebis.bycs.de/mod/assign/view.php?id=56996200&action=grader&userid=6500745
 
 
     print_summary(total_links, completed_count, eingereicht_sum, bewertet_sum, persons)
@@ -296,7 +301,7 @@ def main():
             status_einschraenkung = '0'
 
             # Todo Crash bei auswahl aller Aktivitäten!
-            if selected_activity == "checklist":
+            if selected_activity != "assignments":
                 print("Namen anzeigen")
                 print("(0) Nein")
                 print("(1) Ja")
