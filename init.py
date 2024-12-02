@@ -5,6 +5,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chrome.options import Options
 from concurrent.futures import ThreadPoolExecutor
 
 # TensorFlow-Logstufe auf ERROR setzen
@@ -26,8 +27,13 @@ def load_config():
     config.read('config.ini')
     return config
 
-def create_webdriver():
-    return webdriver.Chrome()  # Stelle sicher, dass du den ChromeDriver installiert hast
+def create_webdriver(headless=False):
+    options = Options()
+    if headless:
+        options.add_argument('--headless')  # Füge Headless-Argument hinzu
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+    return webdriver.Chrome(options=options)  # Stelle sicher, dass du den ChromeDriver installiert hast
 
 def login(driver, username, password):
     WebDriverWait(driver, WAIT_TIME).until(EC.visibility_of_element_located((By.ID, "input-username"))).send_keys(username)
@@ -268,13 +274,18 @@ def main():
     password = config['login']['password']
     base_url = config['urls']['base_url']
     common_params = config['urls']['common_params']
+    debug_mode = config['mode']['headless']
     courses = {key: value for key, value in config['courses'].items()}
     groups = {key: value for key, value in config['groups'].items()}
     activities = {key: value for key, value in config['activities'].items()}
     thresholds = {key: int(value) for key, value in config['thresholds'].items()}
 
     # Webdriver zu Beginn erstellen
-    driver = create_webdriver()
+    if debug_mode == "True":
+        driver = create_webdriver(True)
+    else:
+        driver = create_webdriver()
+
 
     try:
         while True:
