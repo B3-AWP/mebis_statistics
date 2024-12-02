@@ -296,7 +296,7 @@ def main():
             status_einschraenkung = '0'
 
             # Todo Crash bei auswahl aller Aktivitäten!
-            if selected_activity == "assignments":
+            if selected_activity == "checklist":
                 print("Namen anzeigen")
                 print("(0) Nein")
                 print("(1) Ja")
