@@ -78,11 +78,11 @@ def process_single_checkliste(course_name, group_name, activity_name, base_url, 
     headers = driver.find_elements(By.CSS_SELECTOR, "th.completion-header a")
     checklist_titles = [header.get_attribute('title') for header in headers]
     checklist_links = [header.get_attribute('href') for header in headers]  # Extrahiere die Links
-
+    checklist_dict = {title: link for title, link in zip(checklist_titles, checklist_links)}
     print_checklist_results_header()
 
     rows = driver.find_elements(By.CSS_SELECTOR, "tbody tr")
-    checklist_results = {title: {'abgeschlossen': [], 'nicht_abgeschlossen': []} for title in checklist_titles}
+    checklist_results = {title: {'link': checklist_dict[title], 'abgeschlossen': [], 'nicht_abgeschlossen': []} for title in checklist_titles}
 
     for row in rows:
         person_name = row.find_element(By.CSS_SELECTOR, "th a").text
@@ -95,6 +95,7 @@ def process_single_checkliste(course_name, group_name, activity_name, base_url, 
             checklist_results[checklist_title][status].append(person_name)
 
     for title, results in checklist_results.items():
+        specific_link = results['link']
         total = len(results['abgeschlossen']) + len(results['nicht_abgeschlossen'])
         abgeschlossen = len(results['abgeschlossen'])
         nicht_abgeschlossen = len(results['nicht_abgeschlossen'])
@@ -106,16 +107,13 @@ def process_single_checkliste(course_name, group_name, activity_name, base_url, 
 
         color = determine_color(prozent_abgeschlossen, thresholds, 1)
         # Verwende den spezifischen Link für die Checkliste
-        specific_link = checklist_links[index] if index < len(checklist_links) else "Link nicht gefunden"
-        #  print(f"{total:<8}{abgeschlossen:<8}{color}{prozent_abgeschlossen:.2f}%{ANSIColors.RESET:<10}{nicht_abgeschlossen:<8}{prozent_nicht_abgeschlossen:.2f}%\t{title} - {specific_link}")
+
         print(f"{total:>8}{abgeschlossen:>8}{color}{int(prozent_abgeschlossen):>3}%{ANSIColors.RESET:<10}{nicht_abgeschlossen:>8}{int(prozent_nicht_abgeschlossen):>3}%\t{title} - {specific_link}")
 
         if namen_anzeigen and abgeschlossen > 0:
             print("Abgeschlossen:")
             for name in results['abgeschlossen']:
                 print(f"  - {name}")
-
-
 
 
 def process_single_aufgabe(course_name, group_name, activity_name, base_url, common_params, course, group, activity, username, password, thresholds, driver):
@@ -286,7 +284,8 @@ def main():
             namen_anzeigen = False
             status_einschraenkung = '0'
 
-            if selected_activity == "checklist":
+            # Todo Crash bei auswahl aller Aktivitäten!
+            if selected_activity == "assignments":
                 print("Namen anzeigen")
                 print("(0) Nein")
                 print("(1) Ja")
@@ -299,7 +298,7 @@ def main():
                 print("(2) nur Checklisten, die von niemanden abgeschlossen sind")
                 status_einschraenkung = input("Auswahl: ")
 
-            # Hier die Korrektur
+            # TODO kann nicht beides ausführen!
             process_aufgaben_parallel(base_url, common_params, {selected_course: courses[selected_course]}, {selected_group: groups[selected_group]}, {selected_activity: activities[selected_activity]}, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver)
 
             # Abbruchoption 
