@@ -310,7 +310,17 @@ def main():
                 status_einschraenkung = input("Auswahl: ")
 
             # TODO kann nicht beides ausführen!
-            process_aufgaben_parallel(base_url, common_params, {selected_course: courses[selected_course]}, {selected_group: groups[selected_group]}, {selected_activity: activities[selected_activity]}, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver)
+
+            # if isinstance(selected_activity, dict):
+            #     print("Inhalt der selected_activity-Map:")
+            #     for key, value in selected_activity.items():
+            #         process_aufgaben_parallel(base_url, common_params, {selected_course: courses[selected_course]}, {selected_group: groups[selected_group]}, {key: value}, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver)
+            # else:
+            #     print("selected_activity ist keine Map (kein Dictionary).")
+            #     process_aufgaben_parallel(base_url, common_params, {selected_course: courses[selected_course]}, {selected_group: groups[selected_group]}, {selected_activity: activities[selected_activity]}, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver)
+
+            activity_dict = selected_activity if isinstance(selected_activity, dict) else {selected_activity: activities[selected_activity]}
+            process_aufgaben_parallel(base_url, common_params, {selected_course: courses[selected_course]}, {selected_group: groups[selected_group]}, activity_dict, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver)
 
             # Abbruchoption 
             exit_input = input("Geben Sie '0' ein, um das Programm zu beenden oder drücken Sie 'Enter', um fortzufahren: ")
