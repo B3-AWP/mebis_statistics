@@ -122,7 +122,7 @@ def process_single_checkliste(course_name, group_name, activity_name, base_url, 
                 print(f"  - {name}")
 
 
-def process_single_aufgabe(course_name, group_name, activity_name, base_url, common_params, course, group, activity, username, password, thresholds, driver):
+def process_single_aufgabe(course_name, group_name, activity_name, base_url, common_params, course, group, activity, username, password, status_einschraenkung, thresholds, driver):
     url_with_group = build_url(base_url, common_params, course, group, activity)
     
 
@@ -168,6 +168,10 @@ def process_single_aufgabe(course_name, group_name, activity_name, base_url, com
             if abgegeben == teilnehmer:
                 completed_count += 1
 
+
+            if (status_einschraenkung == '1' and abgegeben == 0) or (status_einschraenkung == '2' and abgegeben > 0):
+                continue
+
             # Einheitliche Ausgabeformatierung
             color = determine_color(abgegeben_prozent, thresholds, 1)
             color_bewertung_offen = determine_color(bewertung_wert, thresholds, 0)
@@ -189,7 +193,7 @@ def process_aufgaben_parallel(base_url, common_params, courses, groups, activiti
             for group_name, group_id in groups.items():
                 for activity_name, activity_id in activities.items():
                     if activity_name == "assignments":
-                        futures.append(executor.submit(process_single_aufgabe, course_name, group_name, activity_name, base_url, common_params, course_id, group_id, activity_id, username, password, thresholds, driver))
+                        futures.append(executor.submit(process_single_aufgabe, course_name, group_name, activity_name, base_url, common_params, course_id, group_id, activity_id, username, password, status_einschraenkung, thresholds, driver))
                     elif activity_name == "checklist":
                         futures.append(executor.submit(process_single_checkliste, course_name, group_name, activity_name, base_url, common_params, course_id, group_id, activity_id, username, password, namen_anzeigen, status_einschraenkung, thresholds, driver))
         for future in futures:
@@ -308,11 +312,11 @@ def main():
                 namen_antwort = input("Eingabe: ")
                 namen_anzeigen = namen_antwort == '1'
 
-                print("Checklisten-Status einschränken")
-                print("(0) Keine Einschränkung")
-                print("(1) nur Checklisten die mind. 1 Mal abgeschlossen sind")
-                print("(2) nur Checklisten, die von niemanden abgeschlossen sind")
-                status_einschraenkung = input("Auswahl: ")
+            print("Status einschränken")
+            print("(0) Keine Einschränkung")
+            print("(1) mind. 1 Mal abgeschlossen sind")
+            print("(2) von niemanden abgeschlossen sind")
+            status_einschraenkung = input("Auswahl: ")
 
             # TODO kann nicht beides ausführen!
 
