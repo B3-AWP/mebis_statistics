@@ -8,6 +8,8 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 import json
 import re
+import time
+from datetime import datetime
 
 # TensorFlow-Logstufe auf ERROR setzen
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -73,20 +75,43 @@ def get_activity_urls(driver):
     
     return activity_urls
 
-def get_checklist_progress(driver, checklist_url, user_id):
-    progress_url = f"{checklist_url.replace('view.php', 'report.php')}&studentid={user_id}"
-    driver.get(progress_url)
-    
-    required_progress = WebDriverWait(driver, WAIT_TIME).until(
-        EC.visibility_of_element_located((By.CSS_SELECTOR, "#checklistprogressrequired .checklist_progress_percent"))
-    ).text.strip()
-    
-    all_progress = WebDriverWait(driver, WAIT_TIME).until(
-        EC.visibility_of_element_located((By.CSS_SELECTOR, "#checklistprogressall .checklist_progress_percent"))
-    ).text.strip()
-    
-    return {"required_progress": required_progress, "all_progress": all_progress}
+def get_checklist_progress_optimized(driver, checklist_url, sesskey):
+    progress_data = {}
 
+    # Erste URL mit 'showprogressbars', um die Fortschrittsbalken anzuzeigen
+    url_show_progress_bars = checklist_url.replace('view.php', 'report.php')
+    url_show_progress_bars += f"&sesskey={sesskey}&action=showprogressbars&perpage=300&group=0"
+    driver.get(url_show_progress_bars)
+
+    # URL zur Anzeige der Pflichtelemente
+    url_hide_optional = checklist_url.replace('view.php', 'report.php')
+    url_hide_optional += f"&sesskey={sesskey}&action=hideoptional&perpage=300&group=0"
+    driver.get(url_hide_optional)
+
+    # Extrahiere den required_progress
+    progress_data['required_progress'] = extract_progress(driver)
+
+    # URL zur Anzeige aller Elemente
+    url_show_optional = checklist_url.replace('view.php', 'report.php')
+    url_show_optional += f"&sesskey={sesskey}&action=showoptional&perpage=300&group=0"
+    driver.get(url_show_optional)
+
+    # Extrahiere den all_progress
+    progress_data['all_progress'] = extract_progress(driver)
+
+    return progress_data
+
+def extract_progress(driver):
+    progress_data = {}
+    user_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='user/view.php?id=']")
+    progress_elements = driver.find_elements(By.CSS_SELECTOR, "div.checklist_percentcomplete")
+
+    for link, progress in zip(user_links, progress_elements):
+        user_id = re.search(r'id=(\d+)', link.get_attribute("href")).group(1)
+        progress_percent = progress.text.strip()
+        progress_data[user_id] = progress_percent
+
+    return progress_data
 
 def get_assignment_status(driver, assignment_url):
     # Navigiere zur Bewertungsseite des Assignments mit group=0
@@ -150,7 +175,19 @@ def get_assignment_status(driver, assignment_url):
 
     return user_statuses
 
+def get_sesskey(driver):
+    # Suche nach dem versteckten Input-Feld mit dem Namen 'sesskey'
+    try:
+        sesskey_element = driver.find_element(By.CSS_SELECTOR, "input[name='sesskey']")
+        return sesskey_element.get_attribute("value")
+    except Exception as e:
+        print(f"Fehler beim Extrahieren des sesskey: {e}")
+        return None
+
 def main():
+    # Startzeit des Skripts
+    start_time = time.time()
+
     config = load_config()
     username = config['login']['username']
     password = config['login']['password']
@@ -161,6 +198,13 @@ def main():
     driver.get(f"{base_url}?course={course_id}")
     
     login(driver, username, password)
+
+    # Extrahiere den sesskey nach dem Login
+    sesskey = get_sesskey(driver)
+    if not sesskey:
+        print("Sesskey konnte nicht extrahiert werden. Überprüfe den Login-Prozess.")
+        driver.quit()
+        return
 
     group_options = get_select_options(driver, "group")
     activityinclude_options = get_select_options(driver, "activityinclude")
@@ -175,20 +219,22 @@ def main():
     # Erfasse die Aktivitäten einmalig
     activities = get_activity_urls(driver)
 
+    print("Analysiere Status Assignments")
     # Erfasse den Status der Assignments für alle Benutzer in group=0
     assignments_status = {}
     for assignment in activities["assignments"]:
         assignments_status[assignment["id"]] = get_assignment_status(driver, assignment["url"])
 
+    print("Analysiere Status Checkliste")
     # Erfasse den Fortschritt der Checklisten für alle Benutzer in group=0
     checklist_progress = {}
-    all_users = get_user_ids_from_group(driver, "0", base_url, course_id)
     for checklist in activities["checklists"]:
-        checklist_progress[checklist["id"]] = {}
-        for user in all_users:
-            checklist_progress[checklist["id"]][user["id"]] = get_checklist_progress(driver, checklist["url"], user["id"])
+        checklist_progress[checklist["id"]] = get_checklist_progress_optimized(driver, checklist["url"], sesskey)
+
 
     for group in group_options:
+        if group["value"] == "0":
+            continue  # Überspringe Gruppe 0
         group_data = {
             "name": group["name"],
             "value": group["value"],
@@ -214,19 +260,34 @@ def main():
 
             # Verwende die zuvor erfassten Fortschritte der Checklisten
             for checklist in group["activities"]["checklists"]:
-                user_checklist_progress = checklist_progress[checklist["id"]].get(user["id"])
-                if user_checklist_progress:
+                user_checklist_progress = checklist_progress[checklist["id"]]
+                required_progress = user_checklist_progress.get('required_progress', {}).get(user["id"])
+                all_progress = user_checklist_progress.get('all_progress', {}).get(user["id"])
+                if required_progress or all_progress:
                     user["activities"]["checklists"].append({
                         "id": checklist["id"],
                         "title": checklist["title"],
                         "url": checklist["url"],
-                        "progress": user_checklist_progress
+                        "progress": {
+                            "required_progress": required_progress,
+                            "all_progress": all_progress
+                        }
                     })
 
-    with open('output.json', 'w', encoding='utf-8') as f:
+    print("Erstelle JSON Datei")
+    # Zeitstempel hinzufügen
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    json_filename = f'output_{timestamp}.json'
+    
+    with open(json_filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
     driver.quit()
+
+    # Endzeit des Skripts
+    end_time = time.time()
+    duration = end_time - start_time
+    print(f"Skript abgeschlossen in {duration:.2f} Sekunden.")
 
 if __name__ == "__main__":
     main()
