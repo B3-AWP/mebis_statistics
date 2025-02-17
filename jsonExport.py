@@ -184,6 +184,7 @@ def get_sesskey(driver):
         print(f"Fehler beim Extrahieren des sesskey: {e}")
         return None
 
+
 def main():
     # Startzeit des Skripts
     start_time = time.time()
@@ -210,12 +211,6 @@ def main():
     activityinclude_options = get_select_options(driver, "activityinclude")
     activitysection_options = get_select_options(driver, "activitysection")
 
-    data = {
-        "groups": [],
-        "activityincludes": activityinclude_options,
-        "activitysections": activitysection_options
-    }
-
     # Erfasse die Aktivitäten einmalig
     activities = get_activity_urls(driver)
 
@@ -231,6 +226,13 @@ def main():
     for checklist in activities["checklists"]:
         checklist_progress[checklist["id"]] = get_checklist_progress_optimized(driver, checklist["url"], sesskey)
 
+    # Zentralisierte Speicherung der Aktivitäten
+    data = {
+        "activities": activities,
+        "groups": [],
+        "activityincludes": activityinclude_options,
+        "activitysections": activitysection_options
+    }
 
     for group in group_options:
         if group["value"] == "0":
@@ -240,34 +242,34 @@ def main():
             "value": group["value"],
             "users": get_user_ids_from_group(driver, group["value"], base_url, course_id)
         }
-        group_data["activities"] = activities
         data["groups"].append(group_data)
 
     for group in data["groups"]:
         for user in group["users"]:
-            user["activities"] = {"assignments": [], "checklists": [], "feedbacks": [], "quizzes": []}
+            user["activities"] = {
+                "assignments": [],
+                "checklists": [],
+                "feedbacks": [],
+                "quizzes": []
+            }
             
             # Verwende die zuvor erfassten Assignment-Status
-            for assignment in group["activities"]["assignments"]:
+            for assignment in activities["assignments"]:
                 user_assignment_status = next((status for status in assignments_status[assignment["id"]] if status["user_id"] == user["id"]), None)
                 if user_assignment_status:
                     user["activities"]["assignments"].append({
                         "id": assignment["id"],
-                        "title": assignment["title"],
-                        "url": assignment["url"],
                         "status": user_assignment_status
                     })
 
             # Verwende die zuvor erfassten Fortschritte der Checklisten
-            for checklist in group["activities"]["checklists"]:
+            for checklist in activities["checklists"]:
                 user_checklist_progress = checklist_progress[checklist["id"]]
                 required_progress = user_checklist_progress.get('required_progress', {}).get(user["id"])
                 all_progress = user_checklist_progress.get('all_progress', {}).get(user["id"])
                 if required_progress or all_progress:
                     user["activities"]["checklists"].append({
                         "id": checklist["id"],
-                        "title": checklist["title"],
-                        "url": checklist["url"],
                         "progress": {
                             "required_progress": required_progress,
                             "all_progress": all_progress
@@ -277,7 +279,7 @@ def main():
     print("Erstelle JSON Datei")
     # Zeitstempel hinzufügen
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_filename = f'output_{timestamp}.json'
+    json_filename = f'./export/output_{timestamp}.json'
     
     with open(json_filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
