@@ -194,8 +194,9 @@ def main():
     password = config['login']['password']
     base_url = config['urls']['base_url']
     course_id = config['courses']['course_ifa12']
+    isheadless = config['mode']['headless']
 
-    driver = create_webdriver(headless=False)
+    driver = create_webdriver(headless=isheadless)
     driver.get(f"{base_url}?course={course_id}")
     
     login(driver, username, password)
