@@ -124,6 +124,19 @@ def get_assignment_status(driver, assignment_url, waittime):
         # Kein tbody gefunden, also gibt es keine Abgaben
         return []
 
+    # Finde die Spaltenüberschriften, um die Klasse der "Endbewertung"-Spalte zu ermitteln
+    headers = driver.find_elements(By.CSS_SELECTOR, "th.header")
+    grade_column_class = None
+    for header in headers:
+        if "Endbewertung" in header.text:
+            # Extrahiere die Klasse, z.B. "c14"
+            grade_column_class = header.get_attribute("class").split()[1]
+            break
+
+    if not grade_column_class:
+        print("Spalte 'Endbewertung' nicht gefunden.")
+        return []
+
     # Finde alle Zeilen in der Tabelle
     rows = tbody_element.find_elements(By.CSS_SELECTOR, "tr")
 
@@ -156,8 +169,9 @@ def get_assignment_status(driver, assignment_url, waittime):
         
         grade_options = [option.text for option in row.find_elements(By.CSS_SELECTOR, "select#id_grade option")]
         
+        # Verwende die ermittelte Klasse, um die Endbewertung abzurufen
         try:
-            grade = row.find_element(By.CSS_SELECTOR, "td.cell.c13").text
+            grade = row.find_element(By.CSS_SELECTOR, f"td.cell.{grade_column_class}").text
         except:
             grade = "Keine Bewertung"
 
@@ -268,8 +282,6 @@ def add_activity_to_category(category_entry, activity_type, activity):
         category_entry[activity_type].append(activity)
     else:
         category_entry[activity_type] = [activity]
-
-
 
 
 def main():
