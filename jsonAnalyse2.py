@@ -1,6 +1,8 @@
 import os
 import json
 import glob
+import webbrowser
+import configparser
 
 def find_latest_file(directory):
     files = glob.glob(os.path.join(directory, 'output_*.json'))
@@ -18,7 +20,6 @@ def load_excluded_names(file_path):
     return excluded_names
 
 def select_group(groups):
-    # Filter out groups with no users
     groups_with_users = [group for group in groups if group['users']]
 
     print("Wählen Sie eine Gruppe aus:")
@@ -73,7 +74,6 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
         }
     }
 
-    # Process assignments
     assignments = user['activities'].get('assignments', [])
     category_ids = [c['id'] for c in categories]
     category_assignments = [a for a in assignments if a['category_id'] in category_ids]
@@ -95,24 +95,34 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
         grade = assignment['status'].get('grade', 'Nicht bewertet')
         user_data['assignments']['grades'][category_name].append((title, grade, url))
 
-    user_data['assignments']['percent_submitted'] = (submitted_count / total_assignments) * 100 if total_assignments > 0 else 0
-    user_data['assignments']['percent_submitted_timed'] = (user_data['assignments']['percent_submitted'] / current_week) * total_weeks if total_assignments > 0 else 0
+    user_data['assignments']['percent_submitted'] = round((submitted_count / total_assignments) * 100, 2) if total_assignments > 0 else 0
+    user_data['assignments']['percent_submitted_timed'] = round((user_data['assignments']['percent_submitted'] / current_week) * total_weeks, 2) if total_assignments > 0 else 0
 
-    # Process checklists
     checklists = user['activities'].get('checklists', [])
-    category_checklists = [c for c in checklists if c['id'] in category_ids]
-    total_checklists = len(category_checklists)
-    required_100 = [c for c in category_checklists if c['progress']['required_progress'] == "100%"]
+    total_checklists = len(checklists)
+
+    required_100 = [c for c in checklists if c['progress']['required_progress'] == "100%"]
     user_data['checklists']['required_100_count'] = len(required_100)
-    user_data['checklists']['avg_required_progress'] = sum(float(c['progress']['required_progress'].strip('%')) for c in category_checklists if c['progress']['required_progress']) / total_checklists if total_checklists > 0 else 0
-    user_data['checklists']['avg_all_progress'] = sum(float(c['progress']['all_progress'].strip('%')) for c in category_checklists) / total_checklists if total_checklists > 0 else 0
-    user_data['checklists']['avg_required_progress_timed'] = (user_data['checklists']['avg_required_progress'] / current_week) * total_weeks if total_checklists > 0 else 0
-    user_data['checklists']['avg_all_progress_timed'] = (user_data['checklists']['avg_all_progress'] / current_week) * total_weeks if total_checklists > 0 else 0
+
+    if total_checklists > 0:
+        user_data['checklists']['avg_required_progress'] = round(
+            sum(float(c['progress']['required_progress'].strip('%')) for c in checklists if c['progress']['required_progress']) / total_checklists, 2)
+        user_data['checklists']['avg_all_progress'] = round(
+            sum(float(c['progress']['all_progress'].strip('%')) for c in checklists if c['progress']['all_progress']) / total_checklists, 2)
+    else:
+        user_data['checklists']['avg_required_progress'] = 0
+        user_data['checklists']['avg_all_progress'] = 0
+
+    if current_week > 0:
+        user_data['checklists']['avg_required_progress_timed'] = round((user_data['checklists']['avg_required_progress'] / current_week) * total_weeks, 2)
+        user_data['checklists']['avg_all_progress_timed'] = round((user_data['checklists']['avg_all_progress'] / current_week) * total_weeks, 2)
+    else:
+        user_data['checklists']['avg_required_progress_timed'] = 0
+        user_data['checklists']['avg_all_progress_timed'] = 0
 
     return user_data
 
 def calculate_group_averages(users_data, current_week, total_weeks):
-    # Calculate averages for the group
     group_data = {
         "assignments": {
             "total_reviewed": sum(user['assignments']['reviewed_count'] for user in users_data),
@@ -132,15 +142,15 @@ def calculate_group_averages(users_data, current_week, total_weeks):
 
     total_users = len(users_data)
     if total_users > 0:
-        group_data['assignments']['percent_submitted'] = (group_data['assignments']['total_submitted'] / group_data['assignments']['total_assignments']) * 100 if group_data['assignments']['total_assignments'] > 0 else 0
-        group_data['assignments']['percent_submitted_timed'] = (group_data['assignments']['percent_submitted'] / current_week) * total_weeks if group_data['assignments']['total_assignments'] > 0 else 0
+        group_data['assignments']['percent_submitted'] = round((group_data['assignments']['total_submitted'] / group_data['assignments']['total_assignments']) * 100, 2) if group_data['assignments']['total_assignments'] > 0 else 0
+        group_data['assignments']['percent_submitted_timed'] = round((group_data['assignments']['percent_submitted'] / current_week) * total_weeks, 2) if group_data['assignments']['total_assignments'] > 0 else 0
 
         all_required_progress = [user['checklists']['avg_required_progress'] for user in users_data]
         all_all_progress = [user['checklists']['avg_all_progress'] for user in users_data]
-        group_data['checklists']['avg_required_progress'] = sum(all_required_progress) / total_users if all_required_progress else 0
-        group_data['checklists']['avg_all_progress'] = sum(all_all_progress) / total_users if all_all_progress else 0
-        group_data['checklists']['avg_required_progress_timed'] = (group_data['checklists']['avg_required_progress'] / current_week) * total_weeks if all_required_progress else 0
-        group_data['checklists']['avg_all_progress_timed'] = (group_data['checklists']['avg_all_progress'] / current_week) * total_weeks if all_all_progress else 0
+        group_data['checklists']['avg_required_progress'] = round(sum(all_required_progress) / total_users, 2) if all_required_progress else 0
+        group_data['checklists']['avg_all_progress'] = round(sum(all_all_progress) / total_users, 2) if all_all_progress else 0
+        group_data['checklists']['avg_required_progress_timed'] = round((group_data['checklists']['avg_required_progress'] / current_week) * total_weeks, 2) if all_required_progress else 0
+        group_data['checklists']['avg_all_progress_timed'] = round((group_data['checklists']['avg_all_progress'] / current_week) * total_weeks, 2) if all_all_progress else 0
 
     return group_data
 
@@ -151,33 +161,43 @@ def generate_html_report(groups, categories, current_week, total_weeks, assignme
     expected_assignments = (total_assignments / total_weeks) * current_week
     expected_checklists = (total_checklists / total_weeks) * current_week
 
-    percent_assignments = (expected_assignments / total_assignments) * 100 if total_assignments > 0 else 0
-    percent_checklists = (expected_checklists / total_checklists) * 100 if total_checklists > 0 else 0
+    percent_assignments = round((expected_assignments / total_assignments) * 100, 2) if total_assignments > 0 else 0
+    percent_checklists = round((expected_checklists / total_checklists) * 100, 2) if total_checklists > 0 else 0
 
-    html = "<html><head><title>Auswertung</title></head><body>"
+    html = """
+    <html>
+    <head>
+        <title>Auswertung</title>
+        <style>
+            body { font-family: Arial, sans-serif; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            td.numeric { text-align: right; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            th { background-color: #4CAF50; color: white; }
+        </style>
+    </head>
+    <body>
+    """
     html += f"<h1>Auswertung für Referenzwoche {current_week} (von {total_weeks})</h1>"
     html += f"<p>Checklisten ({int(expected_checklists)} von {total_checklists} --> {percent_checklists:.2f}% des Schuljahres abgeschlossen)</p>"
     html += f"<p>Assignments ({int(expected_assignments)} von {total_assignments} --> {percent_assignments:.2f}% des Schuljahres abgeschlossen)</p>"
 
     for group in groups:
-        # Filter out users whose names are in the excluded list
         users_data = [calculate_user_progress(user, assignment_details, categories, current_week, total_weeks)
                       for user in group['users'] if user['name'] not in excluded_names]
         group_data = calculate_group_averages(users_data, current_week, total_weeks)
 
         html += f"<h2>Gruppe: {group['name']}</h2>"
-        html += "<table border='1'><tr><th>User</th><th>Assignments Max Referenzwoche</th><th>Assignments Max Gesamtzeitraum</th><th>Anzahl Bewerteter Aufgaben</th><th>Anzahl Eingereichter Aufgaben</th><th>Bewertungen</th><th>% Eingereichter Aufgaben</th><th>% Eingereichter Aufgaben (Zeit)</th>"
-        html += "<th>Anzahl Checklisten (100% Required)</th><th>Durchschn. Required Progress</th><th>Durchschn. All Progress</th><th>Durchschn. Required Progress (Zeit)</th><th>Durchschn. All Progress (Zeit)</th>"
-        html += "<th>Checkliste Max Referenzwoche</th><th>Checkliste Max Gesamtzeitraum</th></tr>"
+        html += "<table><tr><th>Benutzername</th><th>Eingereichte Aufgaben</th><th>Bewertete Aufgaben</th><th>Bewertungen und Noten</th><th>Prozentsatz Eingereicht</th><th>Prozentsatz Eingereicht (Zeitbasiert)</th>"
+        html += "<th>Aufgaben Soll (Aktuelle Woche)</th><th>Aufgaben Soll (Gesamtzeitraum)</th><th>Checklisten 100% Erfüllt</th><th>Checkliste Pflicht (%)</th><th>Checkliste Gesamt (%)</th>"
+        html += "<th>Checkliste Pflicht (%) (Aktuelle Woche)</th><th>Checkliste Gesamt (%) (Aktuelle Woche)</th><th>Checklisten Soll (Aktuelle Woche)</th><th>Checklisten Soll (Gesamtzeitraum)</th></tr>"
 
         for user_data in users_data:
             html += f"<tr><td>{user_data['name']}</td>"
-            html += f"<td>{int(expected_assignments)}</td>"
-            html += f"<td>{total_assignments}</td>"
-            html += f"<td>{user_data['assignments']['reviewed_count']}</td>"
-            html += f"<td>{user_data['assignments']['submitted_count']}</td>"
+            html += f"<td class='numeric'>{user_data['assignments']['submitted_count']}</td>"
+            html += f"<td class='numeric'>{user_data['assignments']['reviewed_count']}</td>"
 
-            # Display all submissions with grades if available
             html += "<td>"
             for category_name, grades in user_data['assignments']['grades'].items():
                 if grades:
@@ -188,31 +208,31 @@ def generate_html_report(groups, categories, current_week, total_weeks, assignme
                     html += "</table>"
             html += "</td>"
 
-            html += f"<td>{user_data['assignments']['percent_submitted']:.2f}%</td>"
-            html += f"<td>{user_data['assignments']['percent_submitted_timed']:.2f}%</td>"
-            html += f"<td>{user_data['checklists']['required_100_count']}</td>"
-            html += f"<td>{user_data['checklists']['avg_required_progress']:.2f}%</td>"
-            html += f"<td>{user_data['checklists']['avg_all_progress']:.2f}%</td>"
-            html += f"<td>{user_data['checklists']['avg_required_progress_timed']:.2f}%</td>"
-            html += f"<td>{user_data['checklists']['avg_all_progress_timed']:.2f}%</td>"
-
-            # Add the new columns for max assignments and checklists
-            html += f"<td>{int(expected_checklists)}</td>"
-            html += f"<td>{total_checklists}</td></tr>"
+            html += f"<td class='numeric'>{user_data['assignments']['percent_submitted']:.2f}%</td>"
+            html += f"<td class='numeric'>{user_data['assignments']['percent_submitted_timed']:.2f}%</td>"
+            html += f"<td class='numeric'>{int(expected_assignments)}</td>"
+            html += f"<td class='numeric'>{total_assignments}</td>"
+            html += f"<td class='numeric'>{user_data['checklists']['required_100_count']}</td>"
+            html += f"<td class='numeric'>{user_data['checklists']['avg_required_progress']:.2f}%</td>"
+            html += f"<td class='numeric'>{user_data['checklists']['avg_all_progress']:.2f}%</td>"
+            html += f"<td class='numeric'>{user_data['checklists']['avg_required_progress_timed']:.2f}%</td>"
+            html += f"<td class='numeric'>{user_data['checklists']['avg_all_progress_timed']:.2f}%</td>"
+            html += f"<td class='numeric'>{int(expected_checklists)}</td>"
+            html += f"<td class='numeric'>{total_checklists}</td></tr>"
 
         html += "</table>"
 
         html += "<h3>Durchschnittswerte für die gesamte Gruppe</h3>"
-        html += "<table border='1'><tr><th>Prozentual eingereichte Aufgaben</th><th>Prozentual eingereichte Aufgaben (Zeit)</th><th>Anzahl Checklisten (100% Required)</th>"
-        html += "<th>Durchschn. Required Progress</th><th>Durchschn. All Progress</th><th>Durchschn. Required Progress (Zeit)</th><th>Durchschn. All Progress (Zeit)</th></tr>"
+        html += "<table><tr><th>Prozentsatz Eingereicht</th><th>Prozentsatz Eingereicht (Zeitbasiert)</th><th>Checklisten 100% Erfüllt</th>"
+        html += "<th>Checkliste Pflicht (%)</th><th>Checkliste Gesamt (%)</th><th>Checkliste Pflicht (%) (Aktuelle Woche)</th><th>Checkliste Gesamt (%) (Aktuelle Woche)</th></tr>"
 
-        html += f"<tr><td>{group_data['assignments']['percent_submitted']:.2f}%</td>"
-        html += f"<td>{group_data['assignments']['percent_submitted_timed']:.2f}%</td>"
-        html += f"<td>{group_data['checklists']['total_required_100']}</td>"
-        html += f"<td>{group_data['checklists']['avg_required_progress']:.2f}%</td>"
-        html += f"<td>{group_data['checklists']['avg_all_progress']:.2f}%</td>"
-        html += f"<td>{group_data['checklists']['avg_required_progress_timed']:.2f}%</td>"
-        html += f"<td>{group_data['checklists']['avg_all_progress_timed']:.2f}%</td></tr>"
+        html += f"<tr><td class='numeric'>{group_data['assignments']['percent_submitted']:.2f}%</td>"
+        html += f"<td class='numeric'>{group_data['assignments']['percent_submitted_timed']:.2f}%</td>"
+        html += f"<td class='numeric'>{group_data['checklists']['total_required_100']}</td>"
+        html += f"<td class='numeric'>{group_data['checklists']['avg_required_progress']:.2f}%</td>"
+        html += f"<td class='numeric'>{group_data['checklists']['avg_all_progress']:.2f}%</td>"
+        html += f"<td class='numeric'>{group_data['checklists']['avg_required_progress_timed']:.2f}%</td>"
+        html += f"<td class='numeric'>{group_data['checklists']['avg_all_progress_timed']:.2f}%</td></tr>"
 
         html += "</table>"
 
@@ -220,30 +240,40 @@ def generate_html_report(groups, categories, current_week, total_weeks, assignme
 
     return html
 
-# Main execution
-directory = 'export'
-latest_file = find_latest_file(directory)
-data = load_json_data(latest_file)
+def main():
+    # Load configuration
+    config = configparser.ConfigParser()
+    config.read('config.ini')
 
-groups = data['groups']
-selected_groups = select_group(groups)
+    directory = config.get('General', 'Directory', fallback='export')
+    filename = config.get('General', 'Filename', fallback='report.html')
+    total_weeks = config.getint('General', 'TotalWeeks', fallback=10)
+    show_command_dialog = config.getboolean('General', 'ShowCommandDialog', fallback=True)
 
-categories = data['activities_by_category']
-selected_categories = select_categories(categories)
+    latest_file = find_latest_file(directory)
+    data = load_json_data(latest_file)
 
-assignment_details = get_assignment_details(categories)
+    groups = data['groups']
+    selected_groups = select_group(groups) if show_command_dialog else groups
 
-# Load the names to exclude
-excluded_names_file = 'exclude_names.txt'
-excluded_names = load_excluded_names(excluded_names_file)
+    categories = data['activities_by_category']
+    selected_categories = select_categories(categories) if show_command_dialog else categories
 
-current_week = int(input("Aktuelle Unterrichtswoche: "))
-total_weeks = 10
+    assignment_details = get_assignment_details(categories)
 
-html_report = generate_html_report(selected_groups, selected_categories, current_week, total_weeks, assignment_details, excluded_names)
+    excluded_names_file = 'exclude_names.txt'
+    excluded_names = load_excluded_names(excluded_names_file)
 
-# Save the HTML report
-with open('report.html', 'w', encoding='utf-8') as file:
-    file.write(html_report)
+    current_week = int(input("Aktuelle Unterrichtswoche: ")) if show_command_dialog else total_weeks
 
-print("Der Bericht wurde als 'report.html' gespeichert.")
+    html_report = generate_html_report(selected_groups, selected_categories, current_week, total_weeks, assignment_details, excluded_names)
+
+    # Save the HTML report
+    with open(filename, 'w', encoding='utf-8') as file:
+        file.write(html_report)
+
+    print(f"Der Bericht wurde als '{filename}' gespeichert.")
+    webbrowser.open(filename)
+
+if __name__ == "__main__":
+    main()
