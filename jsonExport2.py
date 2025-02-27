@@ -21,7 +21,7 @@ def load_config():
 
 def create_webdriver(headless=False):
     options = Options()
-    if headless:
+    if headless == "True":
         options.add_argument('--headless')  # Füge Headless-Argument hinzu
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
@@ -180,8 +180,48 @@ def get_sesskey(driver):
     except Exception as e:
         print(f"Fehler beim Extrahieren des sesskey: {e}")
         return None
+    
 
-def get_activity_category(driver, activity_id, course_id):
+def get_all_activity_categories(driver, course_id):
+    categories_data = {}
+
+    # Lade die Seite nur einmal
+    grade_url = f"https://lernplattform.mebis.bycs.de/grade/edit/tree/index.php?id={course_id}"
+    driver.get(grade_url)
+
+    # Verwenden Sie WebDriverWait, um sicherzustellen, dass die Elemente geladen sind
+    activity_elements = WebDriverWait(driver, 10).until(
+        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a.gradeitemheader"))
+    )
+
+    for activity_element in activity_elements:
+        try:
+            # Extrahiere die Aktivitäts-ID aus dem href-Attribut
+            href = activity_element.get_attribute("href")
+            activity_id_match = re.search(r'\?id=(\d+)', href)
+            if not activity_id_match:
+                continue
+
+            activity_id = activity_id_match.group(1)
+
+            # Finde die übergeordnete Kategorie
+            parent_tr = activity_element.find_element(By.XPATH, "./ancestor::tr")
+            category_id = parent_tr.get_attribute("data-parent-category")
+
+            full_id = f"grade-item-{category_id}"
+            category_tr = driver.find_element(By.ID, full_id)
+
+            # Extrahiere den Kategorienamen aus dem `data-toggle-selectall` Attribut
+            category_name = category_tr.find_element(By.CSS_SELECTOR, "input.itemselect").get_attribute("data-toggle-selectall")
+
+            categories_data[activity_id] = {"category_id": category_id, "category_name": category_name}
+
+        except Exception as e:
+            print(f"Fehler beim Verarbeiten der Aktivität: {e}")
+
+    return categories_data
+
+def get_activity_category(driver, activity_id, course_id, waittime):
     category_data = {"category_id": "-1", "category_name": "nicht bewertet"}
     print(f"Verarbeite Aktivität ID: {activity_id}")
 
@@ -190,7 +230,7 @@ def get_activity_category(driver, activity_id, course_id):
     
     try:
         # Verwenden Sie WebDriverWait, um sicherzustellen, dass das Element geladen ist
-        activity_element = WebDriverWait(driver, 10).until(
+        activity_element = WebDriverWait(driver, waittime).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, f"a[href*='?id={activity_id}'].gradeitemheader"))
         )
         parent_tr = activity_element.find_element(By.XPATH, "./ancestor::tr")
@@ -229,6 +269,9 @@ def add_activity_to_category(category_entry, activity_type, activity):
     else:
         category_entry[activity_type] = [activity]
 
+
+
+
 def main():
     # Startzeit des Skripts
     start_time = time.time()
@@ -263,9 +306,17 @@ def main():
     # Aktualisiere Aktivitäten mit Kategorieinformationen
     activities_by_category = []
 
+
+    # Erfasse alle Kategorieninformationen in einem einzigen Aufruf
+    all_categories_data = get_all_activity_categories(driver, course_id)
+
+    # Aktualisiere Aktivitäten mit Kategorieinformationen
+    activities_by_category = []
+
+
     for activity_type in activities:
         for activity in activities[activity_type]:
-            category_data = get_activity_category(driver, activity["id"], course_id)
+            category_data = all_categories_data.get(activity["id"], {"category_id": "-1", "category_name": "nicht bewertet"})
             activity.update(category_data)
 
             # Suche oder erstelle die Kategorie in der Liste
@@ -280,9 +331,10 @@ def main():
                     "quizzes": []
                 }
                 activities_by_category.append(category_entry)
-            
+
             # Füge die Aktivität zur entsprechenden Liste hinzu
             category_entry[activity_type].append(activity)
+
 
     print("Analysiere Status Assignments")
     # Erfasse den Status der Assignments für alle Benutzer in group=0
