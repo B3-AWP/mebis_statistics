@@ -1,5 +1,4 @@
 # Dokumentation für die Mebis Statistik
-
 ## Inhaltsverzeichnis
 1. [Idee](#idee)
 1. [Voraussetzungen](#voraussetzungen)
@@ -29,25 +28,44 @@ Erstelle eine config.ini Datei mit folgendem Inhalt
 
     [mode]
     headless = True
-
+    waittime = 1
+    
     [urls]
     base_url = https://lernplattform.mebis.bycs.de/report/progress/index.php
     common_params = &sifirst=&activityorder=orderincourse&activitysection=-1
-
+    
     [courses]
     course_ifa12 = 1657519
-
+    
     [groups]
     ifa12a = 366526
     ifa12b = 366529
-
+    
     [activities]
     checklist = checklist
     assignments = assign
-```1. [Idee](#idee)
-1. [Voraussetzungen](#voraussetzungen)
-1. [Anleitung](#anleitung)
-2. [config.ini Datei](#config)
+    
+    [thresholds]
+    green = 90
+    yellow = 50
+    orange = 10
+    red = 0
+    
+    
+    [General]
+    Directory = export
+    Filename = report.html
+    TotalWeeks = 9
+    ShowCommandDialog = True
+    DefaultGroup = 1 
+    ;0 = IFA12A 1 = IFA12B
+    DefaultCategories = 0
+    DefaultCurrentWeek = 7  
+    
+    [Analysis]
+    LaggardThreshold = 50
+    GenerateIndividualReports = True
+```
 
 ## Idee
 Das Skript ermöglicht es den Status von Checklisten und Aufgaben eines Mebiskurses in der Konsole anzuzeigen.
