@@ -17,7 +17,8 @@ pip install selenium
 
 ## Anleitung
 1. Erstelle config.ini Datei mit folgenden Inhalt. Hinterlege den Mebis Username und Password
-2. Starte das Python-Script init.py
+2. Starte das Python-Script init.py für Konsolenauswertung
+Alternative: Starte jsonExport2.py um ein JSON Datei zu bekommen und jsonAnalyse2.py für die Auswertung
 
 ## config
 Erstelle eine config.ini Datei mit folgendem Inhalt
