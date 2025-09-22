@@ -19,30 +19,84 @@ def load_excluded_names(file_path):
         excluded_names = {line.strip() for line in file.readlines()}
     return excluded_names
 
+def parse_selection(choice_str):
+    """
+    Parse a selection string that can contain:
+    - Single numbers: "1,2,3"
+    - Ranges: "1-3,5-7"
+    - Combinations: "2,5-7,10"
+    Returns a list of indices
+    """
+    indices = []
+    parts = choice_str.split(",")
+
+    for part in parts:
+        part = part.strip()
+        if "-" in part:
+            # Handle range like "1-3"
+            try:
+                start, end = part.split("-")
+                start = int(start.strip())
+                end = int(end.strip())
+                indices.extend(range(start, end + 1))
+            except ValueError:
+                continue
+        else:
+            # Handle single number
+            try:
+                indices.append(int(part))
+            except ValueError:
+                continue
+
+    return sorted(list(set(indices)))  # Remove duplicates and sort
+
 def select_group(groups):
     groups_with_users = [group for group in groups if group['users']]
 
-    print("Wählen Sie eine Gruppe aus:")
+    print("Wählen Sie Gruppen aus:")
     for i, group in enumerate(groups_with_users):
         print(f"{i} - {group['name']}")
     print("A - Alle Gruppen")
-    choice = input("Ihre Auswahl (Nummer oder 'A' für alle): ")
+    print("Unterstützte Formate: '0,1,2' (einzeln), '0-2' (Bereich), '0,2-4,6' (gemischt)")
+    choice = input("Ihre Auswahl: ")
     if choice.upper() == 'A':
         return groups_with_users
     else:
-        return [groups_with_users[int(choice)]]
+        try:
+            # Parse selection with range support
+            indices = parse_selection(choice)
+            selected_groups = [groups_with_users[i] for i in indices if 0 <= i < len(groups_with_users)]
+            if not selected_groups:
+                print("Keine gültigen Gruppen ausgewählt. Verwende alle Gruppen.")
+                return groups_with_users
+            return selected_groups
+        except (ValueError, IndexError):
+            print("Ungültige Eingabe. Verwende alle Gruppen.")
+            return groups_with_users
 
 def select_categories(categories):
     print("Wählen Sie die Kategorien aus:")
     for i, category in enumerate(categories):
         print(f"{i + 1} - {category['category_name']}")
     print("0 - Alle")
-    choice = input("Ihre Auswahl (Nummern, durch Komma getrennt): ")
-    if choice == "0":
+    print("Unterstützte Formate: '1,2,3' (einzeln), '1-3' (Bereich), '1,3-5,7' (gemischt)")
+    choice = input("Ihre Auswahl: ")
+    if choice.strip() == "0":
         return categories
     else:
-        indices = [int(i) - 1 for i in choice.split(",")]
-        return [categories[i] for i in indices]
+        try:
+            # Parse selection with range support, adjust for 1-based indexing
+            indices = parse_selection(choice)
+            # Convert from 1-based to 0-based indexing
+            indices = [i - 1 for i in indices if i > 0]
+            selected_categories = [categories[i] for i in indices if 0 <= i < len(categories)]
+            if not selected_categories:
+                print("Keine gültigen Kategorien ausgewählt. Verwende alle Kategorien.")
+                return categories
+            return selected_categories
+        except (ValueError, IndexError):
+            print("Ungültige Eingabe. Verwende alle Kategorien.")
+            return categories
 
 def get_assignment_details(assignments_by_category):
     assignment_details = {}
