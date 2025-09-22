@@ -10,6 +10,8 @@ import json
 import re
 import time
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 # TensorFlow-Logstufe auf ERROR setzen
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -22,10 +24,36 @@ def load_config():
 def create_webdriver(headless=False):
     options = Options()
     if headless == "True":
-        options.add_argument('--headless')  # Füge Headless-Argument hinzu
+        options.add_argument('--headless')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
-    return webdriver.Chrome(options=options)  # Stelle sicher, dass du den ChromeDriver installiert hast
+
+    # Performance-Optimierungen (sicher)
+    options.add_argument('--disable-images')  # Bilder nicht laden
+    options.add_argument('--disable-plugins') # Plugins deaktivieren
+    options.add_argument('--disable-extensions') # Extensions deaktivieren
+    options.add_argument('--disable-features=VizDisplayCompositor') # GPU deaktivieren
+    options.add_argument('--disable-gpu')
+    options.add_argument('--no-first-run')
+    options.add_argument('--disable-default-apps')
+    options.add_argument('--disable-background-timer-throttling')
+    options.add_argument('--disable-backgrounding-occluded-windows')
+    options.add_argument('--disable-renderer-backgrounding')
+    options.add_argument('--disable-background-networking')
+    options.add_argument('--disable-sync')
+    options.add_argument('--disable-translate')
+    options.add_argument('--hide-scrollbars')
+    options.add_argument('--mute-audio')
+
+    # Memory und CPU Optimierungen
+    options.add_argument('--memory-pressure-off')
+    options.add_argument('--max_old_space_size=4096')
+
+    # Sicherere Performance-Einstellungen
+    options.add_argument('--aggressive-cache-discard')
+    options.add_argument('--disable-ipc-flooding-protection')
+
+    return webdriver.Chrome(options=options)
 
 def login(driver, username, password, waittime):
     WebDriverWait(driver, waittime).until(EC.visibility_of_element_located((By.ID, "input-username"))).send_keys(username)
@@ -194,6 +222,79 @@ def get_sesskey(driver):
     except Exception as e:
         print(f"Fehler beim Extrahieren des sesskey: {e}")
         return None
+
+# Thread-local storage for WebDriver instances
+thread_local = threading.local()
+
+def get_thread_driver(isheadless, username=None, password=None, base_url=None, course_id=None):
+    """Get or create a WebDriver instance for the current thread"""
+    if not hasattr(thread_local, 'driver'):
+        thread_local.driver = create_webdriver(headless=isheadless)
+        thread_local.logged_in = False
+        thread_local.sesskey = None
+
+    # Login und sesskey für jeden Thread
+    if not thread_local.logged_in and username and password:
+        thread_local.driver.get(f"{base_url}?course={course_id}")
+        if "login" in thread_local.driver.current_url:
+            login(thread_local.driver, username, password, 10)
+
+        # Extrahiere sesskey für diesen Thread
+        thread_local.sesskey = get_sesskey(thread_local.driver)
+        thread_local.logged_in = True
+
+    return thread_local.driver
+
+def get_thread_sesskey():
+    """Get the sesskey for the current thread"""
+    if hasattr(thread_local, 'sesskey'):
+        return thread_local.sesskey
+    return None
+
+def process_assignment_parallel(assignment, isheadless, waittime, username, password, base_url, course_id, index, total):
+    """Process a single assignment in parallel"""
+    try:
+        driver = get_thread_driver(isheadless, username, password, base_url, course_id)
+        assignment_id = assignment["id"]
+        assignment_url = assignment["url"]
+        assignment_title = assignment.get("title", f"Assignment {assignment_id}")
+
+        print(f"[{index+1}/{total}] Verarbeite Assignment: {assignment_title[:50]}...")
+        start_time = time.time()
+        status = get_assignment_status(driver, assignment_url, waittime)
+        duration = time.time() - start_time
+        print(f"  └─ Abgeschlossen in {duration:.1f}s ({len(status)} Einträge)")
+        return assignment_id, status
+    except Exception as e:
+        print(f"❌ Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
+        return assignment.get('id', 'unknown'), []
+
+def process_checklist_parallel(checklist, isheadless, username, password, base_url, course_id, index, total):
+    """Process a single checklist in parallel"""
+    try:
+        driver = get_thread_driver(isheadless, username, password, base_url, course_id)
+        thread_sesskey = get_thread_sesskey()
+
+        if not thread_sesskey:
+            print(f"❌ Fehler: Kein sesskey für Checklist {checklist.get('id', 'unknown')}")
+            return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
+
+        checklist_id = checklist["id"]
+        checklist_url = checklist["url"]
+        checklist_title = checklist.get("title", f"Checklist {checklist_id}")
+
+        print(f"[{index+1}/{total}] Verarbeite Checklist: {checklist_title[:50]}...")
+        start_time = time.time()
+        progress = get_checklist_progress_optimized(driver, checklist_url, thread_sesskey)
+        duration = time.time() - start_time
+
+        req_count = len(progress.get('required_progress', {}))
+        all_count = len(progress.get('all_progress', {}))
+        print(f"  └─ Abgeschlossen in {duration:.1f}s ({req_count} req, {all_count} all)")
+        return checklist_id, progress
+    except Exception as e:
+        print(f"❌ Fehler bei Checklist {checklist.get('id', 'unknown')}: {e}")
+        return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
     
 
 def get_all_activity_categories(driver, course_id):
@@ -283,10 +384,21 @@ def add_activity_to_category(category_entry, activity_type, activity):
     else:
         category_entry[activity_type] = [activity]
 
+def cleanup_thread_drivers():
+    """Cleanup WebDriver instances in all threads"""
+    try:
+        if hasattr(thread_local, 'driver'):
+            thread_local.driver.quit()
+            delattr(thread_local, 'driver')
+    except:
+        pass
+
 
 def main():
     # Startzeit des Skripts
     start_time = time.time()
+    print("🚀 Starte Mebis-Datenexport...")
+    print(f"⏰ Startzeit: {datetime.now().strftime('%H:%M:%S')}")
 
     config = load_config()
     username = config['login']['username']
@@ -348,17 +460,43 @@ def main():
             category_entry[activity_type].append(activity)
 
 
-    print("Analysiere Status Assignments")
-    # Erfasse den Status der Assignments für alle Benutzer in group=0
+    print("Analysiere Status Assignments (parallel)")
     assignments_status = {}
-    for assignment in activities["assignments"]:
-        assignments_status[assignment["id"]] = get_assignment_status(driver, assignment["url"], waittime)
 
-    print("Analysiere Status Checkliste")
-    # Erfasse den Fortschritt der Checklisten für alle Benutzer in group=0
+    # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Assignments
+    max_workers = min(2, len(activities["assignments"]))  # Maximal 2 parallel für Stabilität
+
+    if activities["assignments"]:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Erstelle Future-Tasks für alle Assignments
+            future_to_assignment = {
+                executor.submit(process_assignment_parallel, assignment, isheadless, waittime, username, password, base_url, course_id, idx, len(activities["assignments"])): assignment
+                for idx, assignment in enumerate(activities["assignments"])
+            }
+
+            # Sammle die Ergebnisse
+            for future in as_completed(future_to_assignment):
+                assignment_id, status = future.result()
+                assignments_status[assignment_id] = status
+
+    print("Analysiere Status Checkliste (parallel)")
     checklist_progress = {}
-    for checklist in activities["checklists"]:
-        checklist_progress[checklist["id"]] = get_checklist_progress_optimized(driver, checklist["url"], sesskey)
+
+    # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Checklists
+    max_workers = min(2, len(activities["checklists"]))
+
+    if activities["checklists"]:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Erstelle Future-Tasks für alle Checklists
+            future_to_checklist = {
+                executor.submit(process_checklist_parallel, checklist, isheadless, username, password, base_url, course_id, idx, len(activities["checklists"])): checklist
+                for idx, checklist in enumerate(activities["checklists"])
+            }
+
+            # Sammle die Ergebnisse
+            for future in as_completed(future_to_checklist):
+                checklist_id, progress = future.result()
+                checklist_progress[checklist_id] = progress
 
     # Zentralisierte Speicherung der Aktivitäten
     data = {
@@ -415,21 +553,48 @@ def main():
                         # "category_name": checklist.get("category_name")
                     })
 
-    print("Erstelle JSON Datei")
+    print("Erstelle JSON Datei...")
+    json_start_time = time.time()
+
     # Zeitstempel hinzufügen
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_filename = f'./export/output_{timestamp}.json'
-    
-    with open(json_filename, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
 
+    # Optimierte JSON-Serialisierung ohne Einrückung für bessere Performance
+    with open(json_filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+
+    json_duration = time.time() - json_start_time
+    print(f"✅ JSON-Datei erstellt in {json_duration:.1f}s: {json_filename}")
+
+    # Cleanup: Schließe alle WebDriver-Instanzen
     driver.quit()
+
+    # Cleanup aller Thread-spezifischen WebDriver
+    import atexit
+    atexit.register(cleanup_thread_drivers)
 
     # Endzeit des Skripts
     end_time = time.time()
     duration = end_time - start_time
     duration_minutes = duration / 60  # Umrechnung von Sekunden in Minuten
-    print(f"Skript abgeschlossen in {duration_minutes:.2f} Minuten.")
+
+    # Performance-Statistiken
+    total_activities = len(activities["assignments"]) + len(activities["checklists"])
+    total_groups = len(data["groups"])
+    total_users = sum(len(group["users"]) for group in data["groups"])
+
+    print("\n" + "="*60)
+    print("📊 EXPORT ABGESCHLOSSEN")
+    print("="*60)
+    print(f"⏱️  Gesamtdauer: {duration_minutes:.2f} Minuten ({duration:.1f} Sekunden)")
+    print(f"🎯 Aktivitäten: {total_activities} ({len(activities['assignments'])} Assignments, {len(activities['checklists'])} Checklists)")
+    print(f"👥 Gruppen: {total_groups} mit insgesamt {total_users} Benutzern")
+    if total_activities > 0:
+        print(f"⚡ Durchschnitt: {(duration / total_activities):.1f}s pro Aktivität")
+    print(f"💾 Ausgabedatei: {json_filename}")
+    print(f"🏁 Endzeit: {datetime.now().strftime('%H:%M:%S')}")
+    print("="*60)
 
 if __name__ == "__main__":
     main()
