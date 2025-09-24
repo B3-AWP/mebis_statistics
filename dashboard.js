@@ -43,6 +43,8 @@ function showTab(tabName) {
         loadChecklistsTab();
     } else if (tabName === 'pflicht') {
         loadPflichtTab();
+    } else if (tabName === 'zentral') {
+        loadZentralTab();
     }
 }
 
@@ -735,6 +737,12 @@ function updateAllTabs() {
     if (pflichtTab && pflichtTab.style.display !== 'none') {
         generatePflichtTable();
     }
+
+    // Zentrale Leistungsnachweise-Tab aktualisieren falls sichtbar
+    const zentralTab = document.getElementById('zentralTab');
+    if (zentralTab && zentralTab.style.display !== 'none') {
+        generateZentralTable();
+    }
 }
 
 // Referenzwoche aktualisieren
@@ -869,6 +877,16 @@ function loadPflichtTab() {
 
     setTimeout(() => {
         generatePflichtTable();
+        if (filterSection) filterSection.style.display = 'block';
+    }, 500);
+}
+
+// Zentrale Leistungsnachweise-Tab laden
+function loadZentralTab() {
+    const filterSection = document.getElementById('zentralFilterSection');
+
+    setTimeout(() => {
+        generateZentralTable();
         if (filterSection) filterSection.style.display = 'block';
     }, 500);
 }
@@ -1550,3 +1568,217 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// ============= ZENTRALE LEISTUNGSNACHWEISE FUNKTIONEN =============
+
+// Zentrale Leistungsnachweise-Tabelle generieren (Zeilen = Aufgaben, Spalten = Personen)
+function generateZentralTable() {
+    const container = document.getElementById('zentralData');
+    if (!container || !dashboardData || !dashboardData.structured_tables) return;
+
+    // Bei "Alle Gruppen" alle Zentrale Leistungsnachweise von allen Benutzern anzeigen
+    if (currentGroup === 'all') {
+        generateAllGroupsZentralTable();
+        return;
+    }
+
+    const tableData = dashboardData.structured_tables[currentGroup]?.zentrale_leistungsnachweise;
+
+    if (!tableData) {
+        container.innerHTML = '<p>Keine Daten für die ausgewählte Gruppe verfügbar.</p>';
+        return;
+    }
+
+    let html = '<div style="overflow-x: auto;"><table id="zentralTable" class="info-table dashboard-table">';
+    html += '<thead><tr>';
+
+    // Header: Aufgabe + Benutzernamen
+    html += '<th style="min-width: 250px;">Zentrale Leistungsnachweis</th>';
+
+    // Für jeden Benutzer eine Spalte mit Status/Note
+    for (let i = 1; i < tableData.headers.length; i++) {
+        const userName = tableData.headers[i];
+        html += `<th style="text-align: center; min-width: 120px;">${userName}</th>`;
+    }
+    html += '</tr></thead>';
+
+    html += '<tbody>';
+
+    // Zeilen für jede Zentrale Leistungsnachweis
+    tableData.rows.forEach(row => {
+        html += '<tr>';
+
+        // Aufgaben-Name (mit Link und Typ)
+        const typeIcon = row.assignment_type === 'quiz' ? '🧭' : '📝';
+        html += `<td style="min-width: 250px;">`;
+        html += `<a href="${row.assignment_url}" target="_blank">${typeIcon} ${row.assignment_title}</a>`;
+        html += `<br><small style="color: #666;">Typ: ${row.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
+        html += `</td>`;
+
+        // Status für jeden Benutzer
+        row.user_status.forEach(status => {
+            let cellContent = '';
+            let cellClass = '';
+            let bgColor = '';
+
+            if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
+                if (status.status2 === 'Bewertet' && status.grade) {
+                    // Bewertet mit Note
+                    cellContent = `✓ ${status.grade}`;
+                    cellClass = 'status-graded';
+                    bgColor = '#d4edda'; // Grün
+                } else {
+                    // Abgegeben, aber noch nicht bewertet
+                    cellContent = '⏳ Eingereicht';
+                    cellClass = 'status-submitted';
+                    bgColor = '#fff3cd'; // Gelb
+                }
+            } else if (status.status === 'Nicht eingereicht' || !status.status) {
+                // Nicht eingereicht
+                cellContent = '❌ Offen';
+                cellClass = 'status-missing';
+                bgColor = '#f8d7da'; // Rot
+            } else {
+                // Andere Status
+                cellContent = status.status || 'Unbekannt';
+                cellClass = 'status-other';
+                bgColor = '#e2e3e5'; // Grau
+            }
+
+            html += `<td class="${cellClass}" style="text-align: center; background-color: ${bgColor};">${cellContent}</td>`;
+        });
+
+        html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+
+    // Filter anwenden falls nötig
+    applyZentralViewFilters();
+}
+
+// Zentrale Leistungsnachweise für alle Gruppen
+function generateAllGroupsZentralTable() {
+    const container = document.getElementById('zentralData');
+    if (!container || !dashboardData || !dashboardData.structured_tables) return;
+
+    let html = '<div style="overflow-x: auto;"><table id="allGroupsZentralTable" class="info-table dashboard-table">';
+    html += '<thead><tr>';
+    html += '<th style="min-width: 250px;">Zentrale Leistungsnachweis</th>';
+    html += '<th style="min-width: 120px;">Gruppe</th>';
+    html += '<th style="text-align: center; min-width: 120px;">Benutzer</th>';
+    html += '<th style="text-align: center; min-width: 120px;">Status</th>';
+    html += '<th style="text-align: center; min-width: 100px;">Note</th>';
+    html += '</tr></thead><tbody>';
+
+    // Sammle alle Zentrale Leistungsnachweise von allen Gruppen
+    Object.keys(dashboardData.structured_tables).forEach(groupName => {
+        const groupData = dashboardData.structured_tables[groupName];
+        const tableData = groupData?.zentrale_leistungsnachweise;
+
+        if (!tableData) return;
+
+        tableData.rows.forEach(row => {
+            row.user_status.forEach((status, userIndex) => {
+                if (userIndex >= tableData.headers.length - 1) return;
+
+                const userName = tableData.headers[userIndex + 1];
+                const typeIcon = row.assignment_type === 'quiz' ? '🧭' : '📝';
+
+                let statusText = '';
+                let gradeText = '';
+                let rowClass = '';
+                let bgColor = '';
+
+                if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
+                    if (status.status2 === 'Bewertet' && status.grade) {
+                        statusText = 'Bewertet';
+                        gradeText = status.grade;
+                        rowClass = 'status-graded';
+                        bgColor = '#d4edda';
+                    } else {
+                        statusText = 'Eingereicht';
+                        gradeText = '-';
+                        rowClass = 'status-submitted';
+                        bgColor = '#fff3cd';
+                    }
+                } else {
+                    statusText = 'Offen';
+                    gradeText = '-';
+                    rowClass = 'status-missing';
+                    bgColor = '#f8d7da';
+                }
+
+                html += `<tr class="${rowClass}" style="background-color: ${bgColor};">`;
+                html += `<td style="min-width: 250px;">`;
+                html += `<a href="${row.assignment_url}" target="_blank">${typeIcon} ${row.assignment_title}</a>`;
+                html += `<br><small style="color: #666;">Typ: ${row.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
+                html += `</td>`;
+                html += `<td>${groupName}</td>`;
+                html += `<td>${userName}</td>`;
+                html += `<td style="text-align: center;">${statusText}</td>`;
+                html += `<td style="text-align: center;">${gradeText}</td>`;
+                html += '</tr>';
+            });
+        });
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+
+    // Filter anwenden
+    applyZentralViewFilters();
+}
+
+// Filter für Zentrale Leistungsnachweise anwenden
+function applyZentralFilters() {
+    generateZentralTable();
+    // Status- und Typ-Filter anwenden
+    applyZentralViewFilters();
+}
+
+// Status- und Typ-Filter für Zentrale Leistungsnachweise anwenden
+function applyZentralViewFilters() {
+    const statusFilter = document.getElementById('zentralStatusFilter');
+    const typeFilter = document.getElementById('zentralTypeFilter');
+
+    if (!statusFilter || !typeFilter) return;
+
+    const statusValue = statusFilter.value;
+    const typeValue = typeFilter.value;
+
+    const table = document.getElementById('zentralTable') || document.getElementById('allGroupsZentralTable');
+    if (!table) return;
+
+    const rows = table.querySelectorAll('tbody tr');
+
+    rows.forEach(row => {
+        let shouldShow = true;
+
+        // Status-Filter anwenden
+        if (statusValue !== 'all') {
+            const isCompleted = row.classList.contains('status-graded');
+            if (statusValue === 'completed' && !isCompleted) {
+                shouldShow = false;
+            } else if (statusValue === 'pending' && isCompleted) {
+                shouldShow = false;
+            }
+        }
+
+        // Typ-Filter anwenden
+        if (typeValue !== 'all') {
+            const typeElement = row.querySelector('small');
+            if (typeElement) {
+                const typeText = typeElement.textContent.toLowerCase();
+                if (typeValue === 'quiz' && !typeText.includes('quiz')) {
+                    shouldShow = false;
+                } else if (typeValue === 'assignment' && !typeText.includes('aufgabe')) {
+                    shouldShow = false;
+                }
+            }
+        }
+
+        row.style.display = shouldShow ? '' : 'none';
+    });
+}

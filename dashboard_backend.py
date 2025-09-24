@@ -270,6 +270,7 @@ def create_structured_tables(groups_data, categories):
     # Alle Checklisten aus den Kategorien sammeln
     all_checklists = []
     pflicht_assignments = []
+    zentrale_assignments = []
 
     for category in categories:
         # Checklisten sammeln
@@ -297,6 +298,26 @@ def create_structured_tables(groups_data, categories):
                     'url': quiz.get('url', '#'),
                     'type': 'quiz'
                 })
+
+        # Zentrale Leistungsnachweise sammeln (nur aus Zentrale Leistungsnachweise-Kategorie)
+        if category['category_name'] == "📊 Zentrale Leistungsnachweise":
+            print(f"DEBUG: Gefunden Zentrale Leistungsnachweise Kategorie mit {len(category.get('assignments', []))} assignments und {len(category.get('quizzes', []))} quizzes")
+            for assignment in category.get('assignments', []):
+                zentrale_assignments.append({
+                    'id': assignment['id'],
+                    'title': assignment['title'],
+                    'url': assignment.get('url', '#'),
+                    'type': 'assignment'
+                })
+            for quiz in category.get('quizzes', []):
+                zentrale_assignments.append({
+                    'id': quiz['id'],
+                    'title': quiz['title'],
+                    'url': quiz.get('url', '#'),
+                    'type': 'quiz'
+                })
+
+    print(f"DEBUG: Zentrale Leistungsnachweise insgesamt gefunden: {len(zentrale_assignments)}")
 
     # Strukturierte Tabellen für jede Gruppe erstellen
     structured_tables = {}
@@ -348,9 +369,32 @@ def create_structured_tables(groups_data, categories):
 
             pflicht_table['rows'].append(row)
 
+        # Zentrale Leistungsnachweise-Tabelle: Zeilen = Aufgaben, Spalten = Benutzer
+        zentrale_table = {
+            'headers': ['Aufgabe'] + [user['name'] for user in users],
+            'rows': []
+        }
+
+        for assignment in zentrale_assignments:
+            row = {
+                'assignment_id': assignment['id'],
+                'assignment_title': assignment['title'],
+                'assignment_url': assignment['url'],
+                'assignment_type': assignment['type'],
+                'user_status': []
+            }
+
+            for user in users:
+                # Finde den Status dieser Aufgabe für diesen Benutzer
+                status = find_user_assignment_status(user, assignment['id'])
+                row['user_status'].append(status)
+
+            zentrale_table['rows'].append(row)
+
         structured_tables[group_name] = {
             'checklists': checklist_table,
-            'pflichtaufgaben': pflicht_table
+            'pflichtaufgaben': pflicht_table,
+            'zentrale_leistungsnachweise': zentrale_table
         }
 
     return structured_tables
@@ -373,22 +417,34 @@ def find_user_checklist_progress(user, checklist_id):
 
 def find_user_assignment_status(user, assignment_id):
     """Findet den Status einer spezifischen Aufgabe für einen Benutzer"""
-    # Suche in den Noten/Aufgaben des Benutzers
-    for category_name, assignments in user.get('assignments', {}).get('grades', {}).items():
-        for assignment in assignments:
-            if assignment.get('id') == assignment_id:
-                return {
-                    'status': 'submitted',
-                    'grade': assignment.get('grade', 'Nicht bewertet'),
-                    'url': assignment.get('url', '#'),
-                    'type': assignment.get('type', 'unknown')
-                }
+    # Suche in den User-Aktivitäten (assignments und quizzes)
+    activities = user.get('activities', {})
 
+    # Suche in assignments
+    for assignment in activities.get('assignments', []):
+        if assignment.get('id') == assignment_id:
+            status_info = assignment.get('status', {})
+            return {
+                'status': status_info.get('status', 'Nicht eingereicht'),
+                'status2': status_info.get('status2', ''),
+                'grade': status_info.get('grade', '-')
+            }
+
+    # Suche in quizzes
+    for quiz in activities.get('quizzes', []):
+        if quiz.get('id') == assignment_id:
+            status_info = quiz.get('status', {})
+            return {
+                'status': status_info.get('status', 'Nicht eingereicht'),
+                'status2': status_info.get('status2', ''),
+                'grade': status_info.get('grade', '-')
+            }
+
+    # Wenn nicht gefunden
     return {
-        'status': 'not_submitted',
-        'grade': '-',
-        'url': '#',
-        'type': 'unknown'
+        'status': 'Nicht eingereicht',
+        'status2': '',
+        'grade': '-'
     }
 
 @app.route('/')
@@ -404,6 +460,7 @@ def static_files(filename):
 @app.route('/api/data')
 def get_data():
     """API-Endpoint für Dashboard-Daten"""
+    print("DEBUG API: API-Endpoint /api/data aufgerufen!")
     try:
         # Neueste JSON-Datei finden
         latest_file = find_latest_file()
@@ -446,7 +503,15 @@ def get_data():
         overall_stats = calculate_group_averages(all_users)
 
         # Strukturierte Daten für Tabellen erstellen
+        print(f"DEBUG API: Erstelle strukturierte Tabellen für {len(groups_data)} Gruppen und {len(data['activities_by_category'])} Kategorien")
         structured_data = create_structured_tables(groups_data, data['activities_by_category'])
+        print(f"DEBUG API: Strukturierte Tabellen erstellt: {list(structured_data.keys())}")
+
+        # Debug: Prüfe zentrale Leistungsnachweise in jeder Gruppe
+        for group_name, group_data in structured_data.items():
+            zentral_data = group_data.get('zentrale_leistungsnachweise', {})
+            zentral_rows = zentral_data.get('rows', [])
+            print(f"DEBUG API: Gruppe '{group_name}' hat {len(zentral_rows)} zentrale Leistungsnachweise")
 
         response_data = {
             'groups': groups_data,
