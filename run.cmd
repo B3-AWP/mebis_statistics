@@ -1,3 +1,3 @@
 @echo off
-python ./init.py
+python ./jsonExport2.py
 pause

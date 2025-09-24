@@ -366,14 +366,14 @@ function updateOverviewStats(groupStats, users) {
     // Progress Ring für Checklisten
     updateProgressRing('completionRing', Math.min(percentChecklists, 100));
 
-    // Durchschnittlicher Fortschritt (bleibt wie vorher für Gruppen-Details)
+    // Durchschnittlicher Fortschritt (wochenabhängig)
     const currentProgressType = document.querySelector('input[name="progressType"]:checked').value;
     const progressValue = currentProgressType === 'pflicht' ?
-        groupStats.checklists.avg_required_progress :
-        groupStats.checklists.avg_all_progress;
+        groupStats.checklists.avg_required_progress_timed :
+        groupStats.checklists.avg_all_progress_timed;
 
     document.getElementById('avgCompletionText').textContent = progressValue + '%';
-    document.getElementById('avgCompletionBar').style.width = progressValue + '%';
+    document.getElementById('avgCompletionBar').style.width = Math.min(progressValue, 100) + '%';
 
     // Durchschnittsnote
     const avgGradeElement = document.getElementById('avgGradeText');

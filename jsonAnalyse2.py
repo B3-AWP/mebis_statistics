@@ -301,7 +301,7 @@ def main():
 
     directory = config.get('General', 'Directory', fallback='export')
     filename = config.get('General', 'Filename', fallback='report.html')
-    total_weeks = config.getint('General', 'TotalWeeks', fallback=10)
+    total_weeks = config.getint('General', 'TotalWeeks', fallback=9)
     show_command_dialog = config.getboolean('General', 'ShowCommandDialog', fallback=True)
 
     latest_file = find_latest_file(directory)
