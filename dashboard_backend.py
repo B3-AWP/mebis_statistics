@@ -15,19 +15,29 @@ def find_latest_file(directory='export'):
     """Findet die neueste JSON-Datei im Export-Ordner"""
     pattern = os.path.join(directory, 'output_*.json')
     files = glob.glob(pattern)
+    print(f"DEBUG: Suche JSON-Dateien in '{directory}' mit Pattern '{pattern}'")
+    print(f"DEBUG: Gefundene Dateien: {files}")
     if not files:
+        print("DEBUG: Keine JSON-Dateien gefunden!")
         return None
     latest_file = max(files, key=os.path.getctime)
+    print(f"DEBUG: Neueste Datei: {latest_file}")
     return latest_file
 
 def load_json_data(file_path):
     """Lädt JSON-Daten aus einer Datei"""
+    print(f"DEBUG: Lade JSON-Datei: {file_path}")
+    print(f"DEBUG: Datei existiert: {os.path.exists(file_path) if file_path else 'file_path is None'}")
+
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             data = json.load(file)
+        print(f"DEBUG: JSON erfolgreich geladen. Keys: {list(data.keys()) if isinstance(data, dict) else 'not a dict'}")
         return data
     except Exception as e:
-        print(f"Error loading JSON data: {e}")
+        print(f"DEBUG: Error loading JSON data: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def load_excluded_names(file_path='exclude_names.txt'):
@@ -417,18 +427,26 @@ def find_user_checklist_progress(user, checklist_id):
 
 def find_user_assignment_status(user, assignment_id):
     """Findet den Status einer spezifischen Aufgabe für einen Benutzer"""
+    print(f"DEBUG: Suche Assignment {assignment_id} für User {user.get('name', 'Unknown')}")
+    print(f"DEBUG: User keys: {list(user.keys()) if isinstance(user, dict) else 'not a dict'}")
+
     # Suche in den User-Aktivitäten (assignments und quizzes)
     activities = user.get('activities', {})
+    print(f"DEBUG: Activities keys: {list(activities.keys()) if isinstance(activities, dict) else 'not a dict'}")
+    print(f"DEBUG: User hat {len(activities.get('assignments', []))} assignments und {len(activities.get('quizzes', []))} quizzes")
 
     # Suche in assignments
     for assignment in activities.get('assignments', []):
+        print(f"DEBUG: Prüfe Assignment {assignment.get('id')} gegen {assignment_id}")
         if assignment.get('id') == assignment_id:
             status_info = assignment.get('status', {})
-            return {
+            result = {
                 'status': status_info.get('status', 'Nicht eingereicht'),
                 'status2': status_info.get('status2', ''),
                 'grade': status_info.get('grade', '-')
             }
+            print(f"DEBUG: MATCH! {user.get('name')} - Assignment {assignment_id}: {result}")
+            return result
 
     # Suche in quizzes
     for quiz in activities.get('quizzes', []):
@@ -441,11 +459,13 @@ def find_user_assignment_status(user, assignment_id):
             }
 
     # Wenn nicht gefunden
-    return {
+    result = {
         'status': 'Nicht eingereicht',
         'status2': '',
         'grade': '-'
     }
+    print(f"DEBUG: NICHT GEFUNDEN! {user.get('name')} - Assignment {assignment_id}: {result}")
+    return result
 
 @app.route('/')
 def index():
@@ -460,15 +480,25 @@ def static_files(filename):
 @app.route('/api/data')
 def get_data():
     """API-Endpoint für Dashboard-Daten"""
-    print("DEBUG API: API-Endpoint /api/data aufgerufen!")
+    print("DEBUG API: ========== API-Endpoint /api/data aufgerufen! ==========")
     try:
         # Neueste JSON-Datei finden
+        print("DEBUG API: Suche neueste JSON-Datei...")
         latest_file = find_latest_file()
+        print(f"DEBUG API: latest_file = {latest_file}")
         if not latest_file:
+            print("DEBUG API: Keine Export-Datei gefunden!")
             return jsonify({'error': 'Keine Export-Datei gefunden'}), 404
 
         # Daten laden
+        print("DEBUG API: Lade JSON-Daten...")
         data = load_json_data(latest_file)
+        print(f"DEBUG API: data ist None: {data is None}")
+        if data:
+            print(f"DEBUG API: data.keys(): {list(data.keys())}")
+            print(f"DEBUG API: hat activities_by_category: {'activities_by_category' in data}")
+        else:
+            print("DEBUG API: data ist None!")
         if not data:
             return jsonify({'error': 'Fehler beim Laden der Daten'}), 500
 
@@ -513,11 +543,68 @@ def get_data():
             zentral_rows = zentral_data.get('rows', [])
             print(f"DEBUG API: Gruppe '{group_name}' hat {len(zentral_rows)} zentrale Leistungsnachweise")
 
+        # Reorder activities_by_category to put "Pflichtaufgaben" first
+        activities_ordered = []
+        pflichtaufgaben_category = None
+        other_categories = []
+
+        for category in data['activities_by_category']:
+            if 'Pflichtaufgaben' in category.get('category_name', ''):
+                pflichtaufgaben_category = category
+            else:
+                other_categories.append(category)
+
+        if pflichtaufgaben_category:
+            activities_ordered = [pflichtaufgaben_category] + other_categories
+        else:
+            activities_ordered = data['activities_by_category']
+
+        # Add user_status to activities for frontend
+        def add_user_status_to_activities(activities, data):
+            for category in activities:
+                # Add user_status to assignments
+                for assignment in category.get('assignments', []):
+                    assignment['user_status'] = []
+                    assignment_id = assignment.get('id')
+
+                    # Find user grades for this assignment from original JSON data
+                    for group in data['groups']:
+                        group_users = group.get('users', [])
+                        for user in group_users:
+                            status = find_user_assignment_status(user, assignment_id)
+                            assignment['user_status'].append({
+                                'user_name': user.get('name', ''),
+                                'user_id': user.get('id', ''),
+                                'status': status.get('status', 'Nicht eingereicht'),
+                                'grade': status.get('grade', '-')
+                            })
+
+                # Add user_status to quizzes
+                for quiz in category.get('quizzes', []):
+                    quiz['user_status'] = []
+                    quiz_id = quiz.get('id')
+
+                    # Find user grades for this quiz from original JSON data
+                    for group in data['groups']:
+                        group_users = group.get('users', [])
+                        for user in group_users:
+                            status = find_user_assignment_status(user, quiz_id)
+                            quiz['user_status'].append({
+                                'user_name': user.get('name', ''),
+                                'user_id': user.get('id', ''),
+                                'status': status.get('status', 'Nicht eingereicht'),
+                                'grade': status.get('grade', '-')
+                            })
+            return activities
+
+        activities_with_status = add_user_status_to_activities(activities_ordered, data)
+
         response_data = {
             'groups': groups_data,
             'overall_stats': overall_stats,
             'assignment_details': assignment_details,
-            'categories': data['activities_by_category'],
+            'categories': activities_with_status,
+            'activities_by_category': activities_with_status,  # Korrekte Frontend-Erwartung
             'structured_tables': structured_data,
             'last_updated': latest_file
         }
