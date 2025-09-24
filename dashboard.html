@@ -88,6 +88,12 @@
                         <span class="tab-text">Zentrale Leistungsnachweise</span>
                     </button>
                 </div>
+
+                <div class="file-info-container" id="fileInfoContainer" style="display: none;">
+                    <span class="file-info-label">Datei:</span>
+                    <span class="file-info-text" id="fileInfoText">-</span>
+                </div>
+
                 <button id="refreshBtn" class="nav-btn" onclick="loadData()">
                     <svg class="icon" width="18" height="18" aria-hidden="true">
                         <use href="#icon-refresh"></use>
@@ -313,6 +319,13 @@
                             <option value="all">Alle Typen</option>
                             <option value="assignment">Nur Aufgaben</option>
                             <option value="quiz">Nur Quizzes</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Kategorien:</label>
+                        <select id="pflichtCategoryFilter" onchange="applyPflichtFilters()">
+                            <option value="pflichtaufgaben">Nur Pflichtaufgaben-Kategorie (alle Typen)</option>
+                            <option value="all">Alle Kategorien</option>
                         </select>
                     </div>
                 </div>
