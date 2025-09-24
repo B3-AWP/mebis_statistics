@@ -48,6 +48,45 @@ function showTab(tabName) {
     }
 }
 
+// Datei-Info anzeigen
+function displayFileInfo(filename) {
+    const container = document.getElementById('fileInfoContainer');
+    const textElement = document.getElementById('fileInfoText');
+
+    if (!filename || !container || !textElement) {
+        return;
+    }
+
+    // Extrahiere Datum und Zeit aus dem Dateinamen
+    // Format: export/output_YYYYMMDD_HHMMSS.json
+    const match = filename.match(/output_(\d{8})_(\d{6})\.json/);
+    if (match) {
+        const dateStr = match[1]; // YYYYMMDD
+        const timeStr = match[2]; // HHMMSS
+
+        // Parse Datum
+        const year = dateStr.substring(0, 4);
+        const month = dateStr.substring(4, 6);
+        const day = dateStr.substring(6, 8);
+
+        // Parse Zeit
+        const hour = timeStr.substring(0, 2);
+        const minute = timeStr.substring(2, 4);
+        const second = timeStr.substring(4, 6);
+
+        // Formatiere für Anzeige
+        const formattedDateTime = `${day}.${month}.${year} ${hour}:${minute}:${second}`;
+        textElement.textContent = formattedDateTime;
+
+        // Container anzeigen
+        container.style.display = 'flex';
+    } else {
+        // Fallback: zeige rohen Dateinamen
+        textElement.textContent = filename.replace(/.*[\\\/]/, ''); // Nur Dateiname ohne Pfad
+        container.style.display = 'flex';
+    }
+}
+
 // Daten laden
 async function loadData() {
     showLoading(true);
@@ -59,6 +98,25 @@ async function loadData() {
         }
 
         dashboardData = await response.json();
+
+        // Debug: JSON-Struktur analysieren
+        console.log('=== DASHBOARD DATA LOADED ===');
+        console.log('Data structure:', {
+            hasActivitiesByCategory: !!dashboardData.activities_by_category,
+            categoriesCount: dashboardData.activities_by_category ? dashboardData.activities_by_category.length : 'undefined',
+            sampleCategory: dashboardData.activities_by_category ? dashboardData.activities_by_category[0] : 'none'
+        });
+
+        if (dashboardData.activities_by_category && dashboardData.activities_by_category.length > 0) {
+            const firstCategory = dashboardData.activities_by_category[0];
+            console.log('First category assignments:', {
+                assignmentCount: firstCategory.assignments ? firstCategory.assignments.length : 'undefined',
+                sampleAssignment: firstCategory.assignments && firstCategory.assignments.length > 0 ? firstCategory.assignments[0] : 'none'
+            });
+        }
+
+        // Datei-Info anzeigen
+        displayFileInfo(dashboardData.last_updated);
 
         // Gruppen-Dropdown füllen
         populateGroupSelectors();
@@ -851,14 +909,17 @@ function generateChecklistTable() {
 
         // Fortschritt für jeden Benutzer (jeweils Pflicht + Gesamt)
         row.user_progress.forEach(progress => {
-            const pflichtPercent = parseFloat(progress.required_progress.replace('%', ''));
-            const gesamtPercent = parseFloat(progress.all_progress.replace('%', ''));
+            const requiredProgressText = progress.required_progress || '0%';
+            const allProgressText = progress.all_progress || '0%';
+
+            const pflichtPercent = parseFloat(requiredProgressText.replace('%', ''));
+            const gesamtPercent = parseFloat(allProgressText.replace('%', ''));
 
             // Pflicht-Fortschritt
-            html += `<td class="progress-cell" style="--progress-width: ${pflichtPercent}%; --progress-color: #28a745;">${progress.required_progress}</td>`;
+            html += `<td class="progress-cell" style="--progress-width: ${pflichtPercent}%; --progress-color: #28a745;">${requiredProgressText}</td>`;
 
             // Gesamt-Fortschritt (mit gesamt-column Klasse für ein-/ausblenden)
-            html += `<td class="progress-cell gesamt-column" style="--progress-width: ${gesamtPercent}%; --progress-color: #6f42c1;">${progress.all_progress}</td>`;
+            html += `<td class="progress-cell gesamt-column" style="--progress-width: ${gesamtPercent}%; --progress-color: #6f42c1;">${allProgressText}</td>`;
         });
 
         html += '</tr>';
@@ -941,11 +1002,18 @@ function generatePflichtTable() {
             let cellClass = '';
             let bgColor = '';
 
-            if (status.status === 'submitted') {
+            if (status.grade && status.grade != '-') {
+                // Grade vorhanden - zeige Grade-Wert
                 cellContent = `<strong>${status.grade}</strong>`;
                 cellClass = 'progress-cell';
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (status.status === 'Zur Bewertung abgegeben') {
+                // Zur Bewertung abgegeben - zeige "bewertbar"
+                cellContent = '<span style="color: #ffc107;">bewertbar</span>';
+                cellClass = 'progress-cell';
+                bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
+                // Nicht eingereicht
                 cellContent = '<span style="color: #dc3545;">Nicht eingereicht</span>';
                 cellClass = 'progress-cell';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
@@ -1004,16 +1072,20 @@ function calculateUserPflichtStats(tableData) {
         tableData.rows.forEach(row => {
             total++;
             const status = row.user_status[userIndex];
-            if (status.status === 'submitted') {
+            if (status.grade && status.grade !== '-') {
+                // Hat eine Note - als eingereicht zählen
                 submitted++;
                 // Versuche Note zu extrahieren
                 const gradeStr = status.grade;
-                if (gradeStr && gradeStr !== '-' && gradeStr !== 'Nicht bewertet') {
+                if (gradeStr !== 'Nicht bewertet') {
                     const gradeNum = parseFloat(gradeStr.replace(',', '.'));
                     if (!isNaN(gradeNum) && gradeNum >= 1 && gradeNum <= 6) {
                         grades.push(gradeNum);
                     }
                 }
+            } else if (status.status === 'Zur Bewertung abgegeben') {
+                // Als eingereicht zählen, aber keine Note
+                submitted++;
             }
         });
 
@@ -1118,11 +1190,14 @@ function generateAllGroupsChecklistTable() {
                 }
             });
 
-            const pflichtPercent = parseFloat(progress.required_progress.replace('%', ''));
-            const gesamtPercent = parseFloat(progress.all_progress.replace('%', ''));
+            const requiredProgressText = progress.required_progress || '0%';
+            const allProgressText = progress.all_progress || '0%';
 
-            html += `<td class="progress-cell" style="--progress-width: ${pflichtPercent}%; --progress-color: #28a745;">${progress.required_progress}</td>`;
-            html += `<td class="progress-cell gesamt-column" style="--progress-width: ${gesamtPercent}%; --progress-color: #6f42c1;">${progress.all_progress}</td>`;
+            const pflichtPercent = parseFloat(requiredProgressText.replace('%', ''));
+            const gesamtPercent = parseFloat(allProgressText.replace('%', ''));
+
+            html += `<td class="progress-cell" style="--progress-width: ${pflichtPercent}%; --progress-color: #28a745;">${requiredProgressText}</td>`;
+            html += `<td class="progress-cell gesamt-column" style="--progress-width: ${gesamtPercent}%; --progress-color: #6f42c1;">${allProgressText}</td>`;
         });
 
         html += '</tr>';
@@ -1137,90 +1212,68 @@ function generateAllGroupsChecklistTable() {
 
 function generateAllGroupsPflichtTable() {
     const container = document.getElementById('pflichtData');
-    if (!container || !dashboardData || !dashboardData.structured_tables) return;
+    if (!container || !dashboardData || !dashboardData.activities_by_category) return;
 
-    // Gruppen basierend auf aktueller Gruppierung filtern
-    let groupsToShow = [];
-    if (currentGrouping === 'all') {
-        groupsToShow = Object.keys(dashboardData.structured_tables);
-    } else {
-        const groupings = extractGroupings();
-        groupsToShow = groupings[currentGrouping] || [];
-    }
+    // Nutze die neue activities_by_category Datenstruktur
+    const assignments = dashboardData.activities_by_category
+        .filter(category => category.assignments && category.assignments.length > 0)
+        .flatMap(category => category.assignments);
 
-    // Alle Benutzer aus gefilterten Gruppen sammeln
-    let allUsers = [];
-    let allPflichtaufgaben = new Set();
+    if (assignments.length === 0) return;
 
-    groupsToShow.forEach(groupName => {
-        const tableData = dashboardData.structured_tables[groupName]?.pflichtaufgaben;
-        if (tableData) {
-            // Pflichtaufgaben sammeln
-            tableData.rows.forEach(row => {
-                allPflichtaufgaben.add(JSON.stringify({
-                    id: row.assignment_id,
-                    title: row.assignment_title,
-                    url: row.assignment_url,
-                    type: row.assignment_type
+    // Alle Benutzer sammeln
+    let allUsersSet = new Set();
+    assignments.forEach(assignment => {
+        if (assignment.user_status) {
+            assignment.user_status.forEach(userStatus => {
+                allUsersSet.add(JSON.stringify({
+                    id: userStatus.user_id,
+                    name: userStatus.user_name
                 }));
             });
-
-            // Benutzer sammeln
-            for (let i = 1; i < tableData.headers.length; i++) {
-                const userName = tableData.headers[i];
-                if (!allUsers.find(u => u.name === userName)) {
-                    allUsers.push({ name: userName, group: groupName });
-                }
-            }
         }
     });
-
-    const pflichtArray = Array.from(allPflichtaufgaben).map(str => JSON.parse(str));
+    const allUsers = Array.from(allUsersSet).map(str => JSON.parse(str));
 
     let html = '<div style="overflow-x: auto;"><table id="allGroupsPflichtTable" class="info-table dashboard-table">';
     html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
 
     // Header für alle Benutzer
     allUsers.forEach(user => {
-        html += `<th style="text-align: center; min-width: 120px;">${user.name}<br><small>${user.group}</small></th>`;
+        html += `<th style="text-align: center; min-width: 120px;">${user.name}</th>`;
     });
     html += '</tr></thead><tbody>';
 
     // Zeilen für jede Pflichtaufgabe
-    pflichtArray.forEach(assignment => {
+    assignments.forEach(assignment => {
         html += '<tr>';
-        const typeIcon = assignment.type === 'quiz' ? '🧭' : '📝';
         html += `<td style="min-width: 250px;">`;
-        html += `<a href="${assignment.url}" target="_blank">${typeIcon} ${assignment.title}</a>`;
-        html += `<br><small style="color: #666;">Typ: ${assignment.type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
+        html += `<a href="${assignment.url}" target="_blank">📝 ${assignment.title}</a>`;
+        html += `<br><small style="color: #666;">Kategorie: ${assignment.category_name || 'Unbekannt'}</small>`;
         html += `</td>`;
 
         // Status für jeden Benutzer
         allUsers.forEach(user => {
-            let status = { status: 'not_submitted', grade: '-' };
-
-            // Finde den Status in den Gruppendaten
-            groupsToShow.forEach(groupName => {
-                const tableData = dashboardData.structured_tables[groupName]?.pflichtaufgaben;
-                if (tableData) {
-                    const userIndex = tableData.headers.indexOf(user.name);
-                    if (userIndex > 0) {
-                        const row = tableData.rows.find(r => r.assignment_id === assignment.id);
-                        if (row && row.user_status[userIndex - 1]) {
-                            status = row.user_status[userIndex - 1];
-                        }
-                    }
-                }
-            });
+            // Finde den Status für diesen Benutzer in diesem Assignment
+            let status = null;
+            if (assignment.user_status) {
+                status = assignment.user_status.find(s => s.user_id === user.id);
+            }
 
             let cellContent = '';
             let cellClass = 'progress-cell';
             let bgColor = '';
 
-            if (status.status === 'submitted') {
+            if (status && status.grade && status.grade !== '-') {
+                // Grade vorhanden - zeige Grade-Wert
                 cellContent = `<strong>${status.grade}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (status && status.status === 'Zur Bewertung abgegeben') {
+                // Zur Bewertung abgegeben - zeige "bewertbar"
+                cellContent = '<span style="color: #ffc107;">bewertbar</span>';
+                bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
+                // Nicht eingereicht
                 cellContent = '<span style="color: #dc3545;">Nicht eingereicht</span>';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
@@ -1571,7 +1624,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ============= ZENTRALE LEISTUNGSNACHWEISE FUNKTIONEN =============
 
-// Zentrale Leistungsnachweise-Tabelle generieren (Zeilen = Aufgaben, Spalten = Personen)
+// Zentrale Leistungsnachweise-Tabelle generieren (Zeilen = Personen, Spalten = Aufgaben)
 function generateZentralTable() {
     const container = document.getElementById('zentralData');
     if (!container || !dashboardData || !dashboardData.structured_tables) return;
@@ -1589,55 +1642,91 @@ function generateZentralTable() {
         return;
     }
 
+    // Transponiere die Daten: Von (Aufgaben als Zeilen, Benutzer als Spalten) zu (Benutzer als Zeilen, Aufgaben als Spalten)
+    const assignments = tableData.rows;
+    const userNames = tableData.headers.slice(1); // Entferne "Aufgabe" Header
+
     let html = '<div style="overflow-x: auto;"><table id="zentralTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
 
-    // Header: Aufgabe + Benutzernamen
-    html += '<th style="min-width: 250px;">Zentrale Leistungsnachweis</th>';
+    // Header: Benutzer + Aufgabentitel
+    html += '<th style="min-width: 180px;">Benutzer</th>';
 
-    // Für jeden Benutzer eine Spalte mit Status/Note
-    for (let i = 1; i < tableData.headers.length; i++) {
-        const userName = tableData.headers[i];
-        html += `<th style="text-align: center; min-width: 120px;">${userName}</th>`;
-    }
+    // Für jede Aufgabe eine Spalte mit Status/Note
+    assignments.forEach(assignment => {
+        const typeIcon = assignment.assignment_type === 'quiz' ? '🧭' : '📝';
+        const fullTitle = `${typeIcon} ${assignment.assignment_title}`;
+        const shortTitle = assignment.assignment_title.length > 8 ?
+            assignment.assignment_title.substring(0, 8) + '...' :
+            assignment.assignment_title;
+
+        html += `<th class="zentral-assignment-header" title="${fullTitle}">`;
+        html += `<a href="${assignment.assignment_url}" target="_blank">${typeIcon} ${shortTitle}</a>`;
+        html += `<small>Typ: ${assignment.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
+        html += `</th>`;
+    });
     html += '</tr></thead>';
 
     html += '<tbody>';
 
-    // Zeilen für jede Zentrale Leistungsnachweis
-    tableData.rows.forEach(row => {
+    // Zeilen für jeden Benutzer
+    userNames.forEach((userName, userIndex) => {
         html += '<tr>';
 
-        // Aufgaben-Name (mit Link und Typ)
-        const typeIcon = row.assignment_type === 'quiz' ? '🧭' : '📝';
-        html += `<td style="min-width: 250px;">`;
-        html += `<a href="${row.assignment_url}" target="_blank">${typeIcon} ${row.assignment_title}</a>`;
-        html += `<br><small style="color: #666;">Typ: ${row.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
-        html += `</td>`;
+        // Benutzername
+        html += `<td style="min-width: 180px; font-weight: 500;">${userName}</td>`;
 
-        // Status für jeden Benutzer
-        row.user_status.forEach(status => {
+        // Status für jede Aufgabe
+        assignments.forEach((assignment, assignmentIndex) => {
+            // Debug: Prüfe Assignment-Struktur
+            console.log(`Assignment ${assignmentIndex} (${assignment.title}):`, {
+                hasUserStatus: !!assignment.user_status,
+                userStatusLength: assignment.user_status ? assignment.user_status.length : 'undefined',
+                userIndex: userIndex,
+                assignmentKeys: Object.keys(assignment)
+            });
+
+            // Prüfe ob user_status vorhanden ist
+            if (!assignment.user_status || assignment.user_status.length === 0) {
+                console.log(`❌ Assignment ${assignment.title}: Keine user_status Daten verfügbar`);
+                // Keine user_status Daten verfügbar
+                html += `<td style="background-color: #f8f9fa; text-align: center;">
+                    <span style="color: #6c757d;">Keine Daten</span>
+                </td>`;
+                return;
+            }
+
+            const status = assignment.user_status[userIndex];
+            console.log(`User ${userIndex} (${userName}) - Assignment ${assignment.title}:`, {
+                status: status,
+                statusValue: status ? status.status : 'undefined',
+                grade: status ? status.grade : 'undefined'
+            });
+
             let cellContent = '';
             let cellClass = '';
             let bgColor = '';
 
-            if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
-                if (status.status2 === 'Bewertet' && status.grade) {
-                    // Bewertet mit Note
-                    cellContent = `✓ ${status.grade}`;
-                    cellClass = 'status-graded';
-                    bgColor = '#d4edda'; // Grün
-                } else {
-                    // Abgegeben, aber noch nicht bewertet
-                    cellContent = '⏳ Eingereicht';
-                    cellClass = 'status-submitted';
-                    bgColor = '#fff3cd'; // Gelb
-                }
-            } else if (status.status === 'Nicht eingereicht' || !status.status) {
-                // Nicht eingereicht
-                cellContent = '❌ Offen';
+            if (status.status === 'Nicht eingereicht' || !status.status) {
+                console.log(`🔴 ${userName} - ${assignment.title}: NICHT EINGEREICHT (status: ${status ? status.status : 'undefined'})`);
+                // Nicht eingereicht - zeige "-"
+                // Nicht eingereicht - zeige "-"
+                cellContent = '❌ -';
                 cellClass = 'status-missing';
                 bgColor = '#f8d7da'; // Rot
+            } else if (status.grade && status.grade !== '-') {
+                console.log(`🟢 ${userName} - ${assignment.title}: BEWERTET (grade: ${status.grade})`);
+                // Grade vorhanden - zeige Grade-Wert
+                cellContent = `✓ ${status.grade}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
+                console.log(`🟡 ${userName} - ${assignment.title}: ABGEGEBEN ABER NICHT BEWERTET (status: ${status.status})`);
+                // Zur Bewertung abgegeben - zeige "abgegeben"
+                // Zur Bewertung abgegeben - zeige "abgegeben"
+                cellContent = '⏳ abgegeben';
+                cellClass = 'status-submitted';
+                bgColor = '#fff3cd'; // Gelb
             } else {
                 // Andere Status
                 cellContent = status.status || 'Unbekannt';
@@ -1665,9 +1754,9 @@ function generateAllGroupsZentralTable() {
 
     let html = '<div style="overflow-x: auto;"><table id="allGroupsZentralTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
-    html += '<th style="min-width: 250px;">Zentrale Leistungsnachweis</th>';
+    html += '<th style="min-width: 180px;">Benutzer</th>';
     html += '<th style="min-width: 120px;">Gruppe</th>';
-    html += '<th style="text-align: center; min-width: 120px;">Benutzer</th>';
+    html += '<th style="min-width: 250px;">Zentrale Leistungsnachweis</th>';
     html += '<th style="text-align: center; min-width: 120px;">Status</th>';
     html += '<th style="text-align: center; min-width: 100px;">Note</th>';
     html += '</tr></thead><tbody>';
@@ -1677,46 +1766,55 @@ function generateAllGroupsZentralTable() {
         const groupData = dashboardData.structured_tables[groupName];
         const tableData = groupData?.zentrale_leistungsnachweise;
 
-        if (!tableData) return;
+        if (!tableData || !tableData.rows) return;
 
-        tableData.rows.forEach(row => {
-            row.user_status.forEach((status, userIndex) => {
-                if (userIndex >= tableData.headers.length - 1) return;
+        // Ursprüngliche Struktur: Zeilen sind Aufgaben, transponiere zu Benutzer-Zeilen
+        const userNames = tableData.headers.slice(1); // Entferne "Aufgabe" Header
 
-                const userName = tableData.headers[userIndex + 1];
-                const typeIcon = row.assignment_type === 'quiz' ? '🧭' : '📝';
+        userNames.forEach((userName, userIndex) => {
+            tableData.rows.forEach(assignment => {
+                // Prüfe ob user_status vorhanden ist
+                if (!assignment.user_status || assignment.user_status.length === 0) {
+                    return; // Überspringe Assignment ohne Daten
+                }
+
+                const status = assignment.user_status[userIndex];
+                const typeIcon = assignment.assignment_type === 'quiz' ? '🧭' : '📝';
 
                 let statusText = '';
                 let gradeText = '';
                 let rowClass = '';
                 let bgColor = '';
 
-                if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
-                    if (status.status2 === 'Bewertet' && status.grade) {
-                        statusText = 'Bewertet';
-                        gradeText = status.grade;
-                        rowClass = 'status-graded';
-                        bgColor = '#d4edda';
-                    } else {
-                        statusText = 'Eingereicht';
-                        gradeText = '-';
-                        rowClass = 'status-submitted';
-                        bgColor = '#fff3cd';
-                    }
-                } else {
+                if (status.status === 'Nicht eingereicht' || !status.status) {
                     statusText = 'Offen';
                     gradeText = '-';
                     rowClass = 'status-missing';
                     bgColor = '#f8d7da';
+                } else if (status.grade && status.grade !== '-') {
+                    statusText = 'Bewertet';
+                    gradeText = status.grade;
+                    rowClass = 'status-graded';
+                    bgColor = '#d4edda';
+                } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
+                    statusText = 'abgegeben';
+                    gradeText = 'abgegeben';
+                    rowClass = 'status-submitted';
+                    bgColor = '#fff3cd';
+                } else {
+                    statusText = status.status || 'Unbekannt';
+                    gradeText = '-';
+                    rowClass = 'status-other';
+                    bgColor = '#e2e3e5';
                 }
 
                 html += `<tr class="${rowClass}" style="background-color: ${bgColor};">`;
-                html += `<td style="min-width: 250px;">`;
-                html += `<a href="${row.assignment_url}" target="_blank">${typeIcon} ${row.assignment_title}</a>`;
-                html += `<br><small style="color: #666;">Typ: ${row.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
-                html += `</td>`;
+                html += `<td style="font-weight: 500;">${userName}</td>`;
                 html += `<td>${groupName}</td>`;
-                html += `<td>${userName}</td>`;
+                html += `<td style="min-width: 250px;">`;
+                html += `<a href="${assignment.assignment_url}" target="_blank">${typeIcon} ${assignment.assignment_title}</a>`;
+                html += `<br><small style="color: #666;">Typ: ${assignment.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
+                html += `</td>`;
                 html += `<td style="text-align: center;">${statusText}</td>`;
                 html += `<td style="text-align: center;">${gradeText}</td>`;
                 html += '</tr>';
