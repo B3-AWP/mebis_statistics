@@ -1,0 +1,2 @@
+- create a venv for python and add the folder to .gitignore
+- create a virtual environment venv for python and add the folder to .gitignore

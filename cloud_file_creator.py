@@ -156,10 +156,13 @@ def create_file_in_cloud(driver, filename, content):
         print("Content-Bereich geklickt")
 
         # Clear any existing content and enter new content
-        content_area.clear()
+        from selenium.webdriver.common.keys import Keys
+        content_area.send_keys(Keys.CONTROL + "a")  # Select all content
         if content:
             content_area.send_keys(content)
             print("Inhalt eingegeben")
+        else:
+            content_area.send_keys("")  # Clear if no content
 
         # Save the file
         save_button = WebDriverWait(driver, 10).until(

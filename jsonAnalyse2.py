@@ -3,6 +3,7 @@ import json
 import glob
 import webbrowser
 import configparser
+import math
 
 def find_latest_file(directory):
     files = glob.glob(os.path.join(directory, 'output_*.json'))
@@ -101,10 +102,35 @@ def select_categories(categories):
 def get_assignment_details(assignments_by_category):
     assignment_details = {}
     for category in assignments_by_category:
-        for assignment in category['assignments']:
+        # Assignments hinzufügen
+        for assignment in category.get('assignments', []):
             assignment_details[assignment['id']] = {
                 'title': assignment['title'],
                 'url': assignment['url'],
+                'category_name': category['category_name']
+            }
+
+        # Quizzes hinzufügen
+        for quiz in category.get('quizzes', []):
+            assignment_details[quiz['id']] = {
+                'title': quiz['title'],
+                'url': quiz['url'],
+                'category_name': category['category_name']
+            }
+
+        # Checklists hinzufügen
+        for checklist in category.get('checklists', []):
+            assignment_details[checklist['id']] = {
+                'title': checklist['title'],
+                'url': checklist['url'],
+                'category_name': category['category_name']
+            }
+
+        # Feedbacks hinzufügen
+        for feedback in category.get('feedbacks', []):
+            assignment_details[feedback['id']] = {
+                'title': feedback['title'],
+                'url': feedback['url'],
                 'category_name': category['category_name']
             }
     return assignment_details
@@ -128,29 +154,105 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
         }
     }
 
-    assignments = user['activities'].get('assignments', [])
-    category_ids = [c['id'] for c in categories]
-    category_assignments = [a for a in assignments if a['category_id'] in category_ids]
-    total_assignments = len(category_assignments)
-    reviewed_assignments = [a for a in category_assignments if a['status']['status2'] == "Bewertet"]
-    submitted_assignments = [a for a in category_assignments if a['status']['status'] == "Zur Bewertung abgegeben"]
-    reviewed_count = len(reviewed_assignments)
-    submitted_count = len(submitted_assignments)
+    # Nur Pflichtaufgaben berücksichtigen
+    pflicht_categories = [c for c in categories if c['category_name'] == "🎯Pflichtaufgaben"]
+
+    if not pflicht_categories:
+        # Fallback: wenn keine Pflichtaufgaben-Kategorie gefunden wird
+        print("WARNUNG: Keine Kategorie 'Pflichtaufgaben' gefunden!")
+        return user_data
+
+    pflicht_category = pflicht_categories[0]
+    pflicht_category_id = pflicht_category['id']
+
+    # DEBUG: Alle Pflichtaufgaben in der Kategorie ausgeben
+    print(f"\nDEBUG - Pflichtaufgaben in Kategorie (ID: {pflicht_category_id}):")
+    print(f"   Assignments: {len(pflicht_category.get('assignments', []))}")
+    for assignment in pflicht_category.get('assignments', []):
+        print(f"      - {assignment.get('title', 'Unbekannt')} (ID: {assignment.get('id')})")
+
+    print(f"   Quizzes: {len(pflicht_category.get('quizzes', []))}")
+    for quiz in pflicht_category.get('quizzes', []):
+        print(f"      - {quiz.get('title', 'Unbekannt')} (ID: {quiz.get('id')})")
+
+    print(f"   Checklists: {len(pflicht_category.get('checklists', []))}")
+    for checklist in pflicht_category.get('checklists', []):
+        print(f"      - {checklist.get('title', 'Unbekannt')} (ID: {checklist.get('id')})")
+
+    print(f"   Feedbacks: {len(pflicht_category.get('feedbacks', []))}")
+    for feedback in pflicht_category.get('feedbacks', []):
+        print(f"      - {feedback.get('title', 'Unbekannt')} (ID: {feedback.get('id')})")
+
+    # Alle Pflichtaufgaben (assignments, quizzes, etc.) des Benutzers
+    user_assignments = user['activities'].get('assignments', [])
+    user_quizzes = user['activities'].get('quizzes', [])
+    user_checklists = user['activities'].get('checklists', [])
+    user_feedbacks = user['activities'].get('feedbacks', [])
+
+    print(f"\nUser '{user['name']}' Aktivitaeten:")
+    print(f"   User Assignments: {len(user_assignments)}")
+    print(f"   User Quizzes: {len(user_quizzes)}")
+    print(f"   User Checklists: {len(user_checklists)}")
+    print(f"   User Feedbacks: {len(user_feedbacks)}")
+
+    # Alle Pflichtaufgaben des Benutzers sammeln
+    pflicht_assignments = [a for a in user_assignments if a.get('category_id') == pflicht_category_id]
+    pflicht_quizzes = [q for q in user_quizzes if q.get('category_id') == pflicht_category_id]
+    pflicht_checklists = [c for c in user_checklists if c.get('category_id') == pflicht_category_id]
+    pflicht_feedbacks = [f for f in user_feedbacks if f.get('category_id') == pflicht_category_id]
+
+    print(f"\nUser '{user['name']}' Pflichtaufgaben:")
+    print(f"   Pflicht Assignments: {len(pflicht_assignments)}")
+    print(f"   Pflicht Quizzes: {len(pflicht_quizzes)}")
+    print(f"   Pflicht Checklists: {len(pflicht_checklists)}")
+    print(f"   Pflicht Feedbacks: {len(pflicht_feedbacks)}")
+
+    # Alle Pflichtaktivitäten kombinieren
+    all_pflicht_activities = pflicht_assignments + pflicht_quizzes + pflicht_checklists + pflicht_feedbacks
+
+    print(f"   GESAMT bearbeitete Pflichtaufgaben: {len(all_pflicht_activities)}")
+    for activity in all_pflicht_activities:
+        print(f"      - {activity.get('id')} (Status: {activity.get('status', {}).get('status', 'Unbekannt')})")
+
+    # Gesamtanzahl aller Pflichtaufgaben in der Kategorie berechnen
+    total_pflicht_activities = (
+        len(pflicht_category.get('assignments', [])) +
+        len(pflicht_category.get('quizzes', [])) +
+        len(pflicht_category.get('checklists', [])) +
+        len(pflicht_category.get('feedbacks', []))
+    )
+
+    print(f"   GESAMT Pflichtaufgaben in Kategorie: {total_pflicht_activities}")
+    print("-" * 60)
+
+    # Bewertete und eingereichte Aktivitäten aus allen Pflichtaktivitäten
+    reviewed_activities = [a for a in all_pflicht_activities if a.get('status', {}).get('status2') == "Bewertet"]
+    submitted_activities = [a for a in all_pflicht_activities if a.get('status', {}).get('status') == "Zur Bewertung abgegeben"]
+
+    reviewed_count = len(reviewed_activities)
+    submitted_count = len(submitted_activities)
+
+    print(f"   Bewertete Pflichtaufgaben: {reviewed_count}")
+    print(f"   Eingereichte Pflichtaufgaben: {submitted_count}")
+
     user_data['assignments']['reviewed_count'] = reviewed_count
     user_data['assignments']['submitted_count'] = submitted_count
-    user_data['assignments']['grades'] = {c['category_name']: [] for c in categories}
+    user_data['assignments']['grades'] = {"Pflichtaufgaben": []}
 
-    for assignment in submitted_assignments:
-        assignment_id = assignment['id']
-        details = assignment_details.get(assignment_id, {})
-        category_name = details.get('category_name', 'Unbekannt')
+    for activity in submitted_activities:
+        activity_id = activity['id']
+        details = assignment_details.get(activity_id, {})
         title = details.get('title', 'N/A')
         url = details.get('url', '#')
-        grade = assignment['status'].get('grade', 'Nicht bewertet')
-        user_data['assignments']['grades'][category_name].append((title, grade, url))
+        grade = activity.get('status', {}).get('grade', 'Nicht bewertet')
+        user_data['assignments']['grades']["Pflichtaufgaben"].append((title, grade, url))
 
-    user_data['assignments']['percent_submitted'] = round((submitted_count / total_assignments) * 100, 2) if total_assignments > 0 else 0
-    user_data['assignments']['percent_submitted_timed'] = round((user_data['assignments']['percent_submitted'] / current_week) * total_weeks, 2) if total_assignments > 0 else 0
+    # Prozentberechnung basierend auf Gesamtanzahl der Pflichtaufgaben
+    user_data['assignments']['percent_submitted'] = round((submitted_count / total_pflicht_activities) * 100, 2) if total_pflicht_activities > 0 else 0
+
+    # Referenzwoche-basierte Berechnung: Erwartete Anzahl der Pflichtaufgaben für die aktuelle Woche (aufgerundet)
+    expected_pflicht_for_week = math.ceil((total_pflicht_activities / total_weeks) * current_week)
+    user_data['assignments']['percent_submitted_timed'] = round((submitted_count / expected_pflicht_for_week) * 100, 2) if expected_pflicht_for_week > 0 else 0
 
     checklists = user['activities'].get('checklists', [])
     total_checklists = len(checklists)
@@ -181,7 +283,7 @@ def calculate_group_averages(users_data, current_week, total_weeks):
         "assignments": {
             "total_reviewed": sum(user['assignments']['reviewed_count'] for user in users_data),
             "total_submitted": sum(user['assignments']['submitted_count'] for user in users_data),
-            "total_assignments": sum(len(user['assignments']['grades']) for user in users_data),
+            "total_assignments": 0,  # Wird unten korrekt berechnet
             "percent_submitted": 0,
             "percent_submitted_timed": 0
         },
@@ -196,8 +298,12 @@ def calculate_group_averages(users_data, current_week, total_weeks):
 
     total_users = len(users_data)
     if total_users > 0:
-        group_data['assignments']['percent_submitted'] = round((group_data['assignments']['total_submitted'] / group_data['assignments']['total_assignments']) * 100, 2) if group_data['assignments']['total_assignments'] > 0 else 0
-        group_data['assignments']['percent_submitted_timed'] = round((group_data['assignments']['percent_submitted'] / current_week) * total_weeks, 2) if group_data['assignments']['total_assignments'] > 0 else 0
+        # Durchschnittliche Prozentsätze der Benutzer verwenden
+        avg_percent_submitted = sum(user['assignments']['percent_submitted'] for user in users_data) / total_users
+        avg_percent_submitted_timed = sum(user['assignments']['percent_submitted_timed'] for user in users_data) / total_users
+
+        group_data['assignments']['percent_submitted'] = round(avg_percent_submitted, 2)
+        group_data['assignments']['percent_submitted_timed'] = round(avg_percent_submitted_timed, 2)
 
         all_required_progress = [user['checklists']['avg_required_progress'] for user in users_data]
         all_all_progress = [user['checklists']['avg_all_progress'] for user in users_data]
@@ -209,13 +315,26 @@ def calculate_group_averages(users_data, current_week, total_weeks):
     return group_data
 
 def generate_html_report(groups, categories, current_week, total_weeks, assignment_details, excluded_names):
-    total_assignments = sum(len(category['assignments']) for category in categories)
+    # Nur Pflichtaufgaben-Kategorie berücksichtigen
+    pflicht_categories = [c for c in categories if c['category_name'] == "🎯Pflichtaufgaben"]
+
+    if pflicht_categories:
+        pflicht_category = pflicht_categories[0]
+        total_pflicht_activities = (
+            len(pflicht_category.get('assignments', [])) +
+            len(pflicht_category.get('quizzes', [])) +
+            len(pflicht_category.get('checklists', [])) +
+            len(pflicht_category.get('feedbacks', []))
+        )
+    else:
+        total_pflicht_activities = 0
+
     total_checklists = sum(len(category['checklists']) for category in categories)
 
-    expected_assignments = (total_assignments / total_weeks) * current_week
+    expected_pflicht_activities = (total_pflicht_activities / total_weeks) * current_week
     expected_checklists = (total_checklists / total_weeks) * current_week
 
-    percent_assignments = round((expected_assignments / total_assignments) * 100, 2) if total_assignments > 0 else 0
+    percent_pflicht_activities = round((expected_pflicht_activities / total_pflicht_activities) * 100, 2) if total_pflicht_activities > 0 else 0
     percent_checklists = round((expected_checklists / total_checklists) * 100, 2) if total_checklists > 0 else 0
 
     html = """
@@ -233,9 +352,10 @@ def generate_html_report(groups, categories, current_week, total_weeks, assignme
     </head>
     <body>
     """
-    html += f"<h1>Auswertung für Referenzwoche {current_week} (von {total_weeks})</h1>"
-    html += f"<p>Checklisten ({int(expected_checklists)} von {total_checklists} --> {percent_checklists:.2f}% des Schuljahres abgeschlossen)</p>"
-    html += f"<p>Assignments ({int(expected_assignments)} von {total_assignments} --> {percent_assignments:.2f}% des Schuljahres abgeschlossen)</p>"
+    html += f"<h1>Auswertung für Referenzwoche {current_week} (von {total_weeks}) - Nur Pflichtaufgaben</h1>"
+    html += f"<p>Checklisten ({math.ceil(expected_checklists)} von {total_checklists} --> {percent_checklists:.2f}% des Schuljahres abgeschlossen)</p>"
+    html += f"<p>Pflichtaufgaben ({math.ceil(expected_pflicht_activities)} von {total_pflicht_activities} --> {percent_pflicht_activities:.2f}% des Schuljahres abgeschlossen)</p>"
+    html += f"<p><strong>Hinweis:</strong> Diese Auswertung berücksichtigt nur Aktivitäten aus der Kategorie 'Pflichtaufgaben'</p>"
 
     for group in groups:
         users_data = [calculate_user_progress(user, assignment_details, categories, current_week, total_weeks)
@@ -243,8 +363,8 @@ def generate_html_report(groups, categories, current_week, total_weeks, assignme
         group_data = calculate_group_averages(users_data, current_week, total_weeks)
 
         html += f"<h2>Gruppe: {group['name']}</h2>"
-        html += "<table><tr><th>Benutzername</th><th>Eingereichte Aufgaben</th><th>Bewertete Aufgaben</th><th>Bewertungen und Noten</th><th>Prozentsatz Eingereicht</th><th>Prozentsatz Eingereicht (Zeitbasiert)</th>"
-        html += "<th>Aufgaben Soll (Aktuelle Woche)</th><th>Aufgaben Soll (Gesamtzeitraum)</th><th>Checklisten 100% Erfüllt</th><th>Checkliste Pflicht (%)</th><th>Checkliste Gesamt (%)</th>"
+        html += "<table><tr><th>Benutzername</th><th>Eingereichte Pflichtaufgaben</th><th>Bewertete Pflichtaufgaben</th><th>Bewertungen und Noten</th><th>Prozentsatz Eingereicht</th><th>Prozentsatz Eingereicht (Referenzwoche)</th>"
+        html += "<th>Pflichtaufgaben Soll (Aktuelle Woche)</th><th>Pflichtaufgaben Soll (Gesamtzeitraum)</th><th>Checklisten 100% Erfüllt</th><th>Checkliste Pflicht (%)</th><th>Checkliste Gesamt (%)</th>"
         html += "<th>Checkliste Pflicht (%) (Aktuelle Woche)</th><th>Checkliste Gesamt (%) (Aktuelle Woche)</th><th>Checklisten Soll (Aktuelle Woche)</th><th>Checklisten Soll (Gesamtzeitraum)</th></tr>"
 
         for user_data in users_data:
@@ -264,8 +384,8 @@ def generate_html_report(groups, categories, current_week, total_weeks, assignme
 
             html += f"<td class='numeric'>{user_data['assignments']['percent_submitted']:.2f}%</td>"
             html += f"<td class='numeric'>{user_data['assignments']['percent_submitted_timed']:.2f}%</td>"
-            html += f"<td class='numeric'>{int(expected_assignments)}</td>"
-            html += f"<td class='numeric'>{total_assignments}</td>"
+            html += f"<td class='numeric'>{math.ceil(expected_pflicht_activities)}</td>"
+            html += f"<td class='numeric'>{total_pflicht_activities}</td>"
             html += f"<td class='numeric'>{user_data['checklists']['required_100_count']}</td>"
             html += f"<td class='numeric'>{user_data['checklists']['avg_required_progress']:.2f}%</td>"
             html += f"<td class='numeric'>{user_data['checklists']['avg_all_progress']:.2f}%</td>"
@@ -303,6 +423,7 @@ def main():
     filename = config.get('General', 'Filename', fallback='report.html')
     total_weeks = config.getint('General', 'TotalWeeks', fallback=10)
     show_command_dialog = config.getboolean('General', 'ShowCommandDialog', fallback=True)
+    default_current_week = config.getint('General', 'DefaultCurrentWeek', fallback=1)
 
     latest_file = find_latest_file(directory)
     data = load_json_data(latest_file)
@@ -318,7 +439,7 @@ def main():
     excluded_names_file = 'exclude_names.txt'
     excluded_names = load_excluded_names(excluded_names_file)
 
-    current_week = int(input("Aktuelle Unterrichtswoche: ")) if show_command_dialog else total_weeks
+    current_week = int(input("Aktuelle Unterrichtswoche: ")) if show_command_dialog else default_current_week
 
     html_report = generate_html_report(selected_groups, selected_categories, current_week, total_weeks, assignment_details, excluded_names)
 

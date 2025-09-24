@@ -441,10 +441,13 @@ def create_file_in_cloud(driver, filename, content):
         print("Content-Bereich geklickt")
 
         # Clear any existing content and enter new content (equivalent to Fill content on .cm-content)
-        content_area.clear()
+        from selenium.webdriver.common.keys import Keys
+        content_area.send_keys(Keys.CONTROL + "a")  # Select all content
         if content:
             content_area.send_keys(content)
             print("Inhalt eingegeben")
+        else:
+            content_area.send_keys("")  # Clear if no content
 
         # Save the file (equivalent to Click on #app-save-action svg)
         save_button = WebDriverWait(driver, 10).until(
@@ -481,15 +484,16 @@ def upload_to_owncloud_browser(data, filename, username, password):
         file_size = len(json_content.encode('utf-8'))
         print(f"JSON-Datengroesse: {file_size} bytes")
 
-        # Create browser
+        # Create browser (headless)
         options = Options()
+        options.add_argument('--headless')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-extensions')
         options.add_argument('--disable-plugins')
         options.add_argument('--window-size=1200,800')
 
-        print("Starte Chrome Browser...")
+        print("Starte Chrome Browser (headless)...")
         driver = webdriver.Chrome(options=options)
 
         try:
