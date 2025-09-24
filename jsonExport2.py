@@ -12,6 +12,8 @@ import time
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import requests
+import io
 
 # TensorFlow-Logstufe auf ERROR setzen
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -393,6 +395,156 @@ def cleanup_thread_drivers():
     except:
         pass
 
+def create_file_in_cloud(driver, filename, content):
+    """Create a new file in the cloud using the web interface (based on Puppeteer script)"""
+    print(f"Erstelle Datei in Cloud: {filename}")
+
+    try:
+        # Click on new file menu button (equivalent to #new-file-menu-btn svg)
+        new_file_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "#new-file-menu-btn svg"))
+        )
+        new_file_button.click()
+        print("New-File-Menu geklickt")
+        time.sleep(1)
+
+        # Click on "Text-Datei" option (equivalent to .new-file-btn-txt > .create-list-file-item-text)
+        text_file_option = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, ".new-file-btn-txt > .create-list-file-item-text"))
+        )
+        text_file_option.click()
+        print("Text-Datei Option geklickt")
+        time.sleep(1)
+
+        # Wait for filename input and clear existing text
+        filename_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "#oc-textinput-8"))
+        )
+
+        # Clear existing text and enter our filename
+        filename_input.clear()
+        filename_input.send_keys(filename)
+        print(f"Dateiname eingegeben: {filename}")
+
+        # Press Enter to create the file (equivalent to Press Enter on input and await navigation)
+        filename_input.send_keys("\n")
+        print("Enter gedrückt, warte auf Navigation...")
+
+        # Wait for the file editor to load
+        time.sleep(3)
+
+        # Click in the content area (equivalent to Click on <div> .cm-content)
+        content_area = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, ".cm-content"))
+        )
+        content_area.click()
+        print("Content-Bereich geklickt")
+
+        # Clear any existing content and enter new content (equivalent to Fill content on .cm-content)
+        content_area.clear()
+        if content:
+            content_area.send_keys(content)
+            print("Inhalt eingegeben")
+
+        # Save the file (equivalent to Click on #app-save-action svg)
+        save_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "#app-save-action svg"))
+        )
+        save_button.click()
+        print("Save-Button geklickt")
+        time.sleep(2)
+
+        # Close the file editor (equivalent to Click on #app-top-bar-close svg and await navigation)
+        close_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "#app-top-bar-close svg"))
+        )
+        close_button.click()
+        print("Close-Button geklickt")
+        time.sleep(3)
+
+        print(f"Datei '{filename}' erfolgreich in Cloud erstellt!")
+        return True
+
+    except Exception as e:
+        print(f"Fehler beim Erstellen der Datei in der Cloud: {e}")
+        return False
+
+def upload_to_owncloud_browser(data, filename, username, password):
+    """Upload JSON data to OwnCloud by creating a file directly in the cloud interface"""
+    try:
+        print("=" * 60)
+        print("Starte Cloud-Datei-Erstellung...")
+        print("=" * 60)
+
+        # Convert data to JSON string
+        json_content = json.dumps(data, ensure_ascii=False, indent=2)
+        file_size = len(json_content.encode('utf-8'))
+        print(f"JSON-Datengroesse: {file_size} bytes")
+
+        # Create browser
+        options = Options()
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-extensions')
+        options.add_argument('--disable-plugins')
+        options.add_argument('--window-size=1200,800')
+
+        print("Starte Chrome Browser...")
+        driver = webdriver.Chrome(options=options)
+
+        try:
+            # Login to OwnCloud
+            print(f"Anmeldung mit Benutzer: {username}")
+            driver.get("https://6072.drive.bycs.de/")
+            time.sleep(3)
+
+            # Find and fill login form
+            username_field = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "#input-username"))
+            )
+            username_field.send_keys(username)
+
+            password_field = driver.find_element(By.CSS_SELECTOR, "input[name='password']")
+            password_field.send_keys(password)
+
+            login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+            login_button.click()
+
+            print("Login-Daten gesendet, warte auf Anmeldung...")
+            time.sleep(5)
+
+            # Navigate to upload folder using the full URL from Puppeteer script
+            target_url = "https://6072.drive.bycs.de/files/spaces/project/aeup12/Segel_Export?fileId=e4a0c375-2fb6-4fc6-af92-ac4b95c18ce1%24596fbe56-16a5-41fd-a1a0-96b7e392435e%21f4797d5b-9177-43b8-be8e-0cba1bb25ead&sort-by=name&sort-dir=asc&items-per-page=100&files-spaces-generic-view-mode=resource-table&tiles-size=2"
+            print(f"Navigiere zu Ziel-URL...")
+            driver.get(target_url)
+
+            time.sleep(5)
+
+            # Create the file directly in the cloud interface
+            creation_success = create_file_in_cloud(driver, filename, json_content)
+
+            if creation_success:
+                print(f"✅ Datei '{filename}' erfolgreich in der Cloud erstellt!")
+                return True
+            else:
+                print(f"❌ Datei-Erstellung in der Cloud fehlgeschlagen!")
+                return False
+
+        finally:
+            try:
+                # Keep browser open briefly to see the result
+                time.sleep(2)
+                driver.quit()
+                print("Browser geschlossen")
+            except:
+                pass
+
+    except Exception as e:
+        print(f"Unerwarteter Fehler beim Cloud-Upload: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 
 def main():
     # Startzeit des Skripts
@@ -553,19 +705,30 @@ def main():
                         # "category_name": checklist.get("category_name")
                     })
 
-    print("Erstelle JSON Datei...")
-    json_start_time = time.time()
+    print("Lade Daten zu OwnCloud hoch...")
+    upload_start_time = time.time()
 
     # Zeitstempel hinzufügen
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_filename = f'./export/output_{timestamp}.json'
+    json_filename = f'output_{timestamp}.json'
 
-    # Optimierte JSON-Serialisierung ohne Einrückung für bessere Performance
-    with open(json_filename, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+    # Upload to OwnCloud using browser automation
+    upload_success = upload_to_owncloud_browser(data, json_filename, username, password)
 
-    json_duration = time.time() - json_start_time
-    print(f"✅ JSON-Datei erstellt in {json_duration:.1f}s: {json_filename}")
+    upload_duration = time.time() - upload_start_time
+    if upload_success:
+        print(f"✅ Daten erfolgreich zu OwnCloud hochgeladen in {upload_duration:.1f}s: {json_filename}")
+    else:
+        # Fallback: Save locally if upload fails
+        print("⚠️ OwnCloud-Upload fehlgeschlagen, speichere lokal als Fallback...")
+        local_filename = f'./export/output_{timestamp}.json'
+        try:
+            os.makedirs('./export', exist_ok=True)
+            with open(local_filename, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+            print(f"💾 Lokale Fallback-Datei erstellt: {local_filename}")
+        except Exception as e:
+            print(f"❌ Auch lokale Speicherung fehlgeschlagen: {e}")
 
     # Cleanup: Schließe alle WebDriver-Instanzen
     driver.quit()
@@ -592,7 +755,10 @@ def main():
     print(f"👥 Gruppen: {total_groups} mit insgesamt {total_users} Benutzern")
     if total_activities > 0:
         print(f"⚡ Durchschnitt: {(duration / total_activities):.1f}s pro Aktivität")
-    print(f"💾 Ausgabedatei: {json_filename}")
+    if upload_success:
+        print(f"☁️ OwnCloud-Datei: {json_filename}")
+    else:
+        print(f"💾 Lokale Fallback-Datei: ./export/{json_filename}")
     print(f"🏁 Endzeit: {datetime.now().strftime('%H:%M:%S')}")
     print("="*60)
 
