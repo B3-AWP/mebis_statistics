@@ -121,6 +121,9 @@ async function loadData() {
         // Gruppen-Dropdown füllen
         populateGroupSelectors();
 
+        // Kategorie-Filter füllen
+        populateCategoryFilter();
+
         // Dashboard aktualisieren
         updateDashboard();
 
@@ -175,6 +178,68 @@ function populateGroupSelectors() {
                 option.textContent = groupName;
                 selector.appendChild(option);
             });
+        }
+    });
+}
+
+// Kategorie-Filter mit verfügbaren Kategorien füllen
+function populateCategoryFilter() {
+    const categoryFilter = document.getElementById('pflichtCategoryFilter');
+    if (!categoryFilter || !dashboardData || !dashboardData.activities_by_category) return;
+
+    // Sammle alle verfügbaren Kategorien (sowohl assignments als auch quizzes)
+    const categories = [];
+    dashboardData.activities_by_category.forEach(category => {
+        if (category.category_name) {
+            const assignmentCount = category.assignments ? category.assignments.length : 0;
+            const quizCount = category.quizzes ? category.quizzes.length : 0;
+            const totalCount = assignmentCount + quizCount;
+
+            if (totalCount > 0) {
+                categories.push({
+                    name: category.category_name,
+                    count: totalCount,
+                    assignmentCount: assignmentCount,
+                    quizCount: quizCount
+                });
+            }
+        }
+    });
+
+    // Finde Pflichtaufgaben-Kategorie
+    const pflichtaufgabenCategory = categories.find(cat =>
+        cat.name.includes('Pflichtaufgaben') || cat.name.includes('🎯')
+    );
+
+    // Leere aktuelle Optionen (außer den Standard-Optionen)
+    categoryFilter.innerHTML = '';
+
+    // Standard-Optionen hinzufügen
+    if (pflichtaufgabenCategory) {
+        const pflichtOption = document.createElement('option');
+        pflichtOption.value = 'pflichtaufgaben';
+        // Zeige Gesamtzahl mit Aufschlüsselung
+        const detailText = pflichtaufgabenCategory.assignmentCount > 0 && pflichtaufgabenCategory.quizCount > 0
+            ? ` (${pflichtaufgabenCategory.assignmentCount} Aufgaben + ${pflichtaufgabenCategory.quizCount} Quizzes)`
+            : ` (${pflichtaufgabenCategory.count})`;
+        pflichtOption.textContent = `Nur Pflichtaufgaben-Kategorie${detailText}`;
+        pflichtOption.selected = true; // Standardmäßig ausgewählt
+        categoryFilter.appendChild(pflichtOption);
+    }
+
+    const allOption = document.createElement('option');
+    allOption.value = 'all';
+    const totalAssignments = categories.reduce((sum, cat) => sum + cat.count, 0);
+    allOption.textContent = `Alle Kategorien (${totalAssignments})`;
+    categoryFilter.appendChild(allOption);
+
+    // Einzelne Kategorien als Optionen hinzufügen
+    categories.forEach(category => {
+        if (!category.name.includes('Pflichtaufgaben') && !category.name.includes('🎯')) {
+            const option = document.createElement('option');
+            option.value = category.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            option.textContent = `${category.name} (${category.count})`;
+            categoryFilter.appendChild(option);
         }
     });
 }
@@ -955,9 +1020,210 @@ function loadZentralTab() {
 // Pflichtaufgaben-Tabelle generieren (Zeilen = Aufgaben, Spalten = Personen)
 function generatePflichtTable() {
     const container = document.getElementById('pflichtData');
+    if (!container || !dashboardData) return;
+
+    // Verwende immer die neue activities_by_category Struktur
+    if (dashboardData.activities_by_category) {
+        generatePflichtTableFromActivities();
+    } else if (dashboardData.structured_tables) {
+        // Fallback auf alte Struktur
+        generatePflichtTableFromStructuredTables();
+    } else {
+        container.innerHTML = '<p>Keine Daten verfügbar.</p>';
+    }
+}
+
+function generatePflichtTableFromActivities() {
+    const container = document.getElementById('pflichtData');
+
+    // Bei "Alle Gruppen" verwende die spezielle Funktion
+    if (currentGroup === 'all') {
+        generateAllGroupsPflichtTable();
+        return;
+    }
+
+    // Für einzelne Gruppen: Filtere Daten nach Gruppe
+    console.log('DEBUG: Verfügbare Gruppen:', Object.keys(dashboardData.groups || {}));
+    console.log('DEBUG: Gewählte Gruppe:', currentGroup);
+
+    if (!dashboardData.groups || !dashboardData.groups[currentGroup]) {
+        container.innerHTML = `<p>Gruppe "${currentGroup}" nicht gefunden.</p>
+                               <p>Verfügbare Gruppen: ${Object.keys(dashboardData.groups || {}).join(', ')}</p>`;
+        return;
+    }
+
+    // Kategorie-Filter anwenden (gleiche Logik wie bei generateAllGroupsPflichtTable)
+    const categoryFilter = document.getElementById('pflichtCategoryFilter')?.value || 'pflichtaufgaben';
+    let categoriesToShow;
+
+    if (categoryFilter === 'pflichtaufgaben') {
+        categoriesToShow = dashboardData.activities_by_category.filter(category =>
+            category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
+        );
+    } else if (categoryFilter === 'all') {
+        categoriesToShow = dashboardData.activities_by_category;
+    } else {
+        const selectedCategoryName = dashboardData.activities_by_category.find(category =>
+            category.category_name && category.category_name.toLowerCase().replace(/[^a-z0-9]/g, '') === categoryFilter
+        )?.category_name;
+
+        if (selectedCategoryName) {
+            categoriesToShow = dashboardData.activities_by_category.filter(category =>
+                category.category_name === selectedCategoryName
+            );
+        } else {
+            categoriesToShow = dashboardData.activities_by_category.filter(category =>
+                category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
+            );
+        }
+    }
+
+    // Sammle sowohl assignments als auch quizzes aus den gewählten Kategorien
+    let allActivities = [];
+    categoriesToShow.forEach(category => {
+        // Assignments hinzufügen
+        if (category.assignments && category.assignments.length > 0) {
+            category.assignments.forEach(assignment => {
+                allActivities.push({
+                    ...assignment,
+                    activity_type: 'assignment'
+                });
+            });
+        }
+        // Quizzes hinzufügen
+        if (category.quizzes && category.quizzes.length > 0) {
+            category.quizzes.forEach(quiz => {
+                allActivities.push({
+                    ...quiz,
+                    activity_type: 'quiz'
+                });
+            });
+        }
+    });
+
+    const assignments = allActivities;
+
+    if (assignments.length === 0) {
+        container.innerHTML = '<p>Keine Aktivitäten für die gewählte Kategorie verfügbar.</p>';
+        return;
+    }
+
+    // Benutzer der aktuellen Gruppe sammeln
+    const groupUsers = dashboardData.groups[currentGroup].users;
+    console.log('DEBUG: Erste 3 Benutzer der Gruppe:', groupUsers.slice(0, 3));
+
+    // Prüfe verschiedene mögliche Benutzer-Name-Felder
+    const groupUserNames = new Set();
+    groupUsers.forEach(user => {
+        // Versuche verschiedene mögliche Felder für den Namen
+        const userName = user.user_name || user.name || user.username || user.display_name;
+        if (userName) {
+            groupUserNames.add(userName);
+        }
+        console.log('DEBUG: User object:', user, 'extracted name:', userName);
+    });
+
+    console.log('DEBUG: Gruppe', currentGroup, 'hat', groupUsers.length, 'Benutzer, extrahierte Namen:', Array.from(groupUserNames));
+
+    // Debug: Prüfe Struktur der Activities
+    console.log('DEBUG: Assignments für Gruppe', currentGroup, ':', assignments.length);
+    assignments.forEach((assignment, index) => {
+        if (index < 3) { // Nur erste 3 zur Debug-Ausgabe
+            console.log(`Assignment ${index}:`, {
+                title: assignment.title,
+                activity_type: assignment.activity_type,
+                hasUserStatus: !!assignment.user_status,
+                userStatusLength: assignment.user_status ? assignment.user_status.length : 0,
+                firstUserStatus: assignment.user_status && assignment.user_status.length > 0 ? assignment.user_status[0] : null,
+                groupUserNames: Array.from(groupUserNames)
+            });
+        }
+    });
+
+    // Assignments filtern um nur Benutzer aus der aktuellen Gruppe zu zeigen
+    const filteredAssignments = assignments.map(assignment => ({
+        ...assignment,
+        user_status: assignment.user_status ? assignment.user_status.filter(userStatus =>
+            groupUserNames.has(userStatus.user_name)
+        ) : []
+    })).filter(assignment => assignment.user_status.length > 0);
+
+    console.log('DEBUG: Nach Filterung:', filteredAssignments.length, 'Aktivitäten übrig');
+
+    if (filteredAssignments.length === 0) {
+        container.innerHTML = `<p>Keine Daten für die ausgewählte Gruppe "${currentGroup}" verfügbar.</p>
+                               <p>Debug: ${assignments.length} Aktivitäten gefunden, aber keine für Benutzer dieser Gruppe.</p>`;
+        return;
+    }
+
+    let html = '<div style="overflow-x: auto;"><table id="pflichtTable" class="info-table dashboard-table">';
+    html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
+
+    // Header für alle Benutzer der Gruppe
+    groupUsers.forEach(user => {
+        const userName = user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
+        html += `<th style="text-align: center; min-width: 120px;">${userName}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    // Zeilen für jede Pflichtaufgabe/Quiz
+    filteredAssignments.forEach(assignment => {
+        html += '<tr>';
+        html += `<td style="min-width: 250px;">`;
+        const activityIcon = assignment.activity_type === 'quiz' ? '🧭' : '📝';
+        const activityType = assignment.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe';
+        html += `<a href="${assignment.url}" target="_blank">${activityIcon} ${assignment.title}</a>`;
+        html += `<br><small style="color: #666;">Typ: ${activityType} | Kategorie: ${assignment.category_name || 'Unbekannt'}</small>`;
+        html += `</td>`;
+
+        // Status für jeden Benutzer der Gruppe
+        groupUsers.forEach(user => {
+            let status = null;
+            if (assignment.user_status) {
+                const userId = user.user_id || user.id;
+                const userName = user.user_name || user.name || user.username || user.display_name;
+
+                // Versuche Matching sowohl über user_id als auch user_name
+                status = assignment.user_status.find(s =>
+                    (s.user_id && userId && s.user_id === userId) ||
+                    (s.user_name && userName && s.user_name === userName)
+                );
+            }
+
+            let cellContent = '';
+            let cellClass = 'progress-cell';
+            let bgColor = '';
+
+            if (status && status.grade && status.grade !== '-') {
+                cellContent = `<strong>${status.grade}</strong>`;
+                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (status && status.status === 'Zur Bewertung abgegeben') {
+                cellContent = '<span style="color: #ffc107;">bewertbar</span>';
+                bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
+            } else {
+                cellContent = '<span style="color: #dc3545;">Nicht eingereicht</span>';
+                bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
+            }
+
+            html += `<td class="${cellClass}" style="${bgColor} text-align: center;">${cellContent}</td>`;
+        });
+
+        html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+
+    container.innerHTML = html;
+
+    // Tabelle sortierbar machen
+    makeTableSortable('pflichtTable');
+}
+
+// Fallback-Implementierung für alte structured_tables Datenstruktur
+function generatePflichtTableFromStructuredTables() {
+    const container = document.getElementById('pflichtData');
     if (!container || !dashboardData || !dashboardData.structured_tables) return;
 
-    // Bei "Alle Gruppen" alle Pflichtaufgaben von allen Benutzern anzeigen
     if (currentGroup === 'all') {
         generateAllGroupsPflichtTable();
         return;
@@ -971,51 +1237,35 @@ function generatePflichtTable() {
     }
 
     let html = '<div style="overflow-x: auto;"><table id="pflichtTable" class="info-table dashboard-table">';
-    html += '<thead><tr>';
+    html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
 
-    // Header: Aufgabe + Benutzernamen
-    html += '<th style="min-width: 250px;">Pflichtaufgabe</th>';
-
-    // Für jeden Benutzer eine Spalte mit Status/Note
     for (let i = 1; i < tableData.headers.length; i++) {
         const userName = tableData.headers[i];
         html += `<th style="text-align: center; min-width: 120px;">${userName}</th>`;
     }
-    html += '</tr></thead>';
+    html += '</tr></thead><tbody>';
 
-    html += '<tbody>';
-
-    // Zeilen für jede Pflichtaufgabe
     tableData.rows.forEach(row => {
         html += '<tr>';
-
-        // Aufgaben-Name (mit Link und Typ)
         const typeIcon = row.assignment_type === 'quiz' ? '🧭' : '📝';
         html += `<td style="min-width: 250px;">`;
         html += `<a href="${row.assignment_url}" target="_blank">${typeIcon} ${row.assignment_title}</a>`;
         html += `<br><small style="color: #666;">Typ: ${row.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
         html += `</td>`;
 
-        // Status für jeden Benutzer
         row.user_status.forEach(status => {
             let cellContent = '';
-            let cellClass = '';
+            let cellClass = 'progress-cell';
             let bgColor = '';
 
             if (status.grade && status.grade != '-') {
-                // Grade vorhanden - zeige Grade-Wert
                 cellContent = `<strong>${status.grade}</strong>`;
-                cellClass = 'progress-cell';
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status.status === 'Zur Bewertung abgegeben') {
-                // Zur Bewertung abgegeben - zeige "bewertbar"
                 cellContent = '<span style="color: #ffc107;">bewertbar</span>';
-                cellClass = 'progress-cell';
                 bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
-                // Nicht eingereicht
                 cellContent = '<span style="color: #dc3545;">Nicht eingereicht</span>';
-                cellClass = 'progress-cell';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
@@ -1026,36 +1276,8 @@ function generatePflichtTable() {
     });
 
     html += '</tbody></table></div>';
-
-    // Zusätzliche Statistiken unter der Tabelle
-    html += '<div class="stats-summary">';
-    html += '<h5>📊 Zusammenfassung</h5>';
-
-    // Berechne Statistiken pro Person
-    const userStats = calculateUserPflichtStats(tableData);
-    html += '<table class="info-table dashboard-table" style="max-width: 600px;">';
-    html += '<thead><tr><th>Person</th><th>Eingereicht</th><th>Gesamt</th><th>Quote</th><th>Ø Note</th></tr></thead>';
-    html += '<tbody>';
-
-    userStats.forEach(stat => {
-        const percentage = stat.total > 0 ? Math.round((stat.submitted / stat.total) * 100) : 0;
-        const gradeText = stat.avgGrade ? stat.avgGrade.toFixed(2) : '-';
-
-        html += '<tr>';
-        html += `<td>${stat.name}</td>`;
-        html += `<td>${stat.submitted}</td>`;
-        html += `<td>${stat.total}</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${percentage}%; --progress-color: #007bff;">${percentage}%</td>`;
-        html += `<td>${gradeText}</td>`;
-        html += '</tr>';
-    });
-
-    html += '</tbody></table>';
-    html += '</div>';
-
     container.innerHTML = html;
 
-    // Tabelle sortierbar machen
     makeTableSortable('pflichtTable');
 }
 
@@ -1214,10 +1436,60 @@ function generateAllGroupsPflichtTable() {
     const container = document.getElementById('pflichtData');
     if (!container || !dashboardData || !dashboardData.activities_by_category) return;
 
-    // Nutze die neue activities_by_category Datenstruktur
-    const assignments = dashboardData.activities_by_category
-        .filter(category => category.assignments && category.assignments.length > 0)
-        .flatMap(category => category.assignments);
+    // Kategorie-Filter anwenden
+    const categoryFilter = document.getElementById('pflichtCategoryFilter')?.value || 'pflichtaufgaben';
+    let categoriesToShow;
+
+    if (categoryFilter === 'pflichtaufgaben') {
+        // Nur Pflichtaufgaben-Kategorie
+        categoriesToShow = dashboardData.activities_by_category.filter(category =>
+            category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
+        );
+    } else if (categoryFilter === 'all') {
+        // Alle Kategorien
+        categoriesToShow = dashboardData.activities_by_category;
+    } else {
+        // Spezifische Kategorie - finde sie anhand des Wertes
+        const selectedCategoryName = dashboardData.activities_by_category.find(category =>
+            category.category_name && category.category_name.toLowerCase().replace(/[^a-z0-9]/g, '') === categoryFilter
+        )?.category_name;
+
+        if (selectedCategoryName) {
+            categoriesToShow = dashboardData.activities_by_category.filter(category =>
+                category.category_name === selectedCategoryName
+            );
+        } else {
+            // Fallback zu Pflichtaufgaben
+            categoriesToShow = dashboardData.activities_by_category.filter(category =>
+                category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
+            );
+        }
+    }
+
+    // Nutze die gefilterten Kategorien - sowohl assignments als auch quizzes
+    let allActivities = [];
+    categoriesToShow.forEach(category => {
+        // Assignments hinzufügen
+        if (category.assignments && category.assignments.length > 0) {
+            category.assignments.forEach(assignment => {
+                allActivities.push({
+                    ...assignment,
+                    activity_type: 'assignment'
+                });
+            });
+        }
+        // Quizzes hinzufügen
+        if (category.quizzes && category.quizzes.length > 0) {
+            category.quizzes.forEach(quiz => {
+                allActivities.push({
+                    ...quiz,
+                    activity_type: 'quiz'
+                });
+            });
+        }
+    });
+
+    const assignments = allActivities;
 
     if (assignments.length === 0) return;
 
@@ -1244,12 +1516,14 @@ function generateAllGroupsPflichtTable() {
     });
     html += '</tr></thead><tbody>';
 
-    // Zeilen für jede Pflichtaufgabe
+    // Zeilen für jede Pflichtaufgabe/Quiz
     assignments.forEach(assignment => {
         html += '<tr>';
         html += `<td style="min-width: 250px;">`;
-        html += `<a href="${assignment.url}" target="_blank">📝 ${assignment.title}</a>`;
-        html += `<br><small style="color: #666;">Kategorie: ${assignment.category_name || 'Unbekannt'}</small>`;
+        const activityIcon = assignment.activity_type === 'quiz' ? '🧭' : '📝';
+        const activityType = assignment.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe';
+        html += `<a href="${assignment.url}" target="_blank">${activityIcon} ${assignment.title}</a>`;
+        html += `<br><small style="color: #666;">Typ: ${activityType} | Kategorie: ${assignment.category_name || 'Unbekannt'}</small>`;
         html += `</td>`;
 
         // Status für jeden Benutzer
