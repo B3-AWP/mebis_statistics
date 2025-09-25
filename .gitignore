@@ -9,3 +9,5 @@ auswertung.html
 exclude_names.txt
 venv/
 Referenzprojekt/
+.claude/settings.local.json
+__pycache__/dashboard_backend.cpython-313.pyc
