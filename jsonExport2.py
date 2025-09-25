@@ -10,6 +10,7 @@ import json
 import re
 import time
 from datetime import datetime
+import locale
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import requests
@@ -22,6 +23,41 @@ def load_config():
     config = configparser.ConfigParser()
     config.read('config.ini')
     return config
+
+def parse_german_datetime(datetime_str):
+    """
+    Konvertiert deutsche Zeitangaben wie 'Dienstag, 23. September 2025, 07:46'
+    in ISO-Format '2025-09-23T07:46:00'
+    """
+    if not datetime_str or datetime_str in ["Keine Abgabe", "-", ""]:
+        return None
+
+    try:
+        # Deutsche Wochentage und Monate mapping
+        german_days = {
+            'Montag': 'Monday', 'Dienstag': 'Tuesday', 'Mittwoch': 'Wednesday',
+            'Donnerstag': 'Thursday', 'Freitag': 'Friday', 'Samstag': 'Saturday', 'Sonntag': 'Sunday'
+        }
+        german_months = {
+            'Januar': 'January', 'Februar': 'February', 'März': 'March', 'April': 'April',
+            'Mai': 'May', 'Juni': 'June', 'Juli': 'July', 'August': 'August',
+            'September': 'September', 'Oktober': 'October', 'November': 'November', 'Dezember': 'December'
+        }
+
+        # Übersetze deutsche Begriffe ins Englische
+        datetime_str_en = datetime_str
+        for german, english in german_days.items():
+            datetime_str_en = datetime_str_en.replace(german, english)
+        for german, english in german_months.items():
+            datetime_str_en = datetime_str_en.replace(german, english)
+
+        # Parse: "Tuesday, 23. September 2025, 07:46"
+        dt = datetime.strptime(datetime_str_en, "%A, %d. %B %Y, %H:%M")
+        return dt.isoformat()
+
+    except Exception as e:
+        print(f"Fehler beim Parsen der Zeitangabe '{datetime_str}': {e}")
+        return datetime_str  # Fallback: ursprünglichen Text zurückgeben
 
 def create_webdriver(headless=False):
     options = Options()
@@ -43,6 +79,9 @@ def create_webdriver(headless=False):
     options.add_argument('--disable-renderer-backgrounding')
     options.add_argument('--disable-background-networking')
     options.add_argument('--disable-sync')
+    options.add_argument('--disable-features=VizDisplayCompositor')
+    options.add_argument('--disable-logging')
+    options.add_argument('--log-level=3')
     options.add_argument('--disable-translate')
     options.add_argument('--hide-scrollbars')
     options.add_argument('--mute-audio')
@@ -84,22 +123,82 @@ def get_activity_urls(driver):
         "feedbacks": [],
         "quizzes": []
     }
-    
+
+    # Method 1: Search completion progress table (original method)
     activity_elements = driver.find_elements(By.CSS_SELECTOR, "#completion-progress thead th.completion-header a")
     if not activity_elements:
-        print("No activity elements found.")
+        print("No activity elements found in completion progress.")
+    else:
+        print(f"Found {len(activity_elements)} activities in completion progress.")
+
+    activity_ids_found = set()
+
     for element in activity_elements:
         url = element.get_attribute("href")
         title = element.get_attribute("title")
         if "mod/assign/view.php?id=" in url:
-            activity_urls["assignments"].append({"id": re.search(r'id=(\d+)', url).group(1), "title": title, "url": url})
+            activity_id = re.search(r'id=(\d+)', url).group(1)
+            if activity_id not in activity_ids_found:
+                activity_urls["assignments"].append({"id": activity_id, "title": title, "url": url})
+                activity_ids_found.add(activity_id)
         elif "mod/checklist/view.php?id=" in url:
-            activity_urls["checklists"].append({"id": re.search(r'id=(\d+)', url).group(1), "title": title, "url": url})
+            activity_id = re.search(r'id=(\d+)', url).group(1)
+            if activity_id not in activity_ids_found:
+                activity_urls["checklists"].append({"id": activity_id, "title": title, "url": url})
+                activity_ids_found.add(activity_id)
         elif "mod/feedback/view.php?id=" in url:
-            activity_urls["feedbacks"].append({"id": re.search(r'id=(\d+)', url).group(1), "title": title, "url": url})
+            activity_id = re.search(r'id=(\d+)', url).group(1)
+            if activity_id not in activity_ids_found:
+                activity_urls["feedbacks"].append({"id": activity_id, "title": title, "url": url})
+                activity_ids_found.add(activity_id)
         elif "mod/quiz/view.php?id=" in url:
-            activity_urls["quizzes"].append({"id": re.search(r'id=(\d+)', url).group(1), "title": title, "url": url})
-    
+            activity_id = re.search(r'id=(\d+)', url).group(1)
+            if activity_id not in activity_ids_found:
+                activity_urls["quizzes"].append({"id": activity_id, "title": title, "url": url})
+                activity_ids_found.add(activity_id)
+
+    # Method 2: Also search gradebook for any additional assignments that might be hidden from completion progress
+    print("Searching gradebook for additional activities...")
+    try:
+        # Look for gradebook item headers that might contain additional assignments
+        gradebook_elements = driver.find_elements(By.CSS_SELECTOR, "a.gradeitemheader")
+        print(f"Found {len(gradebook_elements)} items in gradebook.")
+
+        for element in gradebook_elements:
+            href = element.get_attribute("href")
+            if href and "mod/assign/view.php?id=" in href:
+                activity_id = re.search(r'id=(\d+)', href).group(1)
+                if activity_id not in activity_ids_found:
+                    title = element.text or element.get_attribute("title") or f"Assignment {activity_id}"
+                    activity_urls["assignments"].append({"id": activity_id, "title": title, "url": href})
+                    activity_ids_found.add(activity_id)
+                    print(f"Found additional assignment in gradebook: {activity_id} - {title}")
+            elif href and "mod/checklist/view.php?id=" in href:
+                activity_id = re.search(r'id=(\d+)', href).group(1)
+                if activity_id not in activity_ids_found:
+                    title = element.text or element.get_attribute("title") or f"Checklist {activity_id}"
+                    activity_urls["checklists"].append({"id": activity_id, "title": title, "url": href})
+                    activity_ids_found.add(activity_id)
+                    print(f"Found additional checklist in gradebook: {activity_id} - {title}")
+            elif href and "mod/feedback/view.php?id=" in href:
+                activity_id = re.search(r'id=(\d+)', href).group(1)
+                if activity_id not in activity_ids_found:
+                    title = element.text or element.get_attribute("title") or f"Feedback {activity_id}"
+                    activity_urls["feedbacks"].append({"id": activity_id, "title": title, "url": href})
+                    activity_ids_found.add(activity_id)
+                    print(f"Found additional feedback in gradebook: {activity_id} - {title}")
+            elif href and "mod/quiz/view.php?id=" in href:
+                activity_id = re.search(r'id=(\d+)', href).group(1)
+                if activity_id not in activity_ids_found:
+                    title = element.text or element.get_attribute("title") or f"Quiz {activity_id}"
+                    activity_urls["quizzes"].append({"id": activity_id, "title": title, "url": href})
+                    activity_ids_found.add(activity_id)
+                    print(f"Found additional quiz in gradebook: {activity_id} - {title}")
+
+    except Exception as e:
+        print(f"Error searching gradebook for additional activities: {e}")
+
+    print(f"Total activities found: {len(activity_urls['assignments'])} assignments, {len(activity_urls['checklists'])} checklists, {len(activity_urls['feedbacks'])} feedbacks, {len(activity_urls['quizzes'])} quizzes")
     return activity_urls
 
 def get_checklist_progress_optimized(driver, checklist_url, sesskey):
@@ -141,8 +240,11 @@ def extract_progress(driver):
     return progress_data
 
 def get_assignment_status(driver, assignment_url, waittime):
-    # Navigiere zur Bewertungsseite des Assignments mit group=0
-    grading_url = f"{assignment_url}&action=grading&group=0"
+    # Navigiere zur Bewertungsseite des Assignments mit allen nötigen Parametern
+    # status: alle Benutzer anzeigen, auch die ohne Abgaben
+    # quickgrading=0: vollständige Bewertungsansicht
+    # group=0: alle Gruppen
+    grading_url = f"{assignment_url}&action=grading&status&quickgrading=0&group=0"
     driver.get(grading_url)
 
     try:
@@ -154,14 +256,18 @@ def get_assignment_status(driver, assignment_url, waittime):
         # Kein tbody gefunden, also gibt es keine Abgaben
         return []
 
-    # Finde die Spaltenüberschriften, um die Klasse der "Endbewertung"-Spalte zu ermitteln
+    # Finde die Spaltenüberschriften, um die Klassen der relevanten Spalten zu ermitteln
     headers = driver.find_elements(By.CSS_SELECTOR, "th.header")
     grade_column_class = None
+    submission_time_column_class = None
+
     for header in headers:
         if "Endbewertung" in header.text:
             # Extrahiere die Klasse, z.B. "c14"
             grade_column_class = header.get_attribute("class").split()[1]
-            break
+        if "Zuletzt geändert (Abgabe)" in header.text or (header.get_attribute("data-sortby") and "timesubmitted" in header.get_attribute("data-sortby")):
+            # Extrahiere die Klasse für die Abgabezeit-Spalte
+            submission_time_column_class = header.get_attribute("class").split()[1]
 
     if not grade_column_class:
         print("Spalte 'Endbewertung' nicht gefunden.")
@@ -186,34 +292,158 @@ def get_assignment_status(driver, assignment_url, waittime):
             status = row.find_element(By.CSS_SELECTOR, "div.submissionstatussubmitted").text
         except:
             status = "Nicht eingereicht"
-        
+
         try:
             status2 = row.find_element(By.CSS_SELECTOR, "div.submissiongraded").text
         except:
             status2 = "Nicht bewertet"
-        
+
         try:
             submission = row.find_element(By.CSS_SELECTOR, "div.assignsubmission_onlinetext .no-overflow p").text
         except:
             submission = "Keine Abgabe"
-        
-        grade_options = [option.text for option in row.find_elements(By.CSS_SELECTOR, "select#id_grade option")]
-        
-        # Verwende die ermittelte Klasse, um die Endbewertung abzurufen
+
+        # grade_options werden leer gelassen (wie gewünscht)
+        grade_options = []
+
+        # Verwende die ermittelte Klasse, um die Endbewertung abzurufen (ursprüngliche Methode)
         try:
             grade = row.find_element(By.CSS_SELECTOR, f"td.cell.{grade_column_class}").text
         except:
             grade = "Keine Bewertung"
+
+        # Extrahiere den Abgabezeitpunkt, falls die Spalte vorhanden ist
+        submission_time = None
+        if submission_time_column_class:
+            try:
+                submission_time_raw = row.find_element(By.CSS_SELECTOR, f"td.cell.{submission_time_column_class}").text.strip()
+                # Konvertiere deutsche Zeitangabe in ISO-Format
+                submission_time = parse_german_datetime(submission_time_raw)
+            except:
+                submission_time = None
 
         user_statuses.append({
             "user_id": user_id,
             "status": status,
             "status2": status2,
             "submission": submission,
+            "submission_time": submission_time,
             "grade_options": grade_options,
             "grade": grade
         })
 
+    return user_statuses
+
+def get_quiz_status(driver, quiz_url, waittime):
+    """Extrahiert Quiz-Status und Noten aus der Quiz-Report-Seite"""
+    # Navigiere zur Quiz-Report-Seite mit den gewünschten Parametern
+    # mode=overview: Übersichts-Modus
+    # attempts=enrolled_with: alle eingeschriebenen Benutzer
+    # onlygraded=1: nur bewertete Versuche
+    # group=0: alle Gruppen
+    # onlyregraded=0: alle Bewertungen
+    # slotmarks=1: zeige Slot-Markierungen
+    quiz_id = re.search(r'id=(\d+)', quiz_url).group(1)
+    report_url = f"https://lernplattform.mebis.bycs.de/mod/quiz/report.php?id={quiz_id}&mode=overview&attempts=enrolled_with&onlygraded=1&group=0&onlyregraded=0&slotmarks=1"
+    driver.get(report_url)
+
+    try:
+        # Warte auf das Laden der Tabelle
+        table_element = WebDriverWait(driver, waittime).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table.generaltable"))
+        )
+    except TimeoutException:
+        print(f"Keine Quiz-Tabelle für Quiz {quiz_id} gefunden")
+        return []
+
+    # Finde die Header, um die korrekten Spalten zu identifizieren
+    headers = driver.find_elements(By.CSS_SELECTOR, "th.header")
+    time_finish_column_class = None
+    grade_column_class = None
+
+    for header in headers:
+        header_text = header.text.strip()
+        # Suche nach "Beendet"-Spalte (für das Datum)
+        if "Beendet" in header_text:
+            classes = header.get_attribute("class").split()
+            for cls in classes:
+                if cls.startswith("c") and cls[1:].isdigit():
+                    time_finish_column_class = cls
+                    break
+        # Suche nach "Bewertung"-Spalte (für die Note)
+        elif "Bewertung" in header_text and "/" in header_text:
+            classes = header.get_attribute("class").split()
+            for cls in classes:
+                if cls.startswith("c") and cls[1:].isdigit():
+                    grade_column_class = cls
+                    break
+
+    if not grade_column_class:
+        print(f"Bewertungsspalte für Quiz {quiz_id} nicht gefunden")
+        return []
+
+    # Finde alle Zeilen der Tabelle
+    tbody = table_element.find_element(By.CSS_SELECTOR, "tbody")
+    rows = tbody.find_elements(By.CSS_SELECTOR, "tr")
+
+    user_statuses = []
+
+    for row in rows:
+        try:
+            # Extrahiere User-ID aus dem Link zur Benutzerseite
+            user_link = row.find_element(By.CSS_SELECTOR, "td a[href*='user/view.php?id=']")
+            user_href = user_link.get_attribute("href")
+            user_id_match = re.search(r'id=(\d+)', user_href)
+            if not user_id_match:
+                continue
+
+            user_id = user_id_match.group(1)
+
+            # Extrahiere die Bewertung
+            grade = "-"
+            try:
+                grade_cell = row.find_element(By.CSS_SELECTOR, f"td.{grade_column_class}")
+                grade = grade_cell.text.strip()
+                if not grade or grade == "-":
+                    grade = "Nicht bewertet"
+            except:
+                grade = "Nicht bewertet"
+
+            # Extrahiere das Abschluss-Datum
+            submission_time = None
+            if time_finish_column_class:
+                try:
+                    time_cell = row.find_element(By.CSS_SELECTOR, f"td.{time_finish_column_class}")
+                    time_text = time_cell.text.strip()
+                    if time_text and time_text != "-":
+                        # Konvertiere deutsche Zeitangabe in ISO-Format
+                        submission_time = parse_german_datetime(time_text)
+                except:
+                    submission_time = None
+
+            # Bestimme den Status basierend auf der Bewertung
+            if grade == "Nicht bewertet" or grade == "-":
+                status = "Nicht eingereicht"
+                status2 = "Nicht bewertet"
+            else:
+                status = "Zur Bewertung abgegeben"
+                status2 = "Bewertet"
+
+            user_statuses.append({
+                "user_id": user_id,
+                "status": status,
+                "status2": status2,
+                "submission": "Quiz abgeschlossen",
+                "submission_time": submission_time,
+                "grade_options": [],
+                "grade": grade
+            })
+
+        except Exception as e:
+            print(f"Fehler beim Verarbeiten einer Quiz-Zeile für Quiz {quiz_id}: {e}")
+            continue
+
+    print(f"Quiz {quiz_id}: {len(user_statuses)} Benutzer-Status gefunden")
     return user_statuses
 
 def get_sesskey(driver):
@@ -265,10 +495,10 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
         start_time = time.time()
         status = get_assignment_status(driver, assignment_url, waittime)
         duration = time.time() - start_time
-        print(f"  └─ Abgeschlossen in {duration:.1f}s ({len(status)} Einträge)")
+        print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege)")
         return assignment_id, status
     except Exception as e:
-        print(f"❌ Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
+        print(f"Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
         return assignment.get('id', 'unknown'), []
 
 def process_checklist_parallel(checklist, isheadless, username, password, base_url, course_id, index, total):
@@ -297,6 +527,24 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
     except Exception as e:
         print(f"❌ Fehler bei Checklist {checklist.get('id', 'unknown')}: {e}")
         return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
+
+def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_url, course_id, index, total):
+    """Process a single quiz in parallel"""
+    try:
+        driver = get_thread_driver(isheadless, username, password, base_url, course_id)
+        quiz_id = quiz["id"]
+        quiz_url = quiz["url"]
+        quiz_title = quiz.get("title", f"Quiz {quiz_id}")
+
+        print(f"[{index+1}/{total}] Verarbeite Quiz: {quiz_title[:50]}...")
+        start_time = time.time()
+        status = get_quiz_status(driver, quiz_url, waittime)
+        duration = time.time() - start_time
+        print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege)")
+        return quiz_id, status
+    except Exception as e:
+        print(f"Fehler bei Quiz {quiz.get('id', 'unknown')}: {e}")
+        return quiz.get('id', 'unknown'), []
     
 
 def get_all_activity_categories(driver, course_id):
@@ -395,162 +643,16 @@ def cleanup_thread_drivers():
     except:
         pass
 
-def create_file_in_cloud(driver, filename, content):
-    """Create a new file in the cloud using the web interface (based on Puppeteer script)"""
-    print(f"Erstelle Datei in Cloud: {filename}")
+# Cloud functionality removed
 
-    try:
-        # Click on new file menu button (equivalent to #new-file-menu-btn svg)
-        new_file_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "#new-file-menu-btn svg"))
-        )
-        new_file_button.click()
-        print("New-File-Menu geklickt")
-        time.sleep(1)
-
-        # Click on "Text-Datei" option (equivalent to .new-file-btn-txt > .create-list-file-item-text)
-        text_file_option = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, ".new-file-btn-txt > .create-list-file-item-text"))
-        )
-        text_file_option.click()
-        print("Text-Datei Option geklickt")
-        time.sleep(1)
-
-        # Wait for filename input and clear existing text
-        filename_input = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "#oc-textinput-8"))
-        )
-
-        # Clear existing text and enter our filename
-        filename_input.clear()
-        filename_input.send_keys(filename)
-        print(f"Dateiname eingegeben: {filename}")
-
-        # Press Enter to create the file (equivalent to Press Enter on input and await navigation)
-        filename_input.send_keys("\n")
-        print("Enter gedrückt, warte auf Navigation...")
-
-        # Wait for the file editor to load
-        time.sleep(3)
-
-        # Click in the content area (equivalent to Click on <div> .cm-content)
-        content_area = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, ".cm-content"))
-        )
-        content_area.click()
-        print("Content-Bereich geklickt")
-
-        # Clear any existing content and enter new content (equivalent to Fill content on .cm-content)
-        content_area.clear()
-        if content:
-            content_area.send_keys(content)
-            print("Inhalt eingegeben")
-
-        # Save the file (equivalent to Click on #app-save-action svg)
-        save_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "#app-save-action svg"))
-        )
-        save_button.click()
-        print("Save-Button geklickt")
-        time.sleep(2)
-
-        # Close the file editor (equivalent to Click on #app-top-bar-close svg and await navigation)
-        close_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "#app-top-bar-close svg"))
-        )
-        close_button.click()
-        print("Close-Button geklickt")
-        time.sleep(3)
-
-        print(f"Datei '{filename}' erfolgreich in Cloud erstellt!")
-        return True
-
-    except Exception as e:
-        print(f"Fehler beim Erstellen der Datei in der Cloud: {e}")
-        return False
-
-def upload_to_owncloud_browser(data, filename, username, password):
-    """Upload JSON data to OwnCloud by creating a file directly in the cloud interface"""
-    try:
-        print("=" * 60)
-        print("Starte Cloud-Datei-Erstellung...")
-        print("=" * 60)
-
-        # Convert data to JSON string
-        json_content = json.dumps(data, ensure_ascii=False, indent=2)
-        file_size = len(json_content.encode('utf-8'))
-        print(f"JSON-Datengroesse: {file_size} bytes")
-
-        # Create browser
-        options = Options()
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-extensions')
-        options.add_argument('--disable-plugins')
-        options.add_argument('--window-size=1200,800')
-
-        print("Starte Chrome Browser...")
-        driver = webdriver.Chrome(options=options)
-
-        try:
-            # Login to OwnCloud
-            print(f"Anmeldung mit Benutzer: {username}")
-            driver.get("https://6072.drive.bycs.de/")
-            time.sleep(3)
-
-            # Find and fill login form
-            username_field = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "#input-username"))
-            )
-            username_field.send_keys(username)
-
-            password_field = driver.find_element(By.CSS_SELECTOR, "input[name='password']")
-            password_field.send_keys(password)
-
-            login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-            login_button.click()
-
-            print("Login-Daten gesendet, warte auf Anmeldung...")
-            time.sleep(5)
-
-            # Navigate to upload folder using the full URL from Puppeteer script
-            target_url = "https://6072.drive.bycs.de/files/spaces/project/aeup12/Segel_Export?fileId=e4a0c375-2fb6-4fc6-af92-ac4b95c18ce1%24596fbe56-16a5-41fd-a1a0-96b7e392435e%21f4797d5b-9177-43b8-be8e-0cba1bb25ead&sort-by=name&sort-dir=asc&items-per-page=100&files-spaces-generic-view-mode=resource-table&tiles-size=2"
-            print(f"Navigiere zu Ziel-URL...")
-            driver.get(target_url)
-
-            time.sleep(5)
-
-            # Create the file directly in the cloud interface
-            creation_success = create_file_in_cloud(driver, filename, json_content)
-
-            if creation_success:
-                print(f"✅ Datei '{filename}' erfolgreich in der Cloud erstellt!")
-                return True
-            else:
-                print(f"❌ Datei-Erstellung in der Cloud fehlgeschlagen!")
-                return False
-
-        finally:
-            try:
-                # Keep browser open briefly to see the result
-                time.sleep(2)
-                driver.quit()
-                print("Browser geschlossen")
-            except:
-                pass
-
-    except Exception as e:
-        print(f"Unerwarteter Fehler beim Cloud-Upload: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+# Cloud upload functionality removed
 
 
 def main():
     # Startzeit des Skripts
     start_time = time.time()
-    print("🚀 Starte Mebis-Datenexport...")
-    print(f"⏰ Startzeit: {datetime.now().strftime('%H:%M:%S')}")
+    print("Starte Mebis-Datenexport...")
+    print(f"Startzeit: {datetime.now().strftime('%H:%M:%S')}")
 
     config = load_config()
     username = config['login']['username']
@@ -631,6 +733,9 @@ def main():
                 assignment_id, status = future.result()
                 assignments_status[assignment_id] = status
 
+    # Note: user_status is handled by dashboard_backend.py using existing user.activities data
+    # No need to duplicate data structure here
+
     print("Analysiere Status Checkliste (parallel)")
     checklist_progress = {}
 
@@ -649,6 +754,25 @@ def main():
             for future in as_completed(future_to_checklist):
                 checklist_id, progress = future.result()
                 checklist_progress[checklist_id] = progress
+
+    print("Analysiere Quiz Status (parallel)")
+    quizzes_status = {}
+
+    # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Quizzes
+    max_workers = min(2, len(activities["quizzes"]))
+
+    if activities["quizzes"]:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Erstelle Future-Tasks für alle Quizzes
+            future_to_quiz = {
+                executor.submit(process_quiz_parallel, quiz, isheadless, waittime, username, password, base_url, course_id, idx, len(activities["quizzes"])): quiz
+                for idx, quiz in enumerate(activities["quizzes"])
+            }
+
+            # Sammle die Ergebnisse
+            for future in as_completed(future_to_quiz):
+                quiz_id, status = future.result()
+                quizzes_status[quiz_id] = status
 
     # Zentralisierte Speicherung der Aktivitäten
     data = {
@@ -705,30 +829,35 @@ def main():
                         # "category_name": checklist.get("category_name")
                     })
 
-    print("Lade Daten zu OwnCloud hoch...")
-    upload_start_time = time.time()
+            # Verwende die zuvor erfassten Quiz-Status
+            for quiz in activities["quizzes"]:
+                user_quiz_status = next((status for status in quizzes_status[quiz["id"]] if status["user_id"] == user["id"]), None)
+                if user_quiz_status:
+                    user["activities"]["quizzes"].append({
+                        "id": quiz["id"],
+                        "status": user_quiz_status,
+                        "category_id": quiz.get("category_id"),
+                        "category_name": quiz.get("category_name")
+                    })
+
+    print("Speichere Daten lokal...")
+    save_start_time = time.time()
 
     # Zeitstempel hinzufügen
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_filename = f'output_{timestamp}.json'
+    local_filename = f'./export/{json_filename}'
 
-    # Upload to OwnCloud using browser automation
-    upload_success = upload_to_owncloud_browser(data, json_filename, username, password)
-
-    upload_duration = time.time() - upload_start_time
-    if upload_success:
-        print(f"✅ Daten erfolgreich zu OwnCloud hochgeladen in {upload_duration:.1f}s: {json_filename}")
-    else:
-        # Fallback: Save locally if upload fails
-        print("⚠️ OwnCloud-Upload fehlgeschlagen, speichere lokal als Fallback...")
-        local_filename = f'./export/output_{timestamp}.json'
-        try:
-            os.makedirs('./export', exist_ok=True)
-            with open(local_filename, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
-            print(f"💾 Lokale Fallback-Datei erstellt: {local_filename}")
-        except Exception as e:
-            print(f"❌ Auch lokale Speicherung fehlgeschlagen: {e}")
+    try:
+        os.makedirs('./export', exist_ok=True)
+        with open(local_filename, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+        save_duration = time.time() - save_start_time
+        print(f"Daten erfolgreich lokal gespeichert in {save_duration:.1f}s: {local_filename}")
+        save_success = True
+    except Exception as e:
+        print(f"Lokale Speicherung fehlgeschlagen: {e}")
+        save_success = False
 
     # Cleanup: Schließe alle WebDriver-Instanzen
     driver.quit()
@@ -743,23 +872,23 @@ def main():
     duration_minutes = duration / 60  # Umrechnung von Sekunden in Minuten
 
     # Performance-Statistiken
-    total_activities = len(activities["assignments"]) + len(activities["checklists"])
+    total_activities = len(activities["assignments"]) + len(activities["checklists"]) + len(activities["quizzes"])
     total_groups = len(data["groups"])
     total_users = sum(len(group["users"]) for group in data["groups"])
 
     print("\n" + "="*60)
-    print("📊 EXPORT ABGESCHLOSSEN")
+    print("EXPORT ABGESCHLOSSEN")
     print("="*60)
-    print(f"⏱️  Gesamtdauer: {duration_minutes:.2f} Minuten ({duration:.1f} Sekunden)")
-    print(f"🎯 Aktivitäten: {total_activities} ({len(activities['assignments'])} Assignments, {len(activities['checklists'])} Checklists)")
-    print(f"👥 Gruppen: {total_groups} mit insgesamt {total_users} Benutzern")
+    print(f"Gesamtdauer: {duration_minutes:.2f} Minuten ({duration:.1f} Sekunden)")
+    print(f"Aktivitaeten: {total_activities} ({len(activities['assignments'])} Assignments, {len(activities['checklists'])} Checklists, {len(activities['quizzes'])} Quizzes)")
+    print(f"Gruppen: {total_groups} mit insgesamt {total_users} Benutzern")
     if total_activities > 0:
-        print(f"⚡ Durchschnitt: {(duration / total_activities):.1f}s pro Aktivität")
-    if upload_success:
-        print(f"☁️ OwnCloud-Datei: {json_filename}")
+        print(f"Durchschnitt: {(duration / total_activities):.1f}s pro Aktivitaet")
+    if save_success:
+        print(f"Lokale Datei: ./export/{json_filename}")
     else:
-        print(f"💾 Lokale Fallback-Datei: ./export/{json_filename}")
-    print(f"🏁 Endzeit: {datetime.now().strftime('%H:%M:%S')}")
+        print(f"❌ Speicherung fehlgeschlagen")
+    print(f"Endzeit: {datetime.now().strftime('%H:%M:%S')}")
     print("="*60)
 
 if __name__ == "__main__":

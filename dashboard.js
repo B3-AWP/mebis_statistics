@@ -853,6 +853,10 @@ function updateAllTabs() {
     const checklistsTab = document.getElementById('checklistsTab');
     if (checklistsTab && checklistsTab.style.display !== 'none') {
         generateChecklistTable();
+        // Spaltenansicht nach dem Neuaufbau der Tabelle anwenden
+        applyChecklistColumnView();
+        // View-Filter anwenden
+        applyChecklistViewFilter();
     }
 
     // Pflichtaufgaben-Tab aktualisieren falls sichtbar
@@ -1217,6 +1221,33 @@ function generatePflichtTableFromActivities() {
 
     // Tabelle sortierbar machen
     makeTableSortable('pflichtTable');
+
+    // Sofortige alphabetische Sortierung nach Aufgaben-Titel
+    const table = document.getElementById('pflichtTable');
+    if (table) {
+        const tbody = table.querySelector('tbody');
+        if (tbody) {
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            // Sortiere Zeilen alphabetisch nach dem ersten Spalteninhalt
+            rows.sort((a, b) => {
+                const aVal = getCellValue(a, 0, 'text');
+                const bVal = getCellValue(b, 0, 'text');
+                return aVal.localeCompare(bVal);
+            });
+
+            // Zeilen in sortierter Reihenfolge einfügen
+            rows.forEach(row => tbody.appendChild(row));
+
+            // Header als sortiert markieren
+            const headers = table.querySelectorAll('th');
+            if (headers[0]) {
+                headers[0].classList.add('sort-asc');
+            }
+
+            // Sortierstatus setzen
+            sortState['pflichtTable_0'] = 'asc';
+        }
+    }
 }
 
 // Fallback-Implementierung für alte structured_tables Datenstruktur
@@ -1563,6 +1594,34 @@ function generateAllGroupsPflichtTable() {
 
     // Tabelle sortierbar machen
     makeTableSortable('allGroupsPflichtTable');
+
+    // Sofortige alphabetische Sortierung nach Aufgaben-Titel
+    const table = document.getElementById('allGroupsPflichtTable');
+    if (table) {
+        const tbody = table.querySelector('tbody');
+        if (tbody) {
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+
+            // Sortiere Zeilen alphabetisch nach dem ersten Spalteninhalt
+            rows.sort((a, b) => {
+                const aVal = getCellValue(a, 0, 'text');
+                const bVal = getCellValue(b, 0, 'text');
+                return aVal.localeCompare(bVal);
+            });
+
+            // Zeilen in sortierter Reihenfolge einfügen
+            rows.forEach(row => tbody.appendChild(row));
+
+            // Header als sortiert markieren
+            const headers = table.querySelectorAll('th');
+            if (headers[0]) {
+                headers[0].classList.add('sort-asc');
+            }
+
+            // Sortierstatus setzen
+            sortState['allGroupsPflichtTable_0'] = 'asc';
+        }
+    }
 }
 
 // Filter für Checklisten anwenden
@@ -1830,6 +1889,16 @@ function getCellValue(row, columnIndex, dataType) {
 
     let value = cell.textContent.trim();
 
+    // Spezielle Behandlung für Aufgaben-Titel: Emojis entfernen für die Sortierung
+    if (columnIndex === 0) {
+        // Entferne alle Emojis vom Anfang für korrekte alphabetische Sortierung
+        value = value.replace(/^[📝🧭✅❌⚠️💻🎯]\s*/, '');
+        // Entferne auch Numerierung wie "1.1", "1.2" etc. für bessere alphabetische Sortierung
+        value = value.replace(/^\d+\.\d+\s*/, '');
+        // Entferne "Pflicht:" Prefix
+        value = value.replace(/^Pflicht:\s*/, '');
+    }
+
     // Spezielle Behandlung für verschiedene Datentypen
     if (dataType === 'number' || value.match(/^[\d.,%-]+$/)) {
         return value.replace(/[^\d.-]/g, '');
@@ -2017,6 +2086,9 @@ function generateZentralTable() {
     html += '</tbody></table></div>';
     container.innerHTML = html;
 
+    // Tabelle sortierbar machen
+    makeTableSortable('zentralTable');
+
     // Filter anwenden falls nötig
     applyZentralViewFilters();
 }
@@ -2098,6 +2170,37 @@ function generateAllGroupsZentralTable() {
 
     html += '</tbody></table></div>';
     container.innerHTML = html;
+
+    // Tabelle sortierbar machen
+    makeTableSortable('allGroupsZentralTable');
+
+    // Sofortige alphabetische Sortierung nach Aufgabennamen (3. Spalte)
+    const table = document.getElementById('allGroupsZentralTable');
+    if (table) {
+        const tbody = table.querySelector('tbody');
+        if (tbody) {
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+
+            // Sortiere Zeilen alphabetisch nach dem dritten Spalteninhalt
+            rows.sort((a, b) => {
+                const aVal = getCellValue(a, 2, 'text');
+                const bVal = getCellValue(b, 2, 'text');
+                return aVal.localeCompare(bVal);
+            });
+
+            // Zeilen in sortierter Reihenfolge einfügen
+            rows.forEach(row => tbody.appendChild(row));
+
+            // Header als sortiert markieren
+            const headers = table.querySelectorAll('th');
+            if (headers[2]) {
+                headers[2].classList.add('sort-asc');
+            }
+
+            // Sortierstatus setzen
+            sortState['allGroupsZentralTable_2'] = 'asc';
+        }
+    }
 
     // Filter anwenden
     applyZentralViewFilters();

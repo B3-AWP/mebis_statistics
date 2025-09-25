@@ -167,9 +167,12 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
         url = details.get('url', '#')
         grade_str = activity.get('status', {}).get('grade', 'Nicht bewertet')
 
+        # Runde die Note für die Anzeige
+        rounded_grade = round_grade(grade_str)
+
         user_data['assignments']['grades']["Pflichtaufgaben"].append({
             'title': title,
-            'grade': grade_str,
+            'grade': rounded_grade,
             'url': url,
             'type': details.get('type', 'unknown')
         })
@@ -329,6 +332,12 @@ def create_structured_tables(groups_data, categories):
 
     print(f"DEBUG: Zentrale Leistungsnachweise insgesamt gefunden: {len(zentrale_assignments)}")
 
+    # Sortiere Pflichtaufgaben alphabetisch nach Titel
+    pflicht_assignments.sort(key=lambda x: x['title'])
+
+    # Sortiere Zentrale Leistungsnachweise alphabetisch nach Titel
+    zentrale_assignments.sort(key=lambda x: x['title'])
+
     # Strukturierte Tabellen für jede Gruppe erstellen
     structured_tables = {}
 
@@ -409,6 +418,29 @@ def create_structured_tables(groups_data, categories):
 
     return structured_tables
 
+def round_grade(grade_str):
+    """Rundet eine Note auf ganze Zahlen: bis 0.5 ab, ab 0.5 auf"""
+    if not grade_str or grade_str in ['-', 'Nicht bewertet', 'Keine Bewertung']:
+        return grade_str
+
+    try:
+        # Versuche, eine Zahl aus dem Grade-String zu extrahieren
+        import re
+        # Suche nach Zahlen im Format "1,5" oder "2.5" oder "15,3/20" etc.
+        grade_match = re.search(r'(\d+[.,]\d+|\d+)', grade_str)
+        if grade_match:
+            grade_text = grade_match.group(1).replace(',', '.')
+            grade_float = float(grade_text)
+
+            # Runde auf ganze Zahlen: bis 0.5 ab, ab 0.5 auf
+            import math
+            rounded_grade = math.floor(grade_float + 0.5)
+            return str(int(rounded_grade))
+    except:
+        pass
+
+    return grade_str
+
 def find_user_checklist_progress(user, checklist_id):
     """Findet den Fortschritt einer spezifischen Checkliste für einen Benutzer"""
     for checklist in user.get('checklists', {}).get('individual_checklists', []):
@@ -440,10 +472,12 @@ def find_user_assignment_status(user, assignment_id):
         print(f"DEBUG: Prüfe Assignment {assignment.get('id')} gegen {assignment_id}")
         if assignment.get('id') == assignment_id:
             status_info = assignment.get('status', {})
+            raw_grade = status_info.get('grade', '-')
+            rounded_grade = round_grade(raw_grade)
             result = {
                 'status': status_info.get('status', 'Nicht eingereicht'),
                 'status2': status_info.get('status2', ''),
-                'grade': status_info.get('grade', '-')
+                'grade': rounded_grade
             }
             print(f"DEBUG: MATCH! {user.get('name')} - Assignment {assignment_id}: {result}")
             return result
@@ -452,10 +486,12 @@ def find_user_assignment_status(user, assignment_id):
     for quiz in activities.get('quizzes', []):
         if quiz.get('id') == assignment_id:
             status_info = quiz.get('status', {})
+            raw_grade = status_info.get('grade', '-')
+            rounded_grade = round_grade(raw_grade)
             return {
                 'status': status_info.get('status', 'Nicht eingereicht'),
                 'status2': status_info.get('status2', ''),
-                'grade': status_info.get('grade', '-')
+                'grade': rounded_grade
             }
 
     # Wenn nicht gefunden
