@@ -52,6 +52,25 @@ def load_excluded_names(file_path='exclude_names.txt'):
         print(f"Error loading excluded names: {e}")
         return set()
 
+def load_ignored_groups(config_path='config.ini'):
+    """Lädt die Liste der ignorierten Gruppen aus config.ini"""
+    try:
+        import configparser
+        config = configparser.ConfigParser()
+        config.read(config_path, encoding='utf-8')
+
+        ignored_groups = set()
+        if config.has_section('IgnoreGroups'):
+            for key, group_name in config.items('IgnoreGroups'):
+                if not key.startswith(';'):  # Ignore comments
+                    ignored_groups.add(group_name.strip())
+
+        print(f"DEBUG: Ignored groups loaded: {ignored_groups}")
+        return ignored_groups
+    except Exception as e:
+        print(f"Error loading ignored groups: {e}")
+        return set()
+
 def get_assignment_details(assignments_by_category):
     """Erstellt ein Dictionary mit Assignment-Details"""
     assignment_details = {}
@@ -539,12 +558,19 @@ def get_data():
             return jsonify({'error': 'Fehler beim Laden der Daten'}), 500
 
         excluded_names = load_excluded_names()
+        ignored_groups = load_ignored_groups()
         assignment_details = get_assignment_details(data['activities_by_category'])
 
         # Benutzer nach Gruppen organisieren
         groups_data = {}
         for group in data['groups']:
             group_name = group['name']
+
+            # Überspringe ignorierte Gruppen
+            if group_name in ignored_groups:
+                print(f"DEBUG: Skipping ignored group: {group_name}")
+                continue
+
             group_users = [user for user in group['users'] if user['name'] not in excluded_names]
 
             if group_users:  # Nur Gruppen mit Benutzern
