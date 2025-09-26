@@ -109,6 +109,10 @@ async function loadData() {
 
         if (dashboardData.activities_by_category && dashboardData.activities_by_category.length > 0) {
             const firstCategory = dashboardData.activities_by_category[0];
+            console.log('First category assignments:', {
+                assignmentCount: firstCategory.assignments ? firstCategory.assignments.length : 'undefined',
+                sampleAssignment: firstCategory.assignments && firstCategory.assignments.length > 0 ? firstCategory.assignments[0] : 'none'
+            });
         }
 
         // Datei-Info anzeigen
@@ -1043,6 +1047,8 @@ function generatePflichtTableFromActivities() {
     }
 
     // Für einzelne Gruppen: Filtere Daten nach Gruppe
+    console.log('DEBUG: Verfügbare Gruppen:', Object.keys(dashboardData.groups || {}));
+    console.log('DEBUG: Gewählte Gruppe:', currentGroup);
 
     if (!dashboardData.groups || !dashboardData.groups[currentGroup]) {
         container.innerHTML = `<p>Gruppe "${currentGroup}" nicht gefunden.</p>
@@ -1108,6 +1114,7 @@ function generatePflichtTableFromActivities() {
 
     // Benutzer der aktuellen Gruppe sammeln
     const groupUsers = dashboardData.groups[currentGroup].users;
+    console.log('DEBUG: Erste 3 Benutzer der Gruppe:', groupUsers.slice(0, 3));
 
     // Prüfe verschiedene mögliche Benutzer-Name-Felder
     const groupUserNames = new Set();
@@ -1117,8 +1124,25 @@ function generatePflichtTableFromActivities() {
         if (userName) {
             groupUserNames.add(userName);
         }
+        console.log('DEBUG: User object:', user, 'extracted name:', userName);
     });
 
+    console.log('DEBUG: Gruppe', currentGroup, 'hat', groupUsers.length, 'Benutzer, extrahierte Namen:', Array.from(groupUserNames));
+
+    // Debug: Prüfe Struktur der Activities
+    console.log('DEBUG: Assignments für Gruppe', currentGroup, ':', assignments.length);
+    assignments.forEach((assignment, index) => {
+        if (index < 3) { // Nur erste 3 zur Debug-Ausgabe
+            console.log(`Assignment ${index}:`, {
+                title: assignment.title,
+                activity_type: assignment.activity_type,
+                hasUserStatus: !!assignment.user_status,
+                userStatusLength: assignment.user_status ? assignment.user_status.length : 0,
+                firstUserStatus: assignment.user_status && assignment.user_status.length > 0 ? assignment.user_status[0] : null,
+                groupUserNames: Array.from(groupUserNames)
+            });
+        }
+    });
 
     // Assignments filtern um nur Benutzer aus der aktuellen Gruppe zu zeigen
     const filteredAssignments = assignments.map(assignment => ({
@@ -1128,6 +1152,7 @@ function generatePflichtTableFromActivities() {
         ) : []
     })).filter(assignment => assignment.user_status.length > 0);
 
+    console.log('DEBUG: Nach Filterung:', filteredAssignments.length, 'Aktivitäten übrig');
 
     if (filteredAssignments.length === 0) {
         container.innerHTML = `<p>Keine Daten für die ausgewählte Gruppe "${currentGroup}" verfügbar.</p>
@@ -1205,8 +1230,8 @@ function generatePflichtTableFromActivities() {
             const rows = Array.from(tbody.querySelectorAll('tr'));
             // Sortiere Zeilen numerisch nach Aufgabennummer (falls vorhanden), sonst alphabetisch
             rows.sort((a, b) => {
-                const aVal = getCellValue(a, 0, 'text');
-                const bVal = getCellValue(b, 0, 'text');
+                const aVal = getSortValue(a, 0);
+                const bVal = getSortValue(b, 0);
 
                 // Prüfe ob beide Werte numerische Sortierstrings sind (Dezimalzahlen für Aufgabennummern)
                 if (aVal.match(/^\d+(\.\d+)?$/) && bVal.match(/^\d+(\.\d+)?$/)) {
@@ -1586,8 +1611,8 @@ function generateAllGroupsPflichtTable() {
             const rows = Array.from(tbody.querySelectorAll('tr'));
             // Sortiere Zeilen numerisch nach Aufgabennummer (falls vorhanden), sonst alphabetisch
             rows.sort((a, b) => {
-                const aVal = getCellValue(a, 0, 'text');
-                const bVal = getCellValue(b, 0, 'text');
+                const aVal = getSortValue(a, 0);
+                const bVal = getSortValue(b, 0);
 
                 // Prüfe ob beide Werte numerische Sortierstrings sind (Dezimalzahlen für Aufgabennummern)
                 if (aVal.match(/^\d+(\.\d+)?$/) && bVal.match(/^\d+(\.\d+)?$/)) {
@@ -1861,8 +1886,14 @@ function sortTable(tableId, columnIndex, dataType = 'auto') {
             }
         } else {
             // Für Spalte 0: prüfe ob numerische Sortierstrings vorliegen (Dezimalzahlen für Aufgabennummern)
-            if (columnIndex === 0 && aVal.match(/^\d+(\.\d+)?$/) && bVal.match(/^\d+(\.\d+)?$/)) {
-                result = parseFloat(aVal) - parseFloat(bVal);
+            if (columnIndex === 0) {
+                const aSortVal = getSortValue(a, 0);
+                const bSortVal = getSortValue(b, 0);
+                if (aSortVal.match(/^\d+(\.\d+)?$/) && bSortVal.match(/^\d+(\.\d+)?$/)) {
+                    result = parseFloat(aSortVal) - parseFloat(bSortVal);
+                } else {
+                    result = aSortVal.localeCompare(bSortVal);
+                }
             } else {
                 result = aVal.localeCompare(bVal);
             }
@@ -1882,18 +1913,37 @@ function getCellValue(row, columnIndex, dataType) {
     const cell = row.cells[columnIndex];
     if (!cell) return '';
 
+    let value = cell.textContent.trim();
+
+    // Spezielle Behandlung für Aufgaben-Titel: Emojis entfernen für die Sortierung
+    if (columnIndex === 0) {
+        // Entferne alle Emojis vom Anfang für korrekte alphabetische Sortierung
+        value = value.replace(/^[📝🧭✅❌⚠️💻🎯]\s*/, '');
+        // Entferne auch Numerierung wie "1.1", "1.2" etc. für bessere alphabetische Sortierung
+        value = value.replace(/^\d+\.\d+\s*/, '');
+        // Entferne "Pflicht:" Prefix
+        value = value.replace(/^Pflicht:\s*/, '');
+    }
+
+    // Spezielle Behandlung für verschiedene Datentypen
+    if (dataType === 'number' || value.match(/^[\d.,%-]+$/)) {
+        return value.replace(/[^\d.-]/g, '');
+    }
+
+    return value;
+}
+
+function getSortValue(row, columnIndex) {
+    const cell = row.cells[columnIndex];
+    if (!cell) return '';
+
     let value;
 
     // Für die erste Spalte: Extrahiere nur den Link-Text, nicht den gesamten Zellinhalt
     if (columnIndex === 0) {
         const link = cell.querySelector('a');
         value = link ? link.textContent.trim() : cell.textContent.trim();
-    } else {
-        value = cell.textContent.trim();
-    }
 
-    // Spezielle Behandlung für Aufgaben-Titel: Numerische Sortierung nach Aufgabennummer
-    if (columnIndex === 0) {
         // Entferne alle Emojis und Leerzeichen vom Anfang
         let cleanValue = value.replace(/^[\u{1F4DD}\u{1F9ED}\u{2705}\u{274C}\u{26A0}\u{1F4BB}\u{1F3AF}\u{FE0F}?\s]*/u, '');
         // Fallback: Entferne alle Non-ASCII Zeichen vom Anfang
@@ -1909,17 +1959,11 @@ function getCellValue(row, columnIndex, dataType) {
             return (major + minor / 100).toString();
         }
 
-
         // Falls keine Numerierung gefunden, entferne "Pflicht:" Prefix für alphabetische Sortierung
-        value = cleanValue.replace(/^Pflicht:\s*/, '');
+        return cleanValue.replace(/^Pflicht:\s*/, '');
+    } else {
+        return cell.textContent.trim();
     }
-
-    // Spezielle Behandlung für verschiedene Datentypen
-    if (dataType === 'number' || value.match(/^[\d.,%-]+$/)) {
-        return value.replace(/[^\d.-]/g, '');
-    }
-
-    return value;
 }
 
 function makeTableSortable(tableId) {
