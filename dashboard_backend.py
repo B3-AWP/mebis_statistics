@@ -622,7 +622,7 @@ def get_data():
             activities_ordered = data['activities_by_category']
 
         # Add user_status to activities for frontend
-        def add_user_status_to_activities(activities, data):
+        def add_user_status_to_activities(activities, data, groups_data):
             for category in activities:
                 # Add user_status to assignments
                 for assignment in category.get('assignments', []):
@@ -631,6 +631,11 @@ def get_data():
 
                     # Find user grades for this assignment from original JSON data
                     for group in data['groups']:
+                        group_name = group.get('name', '')
+                        # Skip users from ignored groups
+                        if group_name in ignored_groups:
+                            continue
+
                         group_users = group.get('users', [])
                         for user in group_users:
                             status = find_user_assignment_status(user, assignment_id)
@@ -648,6 +653,11 @@ def get_data():
 
                     # Find user grades for this quiz from original JSON data
                     for group in data['groups']:
+                        group_name = group.get('name', '')
+                        # Skip users from ignored groups
+                        if group_name in ignored_groups:
+                            continue
+
                         group_users = group.get('users', [])
                         for user in group_users:
                             status = find_user_assignment_status(user, quiz_id)
@@ -659,7 +669,7 @@ def get_data():
                             })
             return activities
 
-        activities_with_status = add_user_status_to_activities(activities_ordered, data)
+        activities_with_status = add_user_status_to_activities(activities_ordered, data, groups_data)
 
         response_data = {
             'groups': groups_data,
@@ -668,6 +678,7 @@ def get_data():
             'categories': activities_with_status,
             'activities_by_category': activities_with_status,  # Korrekte Frontend-Erwartung
             'structured_tables': structured_data,
+            'ignored_groups': list(ignored_groups),
             'last_updated': latest_file
         }
 
