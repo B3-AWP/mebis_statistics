@@ -1371,7 +1371,10 @@ function generateAllGroupsChecklistTable() {
     // Gruppen basierend auf aktueller Gruppierung filtern
     let groupsToShow = [];
     if (currentGrouping === 'all') {
-        groupsToShow = Object.keys(dashboardData.structured_tables);
+        groupsToShow = Object.keys(dashboardData.structured_tables).filter(groupName => {
+            // Überspringe ignorierte Gruppen
+            return !(dashboardData.ignored_groups && dashboardData.ignored_groups.includes(groupName));
+        });
     } else {
         const groupings = extractGroupings();
         groupsToShow = groupings[currentGrouping] || [];
@@ -2141,6 +2144,12 @@ function generateAllGroupsZentralTable() {
     const allUsers = new Map(); // userName -> { groupName, assignments: Map(assignment_title -> status) }
 
     Object.keys(dashboardData.structured_tables).forEach(groupName => {
+        // Überspringe ignorierte Gruppen
+        if (dashboardData.ignored_groups && dashboardData.ignored_groups.includes(groupName)) {
+            console.log(`DEBUG: Skipping ignored group in All Groups view: ${groupName}`);
+            return;
+        }
+
         const groupData = dashboardData.structured_tables[groupName];
         const tableData = groupData?.zentrale_leistungsnachweise;
 
