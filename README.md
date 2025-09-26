@@ -81,4 +81,20 @@ Erstelle eine config.ini Datei mit folgendem Inhalt
     [Analysis]
     LaggardThreshold = 50
     GenerateIndividualReports = True
+
+    [IgnoreGroups]
+    ; Gruppen die im Dashboard nicht angezeigt werden sollen
+    ; Beispiel: TestGruppe = IFA12A - Test Team
+    ; Entferne das Semikolon vor einer Zeile um eine Gruppe zu ignorieren:
+    ; test_group = IFA12A - Team 5
+    IT_Lehrkraft = IT-Lehrkraft
 ```
+
+### IgnoreGroups Funktionalität
+
+Die `[IgnoreGroups]` Sektion ermöglicht es, bestimmte Gruppen vom Dashboard auszuschließen. Gruppen die hier aufgelistet sind, werden nicht in der Dashboard-Anzeige erscheinen, aber weiterhin in den Export-Daten enthalten sein.
+
+**Verwendung:**
+- Füge Gruppen im Format `gruppenname = Anzeigename` hinzu
+- Kommentiere Zeilen mit `;` aus, um sie zu deaktivieren
+- Die Filterung erfolgt nur auf Dashboard-Ebene, nicht beim Datenexport

@@ -2026,7 +2026,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ============= ZENTRALE LEISTUNGSNACHWEISE FUNKTIONEN =============
 
-// Zentrale Leistungsnachweise-Tabelle generieren (Zeilen = Personen, Spalten = Aufgaben)
+// Zentrale Leistungsnachweise-Tabelle generieren (Zeilen = Aufgaben, Spalten = Benutzer)
 function generateZentralTable() {
     const container = document.getElementById('zentralData');
     if (!container || !dashboardData || !dashboardData.structured_tables) return;
@@ -2044,53 +2044,42 @@ function generateZentralTable() {
         return;
     }
 
-    // Transponiere die Daten: Von (Aufgaben als Zeilen, Benutzer als Spalten) zu (Benutzer als Zeilen, Aufgaben als Spalten)
+    // Verwende die ursprüngliche Struktur: Aufgaben als Zeilen, Benutzer als Spalten
     const assignments = tableData.rows;
     const userNames = tableData.headers.slice(1); // Entferne "Aufgabe" Header
 
     let html = '<div style="overflow-x: auto;"><table id="zentralTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
 
-    // Header: Benutzer + Aufgabentitel
-    html += '<th style="min-width: 180px;">Benutzer</th>';
+    // Header: Aufgabe + Benutzernamen
+    html += '<th style="min-width: 250px;">Aufgabe</th>';
 
-    // Für jede Aufgabe eine Spalte mit Status/Note
-    assignments.forEach(assignment => {
-        const typeIcon = assignment.assignment_type === 'quiz' ? '🧭' : '📝';
-        const fullTitle = `${typeIcon} ${assignment.assignment_title}`;
-        const shortTitle = assignment.assignment_title.length > 8 ?
-            assignment.assignment_title.substring(0, 8) + '...' :
-            assignment.assignment_title;
-
-        html += `<th class="zentral-assignment-header" title="${fullTitle}">`;
-        html += `<a href="${assignment.assignment_url}" target="_blank">${typeIcon} ${shortTitle}</a>`;
-        html += `<small>Typ: ${assignment.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
-        html += `</th>`;
+    // Für jeden Benutzer eine Spalte mit Zeilenumbruch bei erstem Leerzeichen
+    userNames.forEach(userName => {
+        const displayName = userName.replace(' ', '<br>');
+        html += `<th style="min-width: 120px; text-align: center;">${displayName}</th>`;
     });
     html += '</tr></thead>';
 
     html += '<tbody>';
 
-    // Zeilen für jeden Benutzer
-    userNames.forEach((userName, userIndex) => {
+    // Zeilen für jede Aufgabe
+    assignments.forEach((assignment, assignmentIndex) => {
         html += '<tr>';
 
-        // Benutzername
-        html += `<td style="min-width: 180px; font-weight: 500;">${userName}</td>`;
+        // Aufgabentitel mit Link
+        const typeIcon = assignment.assignment_type === 'quiz' ? '🧭' : '📝';
+        const fullTitle = `${typeIcon} ${assignment.assignment_title}`;
 
-        // Status für jede Aufgabe
-        assignments.forEach((assignment, assignmentIndex) => {
-            // Debug: Prüfe Assignment-Struktur
-            console.log(`Assignment ${assignmentIndex} (${assignment.title}):`, {
-                hasUserStatus: !!assignment.user_status,
-                userStatusLength: assignment.user_status ? assignment.user_status.length : 'undefined',
-                userIndex: userIndex,
-                assignmentKeys: Object.keys(assignment)
-            });
+        html += `<td style="min-width: 250px; font-weight: 500;">`;
+        html += `<a href="${assignment.assignment_url}" target="_blank">${fullTitle}</a>`;
+        html += `<br><small>Typ: ${assignment.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
+        html += `</td>`;
 
+        // Status für jeden Benutzer
+        userNames.forEach((userName, userIndex) => {
             // Prüfe ob user_status vorhanden ist
             if (!assignment.user_status || assignment.user_status.length === 0) {
-                console.log(`❌ Assignment ${assignment.title}: Keine user_status Daten verfügbar`);
                 // Keine user_status Daten verfügbar
                 html += `<td style="background-color: #f8f9fa; text-align: center;">
                     <span style="color: #6c757d;">Keine Daten</span>
@@ -2099,32 +2088,22 @@ function generateZentralTable() {
             }
 
             const status = assignment.user_status[userIndex];
-            console.log(`User ${userIndex} (${userName}) - Assignment ${assignment.title}:`, {
-                status: status,
-                statusValue: status ? status.status : 'undefined',
-                grade: status ? status.grade : 'undefined'
-            });
 
             let cellContent = '';
             let cellClass = '';
             let bgColor = '';
 
             if (status.status === 'Nicht eingereicht' || !status.status) {
-                console.log(`🔴 ${userName} - ${assignment.title}: NICHT EINGEREICHT (status: ${status ? status.status : 'undefined'})`);
-                // Nicht eingereicht - zeige "-"
                 // Nicht eingereicht - zeige "-"
                 cellContent = '❌ -';
                 cellClass = 'status-missing';
                 bgColor = '#f8d7da'; // Rot
             } else if (status.grade && status.grade !== '-') {
-                console.log(`🟢 ${userName} - ${assignment.title}: BEWERTET (grade: ${status.grade})`);
                 // Grade vorhanden - zeige Grade-Wert
                 cellContent = `✓ ${status.grade}`;
                 cellClass = 'status-graded';
                 bgColor = '#d4edda'; // Grün
             } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
-                console.log(`🟡 ${userName} - ${assignment.title}: ABGEGEBEN ABER NICHT BEWERTET (status: ${status.status})`);
-                // Zur Bewertung abgegeben - zeige "abgegeben"
                 // Zur Bewertung abgegeben - zeige "abgegeben"
                 cellContent = '⏳ abgegeben';
                 cellClass = 'status-submitted';
@@ -2152,79 +2131,132 @@ function generateZentralTable() {
     applyZentralViewFilters();
 }
 
-// Zentrale Leistungsnachweise für alle Gruppen
+// Zentrale Leistungsnachweise für alle Gruppen (Zeilen = Benutzer, Spalten = Leistungsnachweise)
 function generateAllGroupsZentralTable() {
     const container = document.getElementById('zentralData');
     if (!container || !dashboardData || !dashboardData.structured_tables) return;
 
-    let html = '<div style="overflow-x: auto;"><table id="allGroupsZentralTable" class="info-table dashboard-table">';
-    html += '<thead><tr>';
-    html += '<th style="min-width: 180px;">Benutzer</th>';
-    html += '<th style="min-width: 120px;">Gruppe</th>';
-    html += '<th style="min-width: 250px;">Zentrale Leistungsnachweis</th>';
-    html += '<th style="text-align: center; min-width: 120px;">Status</th>';
-    html += '<th style="text-align: center; min-width: 100px;">Note</th>';
-    html += '</tr></thead><tbody>';
+    // Sammle alle unique Assignments von allen Gruppen
+    const allAssignments = new Map(); // assignment_title -> assignment_data
+    const allUsers = new Map(); // userName -> { groupName, assignments: Map(assignment_title -> status) }
 
-    // Sammle alle Zentrale Leistungsnachweise von allen Gruppen
     Object.keys(dashboardData.structured_tables).forEach(groupName => {
         const groupData = dashboardData.structured_tables[groupName];
         const tableData = groupData?.zentrale_leistungsnachweise;
 
         if (!tableData || !tableData.rows) return;
 
-        // Ursprüngliche Struktur: Zeilen sind Aufgaben, transponiere zu Benutzer-Zeilen
         const userNames = tableData.headers.slice(1); // Entferne "Aufgabe" Header
 
-        userNames.forEach((userName, userIndex) => {
-            tableData.rows.forEach(assignment => {
-                // Prüfe ob user_status vorhanden ist
-                if (!assignment.user_status || assignment.user_status.length === 0) {
-                    return; // Überspringe Assignment ohne Daten
+        // Sammle alle Assignments dieser Gruppe
+        tableData.rows.forEach(assignment => {
+            if (!allAssignments.has(assignment.assignment_title)) {
+                allAssignments.set(assignment.assignment_title, {
+                    title: assignment.assignment_title,
+                    url: assignment.assignment_url,
+                    type: assignment.assignment_type
+                });
+            }
+
+            // Sammle User-Status für dieses Assignment
+            userNames.forEach((userName, userIndex) => {
+                if (!assignment.user_status || assignment.user_status.length === 0) return;
+
+                const fullUserKey = `${userName} (${groupName})`;
+
+                if (!allUsers.has(fullUserKey)) {
+                    allUsers.set(fullUserKey, {
+                        userName: userName,
+                        groupName: groupName,
+                        assignments: new Map()
+                    });
                 }
 
                 const status = assignment.user_status[userIndex];
-                const typeIcon = assignment.assignment_type === 'quiz' ? '🧭' : '📝';
-
-                let statusText = '';
-                let gradeText = '';
-                let rowClass = '';
-                let bgColor = '';
-
-                if (status.status === 'Nicht eingereicht' || !status.status) {
-                    statusText = 'Offen';
-                    gradeText = '-';
-                    rowClass = 'status-missing';
-                    bgColor = '#f8d7da';
-                } else if (status.grade && status.grade !== '-') {
-                    statusText = 'Bewertet';
-                    gradeText = status.grade;
-                    rowClass = 'status-graded';
-                    bgColor = '#d4edda';
-                } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
-                    statusText = 'abgegeben';
-                    gradeText = 'abgegeben';
-                    rowClass = 'status-submitted';
-                    bgColor = '#fff3cd';
-                } else {
-                    statusText = status.status || 'Unbekannt';
-                    gradeText = '-';
-                    rowClass = 'status-other';
-                    bgColor = '#e2e3e5';
-                }
-
-                html += `<tr class="${rowClass}" style="background-color: ${bgColor};">`;
-                html += `<td style="font-weight: 500;">${userName}</td>`;
-                html += `<td>${groupName}</td>`;
-                html += `<td style="min-width: 250px;">`;
-                html += `<a href="${assignment.assignment_url}" target="_blank">${typeIcon} ${assignment.assignment_title}</a>`;
-                html += `<br><small style="color: #666;">Typ: ${assignment.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
-                html += `</td>`;
-                html += `<td style="text-align: center;">${statusText}</td>`;
-                html += `<td style="text-align: center;">${gradeText}</td>`;
-                html += '</tr>';
+                allUsers.get(fullUserKey).assignments.set(assignment.assignment_title, status);
             });
         });
+    });
+
+    // Sortiere Assignments alphabetisch
+    const sortedAssignments = Array.from(allAssignments.values()).sort((a, b) => a.title.localeCompare(b.title));
+
+    // Sortiere Users alphabetisch
+    const sortedUsers = Array.from(allUsers.values()).sort((a, b) => {
+        const nameA = `${a.userName} (${a.groupName})`;
+        const nameB = `${b.userName} (${b.groupName})`;
+        return nameA.localeCompare(nameB);
+    });
+
+    let html = '<div style="overflow-x: auto;"><table id="allGroupsZentralTable" class="info-table dashboard-table">';
+    html += '<thead><tr>';
+
+    // Header: Benutzer + Gruppe + alle Assignments
+    html += '<th style="min-width: 180px;">Benutzer</th>';
+    html += '<th style="min-width: 120px;">Gruppe</th>';
+
+    sortedAssignments.forEach(assignment => {
+        const typeIcon = assignment.type === 'quiz' ? '🧭' : '📝';
+        const shortTitle = assignment.title.length > 12 ?
+            assignment.title.substring(0, 12) + '...' : assignment.title;
+
+        html += `<th style="min-width: 100px; text-align: center;" title="${typeIcon} ${assignment.title}">`;
+        html += `<a href="${assignment.url}" target="_blank">${typeIcon}<br>${shortTitle}</a>`;
+        html += `</th>`;
+    });
+    html += '</tr></thead>';
+
+    html += '<tbody>';
+
+    // Zeilen für jeden Benutzer
+    sortedUsers.forEach(user => {
+        html += '<tr>';
+
+        // Benutzername mit Zeilenumbruch
+        const displayName = user.userName.replace(' ', '<br>');
+        html += `<td style="min-width: 180px; font-weight: 500;">${displayName}</td>`;
+
+        // Gruppenname
+        html += `<td style="min-width: 120px;">${user.groupName}</td>`;
+
+        // Status für jedes Assignment
+        sortedAssignments.forEach(assignment => {
+            const status = user.assignments.get(assignment.title);
+
+            if (!status) {
+                // Kein Status verfügbar
+                html += `<td style="background-color: #f8f9fa; text-align: center;">
+                    <span style="color: #6c757d;">-</span>
+                </td>`;
+                return;
+            }
+
+            let cellContent = '';
+            let cellClass = '';
+            let bgColor = '';
+
+            if (status.status === 'Nicht eingereicht' || !status.status) {
+                cellContent = '❌';
+                cellClass = 'status-missing';
+                bgColor = '#f8d7da'; // Rot
+            } else if (status.grade && status.grade !== '-') {
+                cellContent = `✓<br>${status.grade}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
+                cellContent = '⏳';
+                cellClass = 'status-submitted';
+                bgColor = '#fff3cd'; // Gelb
+            } else {
+                cellContent = '?';
+                cellClass = 'status-other';
+                bgColor = '#e2e3e5'; // Grau
+            }
+
+            html += `<td class="${cellClass}" style="text-align: center; background-color: ${bgColor}; font-size: 12px;">${cellContent}</td>`;
+        });
+
+        html += '</tr>';
     });
 
     html += '</tbody></table></div>';
@@ -2232,34 +2264,6 @@ function generateAllGroupsZentralTable() {
 
     // Tabelle sortierbar machen
     makeTableSortable('allGroupsZentralTable');
-
-    // Sofortige alphabetische Sortierung nach Aufgabennamen (3. Spalte)
-    const table = document.getElementById('allGroupsZentralTable');
-    if (table) {
-        const tbody = table.querySelector('tbody');
-        if (tbody) {
-            const rows = Array.from(tbody.querySelectorAll('tr'));
-
-            // Sortiere Zeilen alphabetisch nach dem dritten Spalteninhalt
-            rows.sort((a, b) => {
-                const aVal = getCellValue(a, 2, 'text');
-                const bVal = getCellValue(b, 2, 'text');
-                return aVal.localeCompare(bVal);
-            });
-
-            // Zeilen in sortierter Reihenfolge einfügen
-            rows.forEach(row => tbody.appendChild(row));
-
-            // Header als sortiert markieren
-            const headers = table.querySelectorAll('th');
-            if (headers[2]) {
-                headers[2].classList.add('sort-asc');
-            }
-
-            // Sortierstatus setzen
-            sortState['allGroupsZentralTable_2'] = 'asc';
-        }
-    }
 
     // Filter anwenden
     applyZentralViewFilters();
