@@ -2032,24 +2032,118 @@ document.addEventListener('DOMContentLoaded', function() {
 // Zentrale Leistungsnachweise-Tabelle generieren (Zeilen = Aufgaben, Spalten = Benutzer)
 function generateZentralTable() {
     const container = document.getElementById('zentralData');
-    if (!container || !dashboardData || !dashboardData.structured_tables) return;
 
-    // Bei "Alle Gruppen" alle Zentrale Leistungsnachweise von allen Benutzern anzeigen
+    // Bei "Alle Gruppen" verwende die spezielle Funktion
     if (currentGroup === 'all') {
         generateAllGroupsZentralTable();
         return;
     }
 
-    const tableData = dashboardData.structured_tables[currentGroup]?.zentrale_leistungsnachweise;
+    // Für einzelne Gruppen: Filtere Daten nach Gruppe (gleiche Logik wie generatePflichtTableFromActivities)
+    console.log('DEBUG ZENTRAL: Verfügbare Gruppen:', Object.keys(dashboardData.groups || {}));
+    console.log('DEBUG ZENTRAL: Gewählte Gruppe:', currentGroup);
 
-    if (!tableData) {
-        container.innerHTML = '<p>Keine Daten für die ausgewählte Gruppe verfügbar.</p>';
+    if (!dashboardData.groups || !dashboardData.groups[currentGroup]) {
+        container.innerHTML = `<p>Gruppe "${currentGroup}" nicht gefunden.</p>
+                               <p>Verfügbare Gruppen: ${Object.keys(dashboardData.groups || {}).join(', ')}</p>`;
         return;
     }
 
-    // Verwende die ursprüngliche Struktur: Aufgaben als Zeilen, Benutzer als Spalten
-    const assignments = tableData.rows;
-    const userNames = tableData.headers.slice(1); // Entferne "Aufgabe" Header
+    // Kategorie-Filter anwenden (gleiche Logik wie bei generatePflichtTableFromActivities)
+    const categoryFilter = document.getElementById('zentralCategoryFilter')?.value || 'zentrale';
+    let categoriesToShow;
+
+    if (categoryFilter === 'zentrale') {
+        categoriesToShow = dashboardData.activities_by_category.filter(category =>
+            category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
+        );
+    } else if (categoryFilter === 'all') {
+        categoriesToShow = dashboardData.activities_by_category;
+    } else {
+        const selectedCategoryName = dashboardData.activities_by_category.find(category =>
+            category.category_name && category.category_name.toLowerCase().replace(/[^a-z0-9]/g, '') === categoryFilter
+        )?.category_name;
+
+        if (selectedCategoryName) {
+            categoriesToShow = dashboardData.activities_by_category.filter(category =>
+                category.category_name === selectedCategoryName
+            );
+        } else {
+            categoriesToShow = dashboardData.activities_by_category.filter(category =>
+                category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
+            );
+        }
+    }
+
+    // Sammle sowohl assignments als auch quizzes aus den gewählten Kategorien
+    let allActivities = [];
+    categoriesToShow.forEach(category => {
+        // Assignments hinzufügen
+        if (category.assignments && category.assignments.length > 0) {
+            category.assignments.forEach(assignment => {
+                allActivities.push({
+                    ...assignment,
+                    category_name: category.category_name,
+                    activity_type: 'assignment'
+                });
+            });
+        }
+        // Quizzes hinzufügen
+        if (category.quizzes && category.quizzes.length > 0) {
+            category.quizzes.forEach(quiz => {
+                allActivities.push({
+                    ...quiz,
+                    category_name: category.category_name,
+                    activity_type: 'quiz'
+                });
+            });
+        }
+    });
+
+    console.log('DEBUG ZENTRAL: Gefundene Kategorien:', categoriesToShow.length);
+    console.log('DEBUG ZENTRAL: Alle Aktivitäten:', allActivities.length);
+
+    // Benutzer der ausgewählten Gruppe (gleiche Logik wie Pflichtaufgaben)
+    const groupUsers = dashboardData.groups[currentGroup].users || [];
+    const groupUserNames = new Set();
+    groupUsers.forEach(user => {
+        const userName = user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
+        groupUserNames.add(userName);
+        console.log('DEBUG ZENTRAL: User object:', user, 'extracted name:', userName);
+    });
+
+    console.log('DEBUG ZENTRAL: Gruppe', currentGroup, 'hat', groupUsers.length, 'Benutzer, extrahierte Namen:', Array.from(groupUserNames));
+
+    // Aktivitäten filtern um nur Benutzer aus der aktuellen Gruppe zu zeigen
+    const filteredActivities = allActivities.map(activity => ({
+        ...activity,
+        user_status: activity.user_status ? activity.user_status.filter(userStatus =>
+            groupUserNames.has(userStatus.user_name)
+        ) : []
+    })).filter(activity => activity.user_status.length > 0);
+
+    console.log('DEBUG ZENTRAL: Nach Filterung:', filteredActivities.length, 'Aktivitäten übrig');
+
+    if (filteredActivities.length === 0) {
+        container.innerHTML = `<p>Keine Zentrale Leistungsnachweise für die ausgewählte Gruppe "${currentGroup}" verfügbar.</p>
+                               <p>Debug: ${allActivities.length} Aktivitäten gefunden, aber keine für Benutzer dieser Gruppe.</p>`;
+        return;
+    }
+
+    // Sammle alle einzigartigen Benutzer aus den gefilterten Aktivitäten
+    const allUsers = new Set();
+    filteredActivities.forEach(activity => {
+        if (activity.user_status) {
+            activity.user_status.forEach(userStatus => {
+                if (userStatus.user_name) {
+                    allUsers.add(userStatus.user_name);
+                }
+            });
+        }
+    });
+    const sortedUsers = Array.from(allUsers).sort();
+
+    console.log('DEBUG ZENTRAL: Gefundene Benutzer:', sortedUsers);
 
     let html = '<div style="overflow-x: auto;"><table id="zentralTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
@@ -2058,7 +2152,7 @@ function generateZentralTable() {
     html += '<th style="min-width: 250px;">Aufgabe</th>';
 
     // Für jeden Benutzer eine Spalte mit Zeilenumbruch bei erstem Leerzeichen
-    userNames.forEach(userName => {
+    sortedUsers.forEach(userName => {
         const displayName = userName.replace(' ', '<br>');
         html += `<th style="min-width: 120px; text-align: center;">${displayName}</th>`;
     });
@@ -2067,36 +2161,41 @@ function generateZentralTable() {
     html += '<tbody>';
 
     // Zeilen für jede Aufgabe
-    assignments.forEach((assignment, assignmentIndex) => {
+    filteredActivities.forEach((activity, activityIndex) => {
         html += '<tr>';
 
         // Aufgabentitel mit Link
-        const typeIcon = assignment.assignment_type === 'quiz' ? '🧭' : '📝';
-        const fullTitle = `${typeIcon} ${assignment.assignment_title}`;
+        const typeIcon = activity.activity_type === 'quiz' ? '🧭' : '📝';
+        const fullTitle = `${typeIcon} ${activity.title}`;
 
         html += `<td style="min-width: 250px; font-weight: 500;">`;
-        html += `<a href="${assignment.assignment_url}" target="_blank">${fullTitle}</a>`;
-        html += `<br><small>Typ: ${assignment.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
+        html += `<a href="${activity.url}" target="_blank">${fullTitle}</a>`;
+        html += `<br><small>Typ: ${activity.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
         html += `</td>`;
 
-        // Status für jeden Benutzer
-        userNames.forEach((userName, userIndex) => {
-            // Prüfe ob user_status vorhanden ist
-            if (!assignment.user_status || assignment.user_status.length === 0) {
-                // Keine user_status Daten verfügbar
-                html += `<td style="background-color: #f8f9fa; text-align: center;">
-                    <span style="color: #6c757d;">Keine Daten</span>
-                </td>`;
-                return;
-            }
+        // Status für jeden Benutzer (gleiche Logik wie generatePflichtTableFromActivities)
+        sortedUsers.forEach(userName => {
+            const userId = groupUsers.find(user => (user.user_name || user.name || user.username || user.display_name) === userName)?.user_id;
 
-            const status = assignment.user_status[userIndex];
+            // Finde den Status für diesen Benutzer (wie in generatePflichtTableFromActivities)
+            let status = null;
+            if (activity.user_status) {
+                status = activity.user_status.find(s =>
+                    (s.user_id && userId && s.user_id === userId) ||
+                    (s.user_name && userName && s.user_name === userName)
+                );
+            }
 
             let cellContent = '';
             let cellClass = '';
             let bgColor = '';
 
-            if (status.status === 'Nicht eingereicht' || !status.status) {
+            if (!status) {
+                // Kein Status gefunden für diesen Benutzer
+                cellContent = '❓ Nicht gefunden';
+                cellClass = 'status-missing';
+                bgColor = '#f8f9fa'; // Grau
+            } else if (status.status === 'Nicht eingereicht' || !status.status) {
                 // Nicht eingereicht - zeige "-"
                 cellContent = '❌ -';
                 cellClass = 'status-missing';
@@ -2137,58 +2236,97 @@ function generateZentralTable() {
 // Zentrale Leistungsnachweise für alle Gruppen (Zeilen = Benutzer, Spalten = Leistungsnachweise)
 function generateAllGroupsZentralTable() {
     const container = document.getElementById('zentralData');
-    if (!container || !dashboardData || !dashboardData.structured_tables) return;
+    if (!container || !dashboardData || !dashboardData.activities_by_category) return;
 
-    // Sammle alle unique Assignments von allen Gruppen
-    const allAssignments = new Map(); // assignment_title -> assignment_data
-    const allUsers = new Map(); // userName -> { groupName, assignments: Map(assignment_title -> status) }
+    console.log('DEBUG ALL GROUPS ZENTRAL: Starting generateAllGroupsZentralTable');
 
-    Object.keys(dashboardData.structured_tables).forEach(groupName => {
-        // Überspringe ignorierte Gruppen
-        if (dashboardData.ignored_groups && dashboardData.ignored_groups.includes(groupName)) {
-            console.log(`DEBUG: Skipping ignored group in All Groups view: ${groupName}`);
-            return;
+    // Kategorie-Filter anwenden (gleiche Logik wie einzelne Gruppen)
+    const categoryFilter = document.getElementById('zentralCategoryFilter')?.value || 'zentrale';
+    let categoriesToShow;
+
+    if (categoryFilter === 'zentrale') {
+        categoriesToShow = dashboardData.activities_by_category.filter(category =>
+            category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
+        );
+    } else if (categoryFilter === 'all') {
+        categoriesToShow = dashboardData.activities_by_category;
+    } else {
+        const selectedCategoryName = dashboardData.activities_by_category.find(category =>
+            category.category_name && category.category_name.toLowerCase().replace(/[^a-z0-9]/g, '') === categoryFilter
+        )?.category_name;
+
+        if (selectedCategoryName) {
+            categoriesToShow = dashboardData.activities_by_category.filter(category =>
+                category.category_name === selectedCategoryName
+            );
+        } else {
+            categoriesToShow = dashboardData.activities_by_category.filter(category =>
+                category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
+            );
         }
+    }
 
-        const groupData = dashboardData.structured_tables[groupName];
-        const tableData = groupData?.zentrale_leistungsnachweise;
-
-        if (!tableData || !tableData.rows) return;
-
-        const userNames = tableData.headers.slice(1); // Entferne "Aufgabe" Header
-
-        // Sammle alle Assignments dieser Gruppe
-        tableData.rows.forEach(assignment => {
-            if (!allAssignments.has(assignment.assignment_title)) {
-                allAssignments.set(assignment.assignment_title, {
-                    title: assignment.assignment_title,
-                    url: assignment.assignment_url,
-                    type: assignment.assignment_type
+    // Sammle sowohl assignments als auch quizzes aus den gewählten Kategorien
+    let allActivities = [];
+    categoriesToShow.forEach(category => {
+        // Assignments hinzufügen
+        if (category.assignments && category.assignments.length > 0) {
+            category.assignments.forEach(assignment => {
+                allActivities.push({
+                    ...assignment,
+                    category_name: category.category_name,
+                    activity_type: 'assignment'
                 });
-            }
-
-            // Sammle User-Status für dieses Assignment
-            userNames.forEach((userName, userIndex) => {
-                if (!assignment.user_status || assignment.user_status.length === 0) return;
-
-                const fullUserKey = `${userName} (${groupName})`;
-
-                if (!allUsers.has(fullUserKey)) {
-                    allUsers.set(fullUserKey, {
-                        userName: userName,
-                        groupName: groupName,
-                        assignments: new Map()
-                    });
-                }
-
-                const status = assignment.user_status[userIndex];
-                allUsers.get(fullUserKey).assignments.set(assignment.assignment_title, status);
             });
-        });
+        }
+        // Quizzes hinzufügen
+        if (category.quizzes && category.quizzes.length > 0) {
+            category.quizzes.forEach(quiz => {
+                allActivities.push({
+                    ...quiz,
+                    category_name: category.category_name,
+                    activity_type: 'quiz'
+                });
+            });
+        }
     });
 
-    // Sortiere Assignments alphabetisch
-    const sortedAssignments = Array.from(allAssignments.values()).sort((a, b) => a.title.localeCompare(b.title));
+    console.log('DEBUG ALL GROUPS ZENTRAL: Gefundene Aktivitäten:', allActivities.length);
+
+    if (allActivities.length === 0) {
+        container.innerHTML = '<p>Keine Zentrale Leistungsnachweise verfügbar.</p>';
+        return;
+    }
+
+    // Sammle alle Benutzer aus allen Gruppen
+    const allUsers = new Map(); // fullUserKey -> { userName, groupName, userId }
+    if (dashboardData.groups) {
+        Object.keys(dashboardData.groups).forEach(groupName => {
+            // Überspringe ignorierte Gruppen
+            if (dashboardData.ignored_groups && dashboardData.ignored_groups.includes(groupName)) {
+                console.log(`DEBUG ALL GROUPS ZENTRAL: Skipping ignored group: ${groupName}`);
+                return;
+            }
+
+            const groupUsers = dashboardData.groups[groupName].users || [];
+            groupUsers.forEach(user => {
+                const userName = user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
+                const userId = user.user_id;
+                const fullUserKey = `${userName} (${groupName})`;
+
+                allUsers.set(fullUserKey, {
+                    userName: userName,
+                    groupName: groupName,
+                    userId: userId
+                });
+            });
+        });
+    }
+
+    console.log('DEBUG ALL GROUPS ZENTRAL: Gefundene Benutzer:', allUsers.size);
+
+    // Sortiere Aktivitäten alphabetisch
+    const sortedActivities = allActivities.sort((a, b) => a.title.localeCompare(b.title));
 
     // Sortiere Users alphabetisch
     const sortedUsers = Array.from(allUsers.values()).sort((a, b) => {
@@ -2200,17 +2338,17 @@ function generateAllGroupsZentralTable() {
     let html = '<div style="overflow-x: auto;"><table id="allGroupsZentralTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
 
-    // Header: Benutzer + Gruppe + alle Assignments
+    // Header: Benutzer + Gruppe + alle Activities
     html += '<th style="min-width: 180px;">Benutzer</th>';
     html += '<th style="min-width: 120px;">Gruppe</th>';
 
-    sortedAssignments.forEach(assignment => {
-        const typeIcon = assignment.type === 'quiz' ? '🧭' : '📝';
-        const shortTitle = assignment.title.length > 12 ?
-            assignment.title.substring(0, 12) + '...' : assignment.title;
+    sortedActivities.forEach(activity => {
+        const typeIcon = activity.activity_type === 'quiz' ? '🧭' : '📝';
+        const shortTitle = activity.title.length > 12 ?
+            activity.title.substring(0, 12) + '...' : activity.title;
 
-        html += `<th style="min-width: 100px; text-align: center;" title="${typeIcon} ${assignment.title}">`;
-        html += `<a href="${assignment.url}" target="_blank">${typeIcon}<br>${shortTitle}</a>`;
+        html += `<th style="min-width: 100px; text-align: center;" title="${typeIcon} ${activity.title}">`;
+        html += `<a href="${activity.url}" target="_blank">${typeIcon}<br>${shortTitle}</a>`;
         html += `</th>`;
     });
     html += '</tr></thead>';
@@ -2228,23 +2366,27 @@ function generateAllGroupsZentralTable() {
         // Gruppenname
         html += `<td style="min-width: 120px;">${user.groupName}</td>`;
 
-        // Status für jedes Assignment
-        sortedAssignments.forEach(assignment => {
-            const status = user.assignments.get(assignment.title);
-
-            if (!status) {
-                // Kein Status verfügbar
-                html += `<td style="background-color: #f8f9fa; text-align: center;">
-                    <span style="color: #6c757d;">-</span>
-                </td>`;
-                return;
+        // Status für jede Activity (gleiche Logik wie einzelne Gruppen)
+        sortedActivities.forEach(activity => {
+            // Finde den Status für diesen Benutzer (gleiche Logik wie generateZentralTable)
+            let status = null;
+            if (activity.user_status) {
+                status = activity.user_status.find(s =>
+                    (s.user_id && user.userId && s.user_id === user.userId) ||
+                    (s.user_name && user.userName && s.user_name === user.userName)
+                );
             }
 
             let cellContent = '';
             let cellClass = '';
             let bgColor = '';
 
-            if (status.status === 'Nicht eingereicht' || !status.status) {
+            if (!status) {
+                // Kein Status gefunden für diesen Benutzer
+                cellContent = '-';
+                cellClass = 'status-missing';
+                bgColor = '#f8f9fa'; // Grau
+            } else if (status.status === 'Nicht eingereicht' || !status.status) {
                 cellContent = '❌';
                 cellClass = 'status-missing';
                 bgColor = '#f8d7da'; // Rot
