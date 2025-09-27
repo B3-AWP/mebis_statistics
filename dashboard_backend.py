@@ -331,9 +331,12 @@ def create_structured_tables(groups_data, categories):
                     'type': 'quiz'
                 })
 
-        # Zentrale Leistungsnachweise sammeln (nur aus Zentrale Leistungsnachweise-Kategorie)
-        if category['category_name'] == "📊 Zentrale Leistungsnachweise":
-            print(f"DEBUG: Gefunden Zentrale Leistungsnachweise Kategorie mit {len(category.get('assignments', []))} assignments und {len(category.get('quizzes', []))} quizzes")
+        # Zentrale Leistungsnachweise sammeln (alle Kategorien mit "Zentrale Leistungsnachweise" im Namen)
+        if category['category_name'] and ('Zentrale Leistungsnachweise' in category['category_name'] or 'chart' in category['category_name'].lower()):
+            try:
+                print(f"DEBUG: Gefunden Zentrale Leistungsnachweise Kategorie mit {len(category.get('assignments', []))} assignments und {len(category.get('quizzes', []))} quizzes")
+            except UnicodeEncodeError:
+                print("DEBUG: Gefunden Zentrale Leistungsnachweise Kategorie (Unicode error in name)")
             for assignment in category.get('assignments', []):
                 zentrale_assignments.append({
                     'id': assignment['id'],
@@ -403,6 +406,8 @@ def create_structured_tables(groups_data, categories):
             for user in users:
                 # Finde den Status dieser Aufgabe für diesen Benutzer
                 status = find_user_assignment_status(user, assignment['id'])
+                # Füge user_name hinzu für Frontend-Kompatibilität
+                status['user_name'] = user.get('name', 'Unknown')
                 row['user_status'].append(status)
 
             pflicht_table['rows'].append(row)
@@ -425,6 +430,9 @@ def create_structured_tables(groups_data, categories):
             for user in users:
                 # Finde den Status dieser Aufgabe für diesen Benutzer
                 status = find_user_assignment_status(user, assignment['id'])
+                # Füge user_name hinzu für Frontend-Kompatibilität
+                status['user_name'] = user.get('name', 'Unknown')
+                print(f"DEBUG ZENTRAL: Added user_name '{status['user_name']}' to status: {status}")
                 row['user_status'].append(status)
 
             zentrale_table['rows'].append(row)
@@ -503,15 +511,18 @@ def find_user_assignment_status(user, assignment_id):
 
     # Suche in quizzes
     for quiz in activities.get('quizzes', []):
+        print(f"DEBUG: Prüfe Quiz {quiz.get('id')} gegen {assignment_id}")
         if quiz.get('id') == assignment_id:
             status_info = quiz.get('status', {})
             raw_grade = status_info.get('grade', '-')
             rounded_grade = round_grade(raw_grade)
-            return {
+            result = {
                 'status': status_info.get('status', 'Nicht eingereicht'),
                 'status2': status_info.get('status2', ''),
                 'grade': rounded_grade
             }
+            print(f"DEBUG: QUIZ MATCH! {user.get('name')} - Quiz {assignment_id}: {result}")
+            return result
 
     # Wenn nicht gefunden
     result = {
@@ -539,65 +550,139 @@ def get_data():
     try:
         # Neueste JSON-Datei finden
         print("DEBUG API: Suche neueste JSON-Datei...")
-        latest_file = find_latest_file()
-        print(f"DEBUG API: latest_file = {latest_file}")
+        try:
+            latest_file = find_latest_file()
+            print(f"DEBUG API: latest_file = {latest_file}")
+        except Exception as e:
+            print(f"DEBUG API: Error in find_latest_file: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Fehler beim Finden der Export-Datei: {str(e)}'}), 500
+
         if not latest_file:
             print("DEBUG API: Keine Export-Datei gefunden!")
             return jsonify({'error': 'Keine Export-Datei gefunden'}), 404
 
         # Daten laden
         print("DEBUG API: Lade JSON-Daten...")
-        data = load_json_data(latest_file)
-        print(f"DEBUG API: data ist None: {data is None}")
-        if data:
-            print(f"DEBUG API: data.keys(): {list(data.keys())}")
-            print(f"DEBUG API: hat activities_by_category: {'activities_by_category' in data}")
-        else:
-            print("DEBUG API: data ist None!")
+        try:
+            data = load_json_data(latest_file)
+            print(f"DEBUG API: data ist None: {data is None}")
+            if data:
+                print(f"DEBUG API: data.keys(): {list(data.keys())}")
+                print(f"DEBUG API: hat activities_by_category: {'activities_by_category' in data}")
+                print(f"DEBUG API: Anzahl Gruppen: {len(data.get('groups', []))}")
+            else:
+                print("DEBUG API: data ist None!")
+        except Exception as e:
+            print(f"DEBUG API: Error in load_json_data: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Fehler beim Laden der JSON-Daten: {str(e)}'}), 500
+
         if not data:
             return jsonify({'error': 'Fehler beim Laden der Daten'}), 500
 
-        excluded_names = load_excluded_names()
-        ignored_groups = load_ignored_groups()
-        assignment_details = get_assignment_details(data['activities_by_category'])
+        print("DEBUG API: Lade Hilfsdaten...")
+        try:
+            excluded_names = load_excluded_names()
+            print(f"DEBUG API: excluded_names geladen: {len(excluded_names)} Namen")
+        except Exception as e:
+            print(f"DEBUG API: Error loading excluded_names: {e}")
+            excluded_names = set()
+
+        try:
+            ignored_groups = load_ignored_groups()
+            print(f"DEBUG API: ignored_groups geladen: {len(ignored_groups)} Gruppen")
+        except Exception as e:
+            print(f"DEBUG API: Error loading ignored_groups: {e}")
+            ignored_groups = set()
+
+        try:
+            assignment_details = get_assignment_details(data['activities_by_category'])
+            print(f"DEBUG API: assignment_details erstellt: {len(assignment_details)} Details")
+        except Exception as e:
+            print(f"DEBUG API: Error in get_assignment_details: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Fehler beim Erstellen der Assignment-Details: {str(e)}'}), 500
 
         # Benutzer nach Gruppen organisieren
+        print("DEBUG API: Beginne Gruppen-Verarbeitung...")
         groups_data = {}
-        for group in data['groups']:
-            group_name = group['name']
+        try:
+            for i, group in enumerate(data['groups']):
+                print(f"DEBUG API: Verarbeite Gruppe {i+1}/{len(data['groups'])}: {group.get('name', 'UNKNOWN')}")
+                group_name = group['name']
 
-            # Überspringe ignorierte Gruppen
-            if group_name in ignored_groups:
-                print(f"DEBUG: Skipping ignored group: {group_name}")
-                continue
+                # Überspringe ignorierte Gruppen
+                if group_name in ignored_groups:
+                    print(f"DEBUG: Skipping ignored group: {group_name}")
+                    continue
 
-            group_users = [user for user in group['users'] if user['name'] not in excluded_names]
+                group_users = [user for user in group['users'] if user['name'] not in excluded_names]
+                print(f"DEBUG API: Gruppe {group_name} hat {len(group_users)} Benutzer (nach Filterung)")
 
-            if group_users:  # Nur Gruppen mit Benutzern
-                groups_data[group_name] = {
-                    'name': group_name,
-                    'users': []
-                }
+                if group_users:  # Nur Gruppen mit Benutzern
+                    groups_data[group_name] = {
+                        'name': group_name,
+                        'users': []
+                    }
 
-                for user in group_users:
-                    # Setze die Gruppe für jeden Benutzer
-                    user['group'] = group_name
-                    user_progress = calculate_user_progress(
-                        user, assignment_details, data['activities_by_category'], 10, 40
-                    )
-                    groups_data[group_name]['users'].append(user_progress)
+                    for j, user in enumerate(group_users):
+                        try:
+                            print(f"DEBUG API: Verarbeite Benutzer {j+1}/{len(group_users)} in Gruppe {group_name}: {user.get('name', 'UNKNOWN')}")
+                            # Setze die Gruppe für jeden Benutzer
+                            user['group'] = group_name
+                            user_progress = calculate_user_progress(
+                                user, assignment_details, data['activities_by_category'], 10, 40
+                            )
+                            groups_data[group_name]['users'].append(user_progress)
+                        except Exception as e:
+                            print(f"DEBUG API: Error processing user {user.get('name', 'UNKNOWN')}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            # Füge einen Fallback-Benutzer hinzu
+                            groups_data[group_name]['users'].append({
+                                "name": user.get('name', 'UNKNOWN'),
+                                "group": group_name,
+                                "assignments": {"reviewed_count": 0, "submitted_count": 0, "grades": {}, "percent_submitted": 0, "percent_submitted_timed": 0, "average_grade": None},
+                                "checklists": {"required_100_count": 0, "avg_required_progress": 0, "avg_all_progress": 0, "avg_required_progress_timed": 0, "avg_all_progress_timed": 0, "individual_checklists": []}
+                            })
+        except Exception as e:
+            print(f"DEBUG API: Error in groups processing: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Fehler bei der Gruppen-Verarbeitung: {str(e)}'}), 500
+
+        print(f"DEBUG API: Gruppen-Verarbeitung abgeschlossen. {len(groups_data)} Gruppen erstellt.")
 
         # Gesamtstatistiken für alle Gruppen
-        all_users = []
-        for group_data in groups_data.values():
-            all_users.extend(group_data['users'])
+        print("DEBUG API: Berechne Gesamtstatistiken...")
+        try:
+            all_users = []
+            for group_data in groups_data.values():
+                all_users.extend(group_data['users'])
+            print(f"DEBUG API: {len(all_users)} Benutzer für Statistiken gesammelt")
 
-        overall_stats = calculate_group_averages(all_users)
+            overall_stats = calculate_group_averages(all_users)
+            print(f"DEBUG API: Gesamtstatistiken berechnet")
+        except Exception as e:
+            print(f"DEBUG API: Error calculating overall stats: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Fehler bei der Statistik-Berechnung: {str(e)}'}), 500
 
         # Strukturierte Daten für Tabellen erstellen
         print(f"DEBUG API: Erstelle strukturierte Tabellen für {len(groups_data)} Gruppen und {len(data['activities_by_category'])} Kategorien")
-        structured_data = create_structured_tables(groups_data, data['activities_by_category'])
-        print(f"DEBUG API: Strukturierte Tabellen erstellt: {list(structured_data.keys())}")
+        try:
+            structured_data = create_structured_tables(groups_data, data['activities_by_category'])
+            print(f"DEBUG API: Strukturierte Tabellen erstellt: {list(structured_data.keys())}")
+        except Exception as e:
+            print(f"DEBUG API: Error creating structured tables: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Fehler beim Erstellen der strukturierten Tabellen: {str(e)}'}), 500
 
         # Debug: Prüfe zentrale Leistungsnachweise in jeder Gruppe
         for group_name, group_data in structured_data.items():
@@ -671,18 +756,31 @@ def get_data():
 
         activities_with_status = add_user_status_to_activities(activities_ordered, data, groups_data)
 
-        response_data = {
-            'groups': groups_data,
-            'overall_stats': overall_stats,
-            'assignment_details': assignment_details,
-            'categories': activities_with_status,
-            'activities_by_category': activities_with_status,  # Korrekte Frontend-Erwartung
-            'structured_tables': structured_data,
-            'ignored_groups': list(ignored_groups),
-            'last_updated': latest_file
-        }
+        print("DEBUG API: Erstelle finale Response...")
+        try:
+            response_data = {
+                'groups': groups_data,
+                'overall_stats': overall_stats,
+                'assignment_details': assignment_details,
+                'categories': activities_with_status,
+                'activities_by_category': activities_with_status,  # Korrekte Frontend-Erwartung
+                'structured_tables': structured_data,
+                'ignored_groups': list(ignored_groups),
+                'last_updated': latest_file
+            }
+            print(f"DEBUG API: Response-Daten erstellt mit {len(groups_data)} Gruppen")
 
-        return jsonify(response_data)
+            # JSON-Serialization test
+            import json
+            json_test = json.dumps(response_data, default=str, ensure_ascii=False)
+            print(f"DEBUG API: JSON-Serialization erfolgreich, Größe: {len(json_test)} Zeichen")
+
+            return jsonify(response_data)
+        except Exception as e:
+            print(f"DEBUG API: Error creating response: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Fehler beim Erstellen der Response: {str(e)}'}), 500
 
     except Exception as e:
         print(f"Error in get_data: {e}")
