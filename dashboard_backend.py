@@ -196,15 +196,10 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
             'type': details.get('type', 'unknown')
         })
 
-        # Versuche Note zu extrahieren (z.B. "1,5" oder "2")
-        try:
-            if grade_str and grade_str != 'Nicht bewertet':
-                grade_clean = grade_str.replace(',', '.')
-                grade_num = float(grade_clean)
-                if 1 <= grade_num <= 6:  # Deutsche Notenskala
-                    grades.append(grade_num)
-        except:
-            pass
+        # Konvertiere Note zu IHK-Format (unterstützt verschiedene Notenformate)
+        ihk_grade = convert_grade_to_ihk(grade_str)
+        if ihk_grade is not None:
+            grades.append(ihk_grade)
 
     # IHK-konforme Durchschnittsnote berechnen
     if grades:
@@ -284,8 +279,8 @@ def calculate_group_averages(users_data):
             "total_required_100": sum(user['checklists']['required_100_count'] for user in users_data),
             "avg_required_progress": round(sum(user['checklists']['avg_required_progress'] for user in users_data) / total_users, 2),
             "avg_all_progress": round(sum(user['checklists']['avg_all_progress'] for user in users_data) / total_users, 2),
-            "avg_required_progress_timed": round(sum(user['checklists']['avg_required_progress_timed'] for user in users_data) / total_users, 2),
-            "avg_all_progress_timed": round(sum(user['checklists']['avg_all_progress_timed'] for user in users_data) / total_users, 2)
+            "avg_required_progress_timed": 0,  # Wird unten berechnet
+            "avg_all_progress_timed": 0        # Wird unten berechnet
         }
     }
 
@@ -293,6 +288,12 @@ def calculate_group_averages(users_data):
     grades = [user['assignments']['average_grade'] for user in users_data if user['assignments']['average_grade'] is not None]
     if grades:
         group_data['assignments']['avg_grade'] = calculate_ihk_grade_average(grades)
+
+    # Die wochenbasierten Durchschnitte werden vom Frontend berechnet
+    # Setze sie auf die gleichen Werte wie die normalen Durchschnitte
+    # Das Frontend wird sie entsprechend der gewählten Woche anpassen
+    group_data['checklists']['avg_required_progress_timed'] = group_data['checklists']['avg_required_progress']
+    group_data['checklists']['avg_all_progress_timed'] = group_data['checklists']['avg_all_progress']
 
     return group_data
 
@@ -472,25 +473,63 @@ def ihk_grade_to_points(grade):
     }
     return grade_to_points.get(grade, 50)
 
+def convert_grade_to_ihk(grade_str):
+    """Konvertiert verschiedene Notenformate zu IHK-Note (1-6)"""
+    if not grade_str or grade_str in ['-', 'Nicht bewertet', 'Keine Bewertung']:
+        return None
+
+    grade_str = str(grade_str).strip()
+
+    # Sterne-basierte Noten (4-Punkt-System zu IHK)
+    star_mapping = {
+        "**** Exzellent": 1.0,           # Sehr gut
+        "*** Solide Umsetzung": 2.5,     # Gut-Befriedigend
+        "** Verbesserungsbedarf": 4.0,   # Ausreichend
+        "* Nicht akzeptabel": 5.5        # Mangelhaft
+    }
+
+    if grade_str in star_mapping:
+        return star_mapping[grade_str]
+
+    # Punkte-basierte Noten (z.B. "80 / 100")
+    if '/' in grade_str:
+        try:
+            parts = grade_str.split('/')
+            points = float(parts[0].strip())
+            max_points = float(parts[1].strip())
+            percentage = (points / max_points) * 100
+
+            # Konvertiere Prozent zu IHK-Note
+            return points_to_ihk_grade(percentage)
+        except (ValueError, IndexError):
+            pass
+
+    # Numerische Noten (1-6)
+    try:
+        if isinstance(grade_str, str):
+            grade_num = float(grade_str.replace(',', '.'))
+        else:
+            grade_num = float(grade_str)
+
+        # Nur Noten zwischen 1 und 6 sind gültig
+        if 1 <= grade_num <= 6:
+            return grade_num
+    except (ValueError, TypeError):
+        pass
+
+    return None
+
 def calculate_ihk_grade_average(grades):
-    """Berechnet IHK-konformen Notendurchschnitt aus numerischen Noten"""
+    """Berechnet IHK-konformen Notendurchschnitt aus verschiedenen Notenformaten"""
     if not grades:
         return None
 
-    # Filtere gültige Noten (1-6)
+    # Konvertiere alle Noten zu IHK-Format
     valid_grades = []
     for grade in grades:
-        try:
-            if isinstance(grade, str):
-                grade_num = float(grade.replace(',', '.'))
-            else:
-                grade_num = float(grade)
-
-            # Nur Noten zwischen 1 und 6 sind gültig
-            if 1 <= grade_num <= 6:
-                valid_grades.append(grade_num)
-        except (ValueError, TypeError):
-            continue
+        ihk_grade = convert_grade_to_ihk(grade)
+        if ihk_grade is not None:
+            valid_grades.append(ihk_grade)
 
     if not valid_grades:
         return None
@@ -711,6 +750,23 @@ def get_data():
             return jsonify({'error': f'Fehler bei der Gruppen-Verarbeitung: {str(e)}'}), 500
 
         print(f"DEBUG API: Gruppen-Verarbeitung abgeschlossen. {len(groups_data)} Gruppen erstellt.")
+
+        # Statistiken für jede einzelne Gruppe berechnen
+        print("DEBUG API: Berechne Statistiken für jede Gruppe...")
+        try:
+            for group_name, group_data in groups_data.items():
+                group_users = group_data['users']
+                print(f"DEBUG API: Berechne Statistiken für Gruppe '{group_name}' mit {len(group_users)} Benutzern")
+                group_stats = calculate_group_averages(group_users)
+
+                # Füge die Statistiken zur Gruppe hinzu
+                group_data.update(group_stats)
+                print(f"DEBUG API: Gruppe '{group_name}' - Durchschnittsnote: {group_stats.get('assignments', {}).get('avg_grade', 'None')}")
+        except Exception as e:
+            print(f"DEBUG API: Error calculating individual group stats: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Fehler bei der Gruppen-Statistik-Berechnung: {str(e)}'}), 500
 
         # Gesamtstatistiken für alle Gruppen
         print("DEBUG API: Berechne Gesamtstatistiken...")

@@ -514,17 +514,17 @@ function updateOverviewStats(groupStats, users) {
     updateProgressRing('completionRing', Math.min(percentChecklists, 100));
 
     // Durchschnittlicher Fortschritt (wochenabhängig)
+    // Korrekte Berechnung: Erst Gruppendurchschnitt, dann Zeitprojektion
     const currentProgressType = document.querySelector('input[name="progressType"]:checked').value;
-    const progressValue = currentProgressType === 'pflicht' ?
-        groupStats.checklists.avg_required_progress_timed :
-        groupStats.checklists.avg_all_progress_timed;
+    const baseProgress = currentProgressType === 'pflicht' ?
+        groupStats.checklists.avg_required_progress :
+        groupStats.checklists.avg_all_progress;
 
-    // Debug logging for the card display
-    console.log('=== CARD UPDATE DEBUG ===');
-    console.log('currentProgressType:', currentProgressType);
-    console.log('groupStats.checklists:', groupStats.checklists);
-    console.log('progressValue that will be displayed:', progressValue);
-    console.log('This goes to card:', progressValue + '%');
+    // Zeitprojektion auf Gruppenbasis anwenden (nicht auf Benutzerbasis)
+    // Das System arbeitet mit 10 Wochen als Maximalwert (entspricht dem Slider-Maximum)
+    const progressValue = currentWeek > 0 ?
+        Math.round(((baseProgress / currentWeek) * maxWeeks) * 100) / 100 : 0;
+
 
     document.getElementById('avgCompletionText').textContent = progressValue + '%';
     document.getElementById('avgCompletionBar').style.width = Math.min(progressValue, 100) + '%';
@@ -584,11 +584,8 @@ function calculateStatsForGroup(groupName, groupData) {
     const avgRequiredProgress = users.reduce((sum, user) => sum + user.checklists.avg_required_progress, 0) / totalUsers;
     const avgAllProgress = users.reduce((sum, user) => sum + user.checklists.avg_all_progress, 0) / totalUsers;
 
-    // Durchschnittsnote berechnen
-    const gradesArray = users
-        .map(user => user.assignments.average_grade)
-        .filter(grade => grade !== null && grade !== undefined);
-    const avgGrade = gradesArray.length > 0 ? gradesArray.reduce((sum, grade) => sum + grade, 0) / gradesArray.length : null;
+    // Durchschnittsnote: Verwende die vom Backend berechnete IHK-konforme Gruppendurchschnittsnote
+    const avgGrade = groupData.assignments && groupData.assignments.avg_grade !== null ? groupData.assignments.avg_grade : null;
 
     // Erwartete Werte für aktuelle Referenzwoche
     const { totalChecklists, totalPflichtaufgaben } = getTotalCounts();
@@ -657,12 +654,21 @@ function generateGroupComparisonTable() {
     html += '</tr></thead>';
     html += '<tbody>';
 
+    // Zeitprojektion für Gruppenwerte anwenden
+    const maxWeeks = 10; // Entspricht dem max-Wert des Sliders
+
     // Statistiken für jede Gruppe berechnen und anzeigen
     groupsToShow.forEach(groupName => {
         const groupData = dashboardData.groups[groupName];
         const stats = calculateStatsForGroup(groupName, groupData);
 
         const gradeText = stats.avgGrade !== null ? stats.avgGrade.toFixed(2) : '-';
+
+        // Projizierte Fortschrittswerte basierend auf ausgewählter Referenzwoche
+        const projectedRequiredProgress = currentWeek > 0 ?
+            Math.round(((stats.avgRequiredProgress / currentWeek) * maxWeeks) * 100) / 100 : 0;
+        // Keine Begrenzung - Gruppen können über 100% liegen (sind schneller als erwartet)
+        const displayRequiredProgress = projectedRequiredProgress;
 
         // Zeige die gleichen Werte wie in den Cards:
         // "Ø Checklisten 100%" = avgCompletedChecklists (wie completedCount in der Card)
@@ -673,7 +679,7 @@ function generateGroupComparisonTable() {
         html += `<td style="text-align: center;">${stats.userCount}</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${Math.min(stats.avgCompletedChecklists * 10, 100)}%; --progress-color: #28a745;">${stats.avgCompletedChecklists.toFixed(1)}</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${Math.min(stats.avgCompletedPflichtaufgaben * 10, 100)}%; --progress-color: #fd7e14;">${stats.avgCompletedPflichtaufgaben.toFixed(1)}</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${stats.avgRequiredProgress}%; --progress-color: #6f42c1;">${stats.avgRequiredProgress.toFixed(1)}%</td>`;
+        html += `<td class="progress-cell" style="--progress-width: ${displayRequiredProgress}%; --progress-color: #6f42c1;">${displayRequiredProgress.toFixed(1)}%</td>`;
         html += `<td style="text-align: center; font-weight: bold;">${gradeText}</td>`;
         html += '</tr>';
     });
@@ -718,15 +724,28 @@ function generateGroupProgressTable(users) {
     html += '</tr></thead>';
     html += '<tbody>';
 
+    // Zeitprojektion für Prozentangaben anwenden
+    const maxWeeks = 10; // Entspricht dem max-Wert des Sliders
+
     users.forEach(user => {
         const gradeText = user.assignments.average_grade !== null ?
             user.assignments.average_grade.toFixed(2) : '-';
 
+        // Projizierte Prozentsätze basierend auf ausgewählter Referenzwoche
+        const projectedPflichtProgress = currentWeek > 0 ?
+            Math.round(((user.checklists.avg_required_progress / currentWeek) * maxWeeks) * 100) / 100 : 0;
+        const projectedGesamtProgress = currentWeek > 0 ?
+            Math.round(((user.checklists.avg_all_progress / currentWeek) * maxWeeks) * 100) / 100 : 0;
+
+        // Keine Begrenzung - Schüler können über 100% liegen (sind schneller als erwartet)
+        const displayPflichtProgress = projectedPflichtProgress;
+        const displayGesamtProgress = projectedGesamtProgress;
+
         html += '<tr>';
         html += `<td class="person-name"><strong>${user.name}</strong></td>`;
         html += `<td class="progress-cell" style="--progress-width: ${Math.min(user.checklists.required_100_count * 10, 100)}%; --progress-color: #28a745;">${user.checklists.required_100_count}</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${user.checklists.avg_required_progress}%; --progress-color: #007bff;">${user.checklists.avg_required_progress}%</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${user.checklists.avg_all_progress}%; --progress-color: #6f42c1;">${user.checklists.avg_all_progress}%</td>`;
+        html += `<td class="progress-cell" style="--progress-width: ${displayPflichtProgress}%; --progress-color: #007bff;">${displayPflichtProgress.toFixed(1)}%</td>`;
+        html += `<td class="progress-cell" style="--progress-width: ${displayGesamtProgress}%; --progress-color: #6f42c1;">${displayGesamtProgress.toFixed(1)}%</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${user.assignments.percent_submitted}%; --progress-color: #fd7e14;">${user.assignments.submitted_count}</td>`;
         html += `<td style="text-align: center; font-weight: bold;">${gradeText}</td>`;
         html += '</tr>';
