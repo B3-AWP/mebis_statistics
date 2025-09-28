@@ -1198,24 +1198,22 @@ function generatePflichtTableFromActivities() {
         return;
     }
 
-    // Für einzelne Gruppen: Filtere Daten nach Gruppe
-    console.log('DEBUG: Verfügbare Gruppen:', Object.keys(dashboardData.groups || {}));
-    console.log('DEBUG: Gewählte Gruppe:', currentGroup);
+    // NEUE LÖSUNG: Verwende dieselbe Logik wie "Alle Gruppen", aber filtere nach Gruppe
+    // Das stellt sicher, dass sowohl Assignments als auch Quizzes korrekt einbezogen werden
+    generateSingleGroupPflichtTableFromAllData();
+    return;
 
-    if (!dashboardData.groups || !dashboardData.groups[currentGroup]) {
-        container.innerHTML = `<p>Gruppe "${currentGroup}" nicht gefunden.</p>
-                               <p>Verfügbare Gruppen: ${Object.keys(dashboardData.groups || {}).join(', ')}</p>`;
-        return;
-    }
-
-    // Kategorie-Filter anwenden (gleiche Logik wie bei generateAllGroupsPflichtTable)
+    // Kategorie-Filter anwenden - aber IMMER auch Quizzes aus allen Kategorien einbeziehen
     const categoryFilter = document.getElementById('pflichtCategoryFilter')?.value || 'pflichtaufgaben';
     let categoriesToShow;
 
     if (categoryFilter === 'pflichtaufgaben') {
+        // Für Pflichtaufgaben: Assignments nur aus Pflichtaufgaben-Kategorien, aber Quizzes aus allen
         categoriesToShow = dashboardData.activities_by_category.filter(category =>
             category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
         );
+
+
     } else if (categoryFilter === 'all') {
         categoriesToShow = dashboardData.activities_by_category;
     } else {
@@ -1228,34 +1226,96 @@ function generatePflichtTableFromActivities() {
                 category.category_name === selectedCategoryName
             );
         } else {
-            categoriesToShow = dashboardData.activities_by_category.filter(category =>
-                category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
-            );
+            categoriesToShow = dashboardData.activities_by_category;
         }
     }
 
-    // Sammle sowohl assignments als auch quizzes aus den gewählten Kategorien
+    // Sammle sowohl assignments als auch quizzes
     let allActivities = [];
-    categoriesToShow.forEach(category => {
-        // Assignments hinzufügen
-        if (category.assignments && category.assignments.length > 0) {
-            category.assignments.forEach(assignment => {
-                allActivities.push({
-                    ...assignment,
-                    activity_type: 'assignment'
+
+    if (categoryFilter === 'pflichtaufgaben') {
+        // Für Pflichtaufgaben-Filter: Assignments nur aus Pflichtaufgaben, aber ALLE Quizzes für Notenberechnung
+
+        // 1. Assignments aus Pflichtaufgaben-Kategorien
+        const pflichtCategories = dashboardData.activities_by_category.filter(category =>
+            category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
+        );
+
+        pflichtCategories.forEach(category => {
+            if (category.assignments && category.assignments.length > 0) {
+                category.assignments.forEach(assignment => {
+                    allActivities.push({
+                        ...assignment,
+                        activity_type: 'assignment'
+                    });
                 });
+            }
+        });
+
+        // 2. Quizzes aus ALLEN Kategorien (für umfassende Notenberechnung)
+        console.log('DEBUG: Searching for quizzes in all categories...');
+        let totalQuizzesFound = 0;
+        dashboardData.activities_by_category.forEach(category => {
+            console.log(`DEBUG: Category "${category.category_name}" has ${category.quizzes ? category.quizzes.length : 0} quizzes`);
+            if (category.quizzes && category.quizzes.length > 0) {
+                totalQuizzesFound += category.quizzes.length;
+                category.quizzes.forEach(quiz => {
+                    allActivities.push({
+                        ...quiz,
+                        activity_type: 'quiz'
+                    });
+                });
+            }
+        });
+        console.log('DEBUG: Total quizzes found and added:', totalQuizzesFound);
+
+        // ZUSÄTZLICH: Prüfe structured_tables für weitere Quiz-Daten
+        if (dashboardData.structured_tables && dashboardData.structured_tables[currentGroup]) {
+            console.log('DEBUG: Checking structured_tables for additional quiz data...');
+            const structuredData = dashboardData.structured_tables[currentGroup];
+
+            // Prüfe verschiedene mögliche Quiz-Felder in structured_tables
+            Object.keys(structuredData).forEach(tableName => {
+                if (tableName.toLowerCase().includes('quiz') || tableName.toLowerCase().includes('test')) {
+                    console.log(`DEBUG: Found potential quiz table: ${tableName}`);
+                    const tableData = structuredData[tableName];
+                    if (tableData && tableData.rows) {
+                        console.log(`DEBUG: Table ${tableName} has ${tableData.rows.length} rows`);
+                        // TODO: Hier könnten wir Quiz-Daten aus structured_tables extrahieren
+                    }
+                }
             });
         }
-        // Quizzes hinzufügen
-        if (category.quizzes && category.quizzes.length > 0) {
-            category.quizzes.forEach(quiz => {
-                allActivities.push({
-                    ...quiz,
-                    activity_type: 'quiz'
+
+    } else {
+        // Für andere Filter: normale Logik
+        categoriesToShow.forEach(category => {
+            // Assignments hinzufügen
+            if (category.assignments && category.assignments.length > 0) {
+                category.assignments.forEach(assignment => {
+                    allActivities.push({
+                        ...assignment,
+                        activity_type: 'assignment'
+                    });
                 });
-            });
-        }
-    });
+            }
+            // Quizzes hinzufügen
+            if (category.quizzes && category.quizzes.length > 0) {
+                category.quizzes.forEach(quiz => {
+                    allActivities.push({
+                        ...quiz,
+                        activity_type: 'quiz'
+                    });
+                });
+            }
+        });
+    }
+
+    console.log('DEBUG: Final allActivities count:', allActivities.length);
+    console.log('DEBUG: Activity types breakdown:', allActivities.reduce((acc, activity) => {
+        acc[activity.activity_type] = (acc[activity.activity_type] || 0) + 1;
+        return acc;
+    }, {}));
 
     const assignments = allActivities;
 
@@ -1374,6 +1434,9 @@ function generatePflichtTableFromActivities() {
     // Tabelle sortierbar machen
     makeTableSortable('pflichtTable');
 
+    // Notenberechnung für Pflichtaufgaben hinzufügen
+    addPflichtaufgabenGradeCalculation();
+
     // Sofortige numerische Sortierung nach Aufgabennummer
     const table = document.getElementById('pflichtTable');
     if (table) {
@@ -1470,6 +1533,9 @@ function generatePflichtTableFromStructuredTables() {
     container.innerHTML = html;
 
     makeTableSortable('pflichtTable');
+
+    // Notenberechnung für Pflichtaufgaben hinzufügen
+    addPflichtaufgabenGradeCalculation();
 }
 
 // Hilfsfunktion für Pflichtaufgaben-Statistiken
@@ -1757,6 +1823,9 @@ function generateAllGroupsPflichtTable() {
 
     // Tabelle sortierbar machen
     makeTableSortable('allGroupsPflichtTable');
+
+    // Notenberechnung für Pflichtaufgaben hinzufügen
+    addPflichtaufgabenGradeCalculationForAllGroups();
 
     // Sofortige numerische Sortierung nach Aufgabennummer
     const table = document.getElementById('allGroupsPflichtTable');
@@ -2622,4 +2691,635 @@ function applyZentralViewFilters() {
 
         row.style.display = shouldShow ? '' : 'none';
     });
+}
+
+// Notenberechnung für Pflichtaufgaben hinzufügen
+function addPflichtaufgabenGradeCalculation() {
+    const table = document.getElementById('pflichtTable');
+    if (!table) return;
+
+    // Prüfe ob bereits eine Notenzeile existiert
+    const existingGradeRow = table.querySelector('.pflicht-grade-row');
+    if (existingGradeRow) {
+        existingGradeRow.remove();
+    }
+
+    const thead = table.querySelector('thead');
+    if (!thead) return;
+
+    // Berechne Noten für alle Benutzer und füge sie im Header hinzu
+    const gradeRow = createPflichtaufgabenGradeHeaderRow();
+    thead.appendChild(gradeRow);
+}
+
+// Erstelle eine Header-Zeile mit berechneten Noten für Pflichtaufgaben
+function createPflichtaufgabenGradeHeaderRow() {
+    const table = document.getElementById('pflichtTable');
+    const headers = table.querySelectorAll('thead th');
+
+    const row = document.createElement('tr');
+    row.className = 'pflicht-grade-row sticky-header';
+    row.style.backgroundColor = '#e8f4fd';
+    row.style.fontWeight = 'bold';
+    row.style.borderTop = '2px solid #007bff';
+
+    // Erste Spalte: "Durchschnittsnote"
+    const labelCell = document.createElement('th');
+    labelCell.textContent = '📊 Durchschnittsnote';
+    labelCell.style.fontWeight = 'bold';
+    labelCell.style.color = '#007bff';
+    labelCell.style.backgroundColor = '#e8f4fd';
+    row.appendChild(labelCell);
+
+    // Für jeden Benutzer eine Note berechnen (alle Spalten außer der ersten)
+    for (let i = 1; i < headers.length; i++) {
+        const gradeCell = document.createElement('th');
+        gradeCell.style.textAlign = 'center';
+        gradeCell.style.fontWeight = 'bold';
+        gradeCell.style.backgroundColor = '#e8f4fd';
+
+        const gradeResult = calculatePflichtaufgabenGradeForUser(i - 1); // i-1 weil erste Spalte der Aufgabenname ist
+
+        if (gradeResult !== null && gradeResult.grade !== null) {
+            gradeCell.textContent = `${gradeResult.grade.toFixed(1)} (${gradeResult.count})`;
+            gradeCell.style.color = getGradeColor(gradeResult.grade);
+            gradeCell.title = `Durchschnitt aus ${gradeResult.count} bewerteten Aufgaben`;
+        } else {
+            gradeCell.textContent = 'n/a';
+            gradeCell.style.color = '#6c757d';
+            gradeCell.title = 'Keine bewerteten Aufgaben vorhanden';
+        }
+
+        row.appendChild(gradeCell);
+    }
+
+    return row;
+}
+
+// Berechne die Note für einen bestimmten Benutzer basierend auf allen bewerteten Pflichtaufgaben
+function calculatePflichtaufgabenGradeForUser(userIndex) {
+    const table = document.getElementById('pflichtTable');
+    if (!table) return null;
+
+    const rows = table.querySelectorAll('tbody tr:not(.pflicht-grade-row)');
+    const grades = [];
+
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length > userIndex + 1) { // +1 weil erste Spalte der Aufgabenname ist
+            const userCell = cells[userIndex + 1];
+            const grade = extractGradeFromCell(userCell);
+
+            if (grade !== null) {
+                grades.push(grade);
+            }
+        }
+    });
+
+    if (grades.length === 0) return null;
+
+    // Durchschnitt berechnen
+    const average = grades.reduce((sum, grade) => sum + grade, 0) / grades.length;
+
+    return {
+        grade: average,
+        count: grades.length
+    };
+}
+
+// Extrahiere Note aus einer Tabellenzelle (nur tatsächlich bewertete Aufgaben)
+function extractGradeFromCell(cell) {
+    const content = cell.textContent.trim();
+    const innerHTML = cell.innerHTML.trim();
+
+    // Debug für Bastian Brenner
+    const isDebugCell = content && !content.includes('Nicht eingereicht') && !content.includes('bewertbar');
+    if (isDebugCell) {
+        console.log('DEBUG extractGradeFromCell:');
+        console.log('  textContent:', content);
+        console.log('  innerHTML:', innerHTML);
+    }
+
+    // Prüfe auf Sterne-Bewertungen basierend auf GradeMapping aus config.ini
+    if (content.includes('*')) {
+        if (isDebugCell) console.log('  -> Found star rating');
+        return convertStarRatingToGrade(content);
+    }
+
+    // Prüfe auf direkte Notenwerte in <strong> Tags (z.B. Assignment-Noten und Quiz-Ergebnisse)
+    const strongMatch = innerHTML.match(/<strong>([^<]+)<\/strong>/);
+    if (strongMatch) {
+        const gradeText = strongMatch[1].trim();
+        if (isDebugCell) console.log('  -> Found strong tag:', gradeText);
+
+        // Prüfe auf Prozentwerte
+        const percentMatch = gradeText.match(/(\d+(?:\.\d+)?)%/);
+        if (percentMatch) {
+            const percent = parseFloat(percentMatch[1]);
+            if (isDebugCell) console.log('  -> Extracted percentage from strong:', percent);
+            return convertPercentToIHKGrade(percent);
+        }
+
+        // Prüfe auf direkte Notenwerte oder Prozentwerte ohne % Zeichen
+        const gradeMatch = gradeText.match(/^(\d+(?:[.,]\d+)?)$/);
+        if (gradeMatch) {
+            const value = parseFloat(gradeMatch[1].replace(',', '.'));
+
+            // Noten zwischen 1.0 und 6.0
+            if (value >= 1.0 && value <= 6.0) {
+                if (isDebugCell) console.log('  -> Extracted direct grade from strong:', value);
+                return value;
+            }
+
+            // Zahlen > 6 als Prozentwerte interpretieren (Quiz-Ergebnisse ohne % Zeichen)
+            if (value > 6 && value <= 100) {
+                if (isDebugCell) console.log('  -> Treating number as percentage from strong:', value);
+                return convertPercentToIHKGrade(value);
+            }
+        }
+
+        // Prüfe auf Quiz-Punktzahlen in strong tags (z.B. "8/10")
+        const pointsMatch = gradeText.match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+        if (pointsMatch) {
+            const achieved = parseFloat(pointsMatch[1]);
+            const total = parseFloat(pointsMatch[2]);
+            if (total > 0) {
+                const percent = (achieved / total) * 100;
+                if (isDebugCell) console.log('  -> Calculated percentage from points in strong:', percent);
+                return convertPercentToIHKGrade(percent);
+            }
+        }
+    }
+
+    // Prüfe auf Prozentwerte (sowohl für Assignments als auch Quizzes)
+    const percentMatch = content.match(/(\d+(?:\.\d+)?)%/);
+    if (percentMatch) {
+        const percent = parseFloat(percentMatch[1]);
+        if (isDebugCell) console.log('  -> Found percentage:', percent);
+        return convertPercentToIHKGrade(percent);
+    }
+
+    // Prüfe auf Quiz-Ergebnisse mit Punktzahl (z.B. "8/10 (80%)")
+    const quizMatch = content.match(/\d+\/\d+\s*\((\d+(?:\.\d+)?)%\)/);
+    if (quizMatch) {
+        const percent = parseFloat(quizMatch[1]);
+        if (isDebugCell) console.log('  -> Found quiz with percentage:', percent);
+        return convertPercentToIHKGrade(percent);
+    }
+
+    // Prüfe auf Punktzahl ohne Prozentwert (z.B. "8/10")
+    const pointsMatch = content.match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+    if (pointsMatch) {
+        const achieved = parseFloat(pointsMatch[1]);
+        const total = parseFloat(pointsMatch[2]);
+        if (total > 0) {
+            const percent = (achieved / total) * 100;
+            if (isDebugCell) console.log('  -> Calculated percentage from points:', percent);
+            return convertPercentToIHKGrade(percent);
+        }
+    }
+
+    // Prüfe auf direkte Notenwerte (z.B. "2,5" oder "1.0")
+    const gradeMatch = content.match(/^(\d+(?:[.,]\d+)?)$/);
+    if (gradeMatch) {
+        const grade = parseFloat(gradeMatch[1].replace(',', '.'));
+        if (grade >= 1.0 && grade <= 6.0) {
+            if (isDebugCell) console.log('  -> Found direct grade:', grade);
+            return grade;
+        }
+    }
+
+    if (isDebugCell) console.log('  -> No grade found, returning null');
+
+    // Für alle anderen Fälle (nicht eingereicht, zur Bewertung abgegeben, etc.)
+    // wird KEINE Note zurückgegeben - diese Aufgaben fließen nicht in die Berechnung ein
+    return null;
+}
+
+// Konvertiere Sterne-Bewertung zu Note basierend auf config.ini Mapping
+function convertStarRatingToGrade(starRating) {
+    // Mapping basierend auf config.ini GradeMapping
+    // 0 = * Nicht akzeptabel
+    // 70 = ** Verbesserungsbedarf
+    // 100 = *** Solide Umsetzung
+    // 130 = **** Exzellent
+
+    if (starRating.includes('**** Exzellent') || starRating.includes('****')) {
+        return convertPercentToIHKGrade(130); // Exzellent
+    } else if (starRating.includes('*** Solide Umsetzung') || starRating.includes('***')) {
+        return convertPercentToIHKGrade(100); // Solide Umsetzung
+    } else if (starRating.includes('** Verbesserungsbedarf') || starRating.includes('**')) {
+        return convertPercentToIHKGrade(70); // Verbesserungsbedarf
+    } else if (starRating.includes('* Nicht akzeptabel') || starRating.includes('*')) {
+        return convertPercentToIHKGrade(0); // Nicht akzeptabel
+    }
+
+    return null;
+}
+
+// Konvertiere Prozentwert zu IHK-Note
+function convertPercentToIHKGrade(percent) {
+    if (percent >= 92) return 1.0;
+    if (percent >= 81) return 2.0;
+    if (percent >= 67) return 3.0;
+    if (percent >= 50) return 4.0;
+    if (percent >= 30) return 5.0;
+    return 6.0;
+}
+
+// Bestimme Farbe basierend auf Note
+function getGradeColor(grade) {
+    if (grade <= 2.0) return '#28a745'; // Grün für sehr gut/gut
+    if (grade <= 3.0) return '#ffc107'; // Gelb für befriedigend
+    if (grade <= 4.0) return '#fd7e14'; // Orange für ausreichend
+    return '#dc3545'; // Rot für mangelhaft/ungenügend
+}
+
+// Notenberechnung für Pflichtaufgaben hinzufügen (für Alle Gruppen Ansicht)
+function addPflichtaufgabenGradeCalculationForAllGroups() {
+    const table = document.getElementById('allGroupsPflichtTable');
+    if (!table) return;
+
+    // Prüfe ob bereits eine Notenzeile existiert
+    const existingGradeRow = table.querySelector('.pflicht-grade-row');
+    if (existingGradeRow) {
+        existingGradeRow.remove();
+    }
+
+    const thead = table.querySelector('thead');
+    if (!thead) return;
+
+    // Berechne Noten für alle Benutzer und füge sie im Header hinzu
+    const gradeRow = createPflichtaufgabenGradeHeaderRowForAllGroups();
+    thead.appendChild(gradeRow);
+}
+
+// Erstelle eine Header-Zeile mit berechneten Noten für Pflichtaufgaben (Alle Gruppen)
+function createPflichtaufgabenGradeHeaderRowForAllGroups() {
+    const table = document.getElementById('allGroupsPflichtTable');
+    const headers = table.querySelectorAll('thead th');
+
+    const row = document.createElement('tr');
+    row.className = 'pflicht-grade-row sticky-header';
+    row.style.backgroundColor = '#e8f4fd';
+    row.style.fontWeight = 'bold';
+    row.style.borderTop = '2px solid #007bff';
+
+    // Erste Spalte: "Durchschnittsnote"
+    const labelCell = document.createElement('th');
+    labelCell.textContent = '📊 Durchschnittsnote';
+    labelCell.style.fontWeight = 'bold';
+    labelCell.style.color = '#007bff';
+    labelCell.style.backgroundColor = '#e8f4fd';
+    row.appendChild(labelCell);
+
+    // Für jeden Benutzer eine Note berechnen (alle Spalten außer der ersten)
+    for (let i = 1; i < headers.length; i++) {
+        const gradeCell = document.createElement('th');
+        gradeCell.style.textAlign = 'center';
+        gradeCell.style.fontWeight = 'bold';
+        gradeCell.style.backgroundColor = '#e8f4fd';
+
+        const gradeResult = calculatePflichtaufgabenGradeForUserAllGroups(i - 1); // i-1 weil erste Spalte der Aufgabenname ist
+
+        if (gradeResult !== null && gradeResult.grade !== null) {
+            gradeCell.textContent = `${gradeResult.grade.toFixed(1)} (${gradeResult.count})`;
+            gradeCell.style.color = getGradeColor(gradeResult.grade);
+            gradeCell.title = `Durchschnitt aus ${gradeResult.count} bewerteten Aufgaben`;
+        } else {
+            gradeCell.textContent = 'n/a';
+            gradeCell.style.color = '#6c757d';
+            gradeCell.title = 'Keine bewerteten Aufgaben vorhanden';
+        }
+
+        row.appendChild(gradeCell);
+    }
+
+    return row;
+}
+
+// Berechne die Note für einen bestimmten Benutzer basierend auf allen bewerteten Pflichtaufgaben (Alle Gruppen)
+function calculatePflichtaufgabenGradeForUserAllGroups(userIndex) {
+    const table = document.getElementById('allGroupsPflichtTable');
+    if (!table) return null;
+
+    const rows = table.querySelectorAll('tbody tr:not(.pflicht-grade-row)');
+    const grades = [];
+
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length > userIndex + 1) { // +1 weil erste Spalte der Aufgabenname ist
+            const userCell = cells[userIndex + 1];
+            const grade = extractGradeFromCell(userCell);
+
+            if (grade !== null) {
+                grades.push(grade);
+            }
+        }
+    });
+
+    if (grades.length === 0) return null;
+
+    // Durchschnitt berechnen
+    const average = grades.reduce((sum, grade) => sum + grade, 0) / grades.length;
+
+    return {
+        grade: average,
+        count: grades.length
+    };
+}
+
+// Neue Funktion für Einzelgruppen basierend auf der bewährten "Alle Gruppen" Logik
+function generateSingleGroupPflichtTableFromAllData() {
+    const container = document.getElementById('pflichtData');
+    if (!container || !dashboardData || !dashboardData.activities_by_category) return;
+
+    // Kategorie-Filter anwenden (gleiche Logik wie "Alle Gruppen")
+    const categoryFilter = document.getElementById('pflichtCategoryFilter')?.value || 'pflichtaufgaben';
+    let categoriesToShow;
+
+    if (categoryFilter === 'pflichtaufgaben') {
+        categoriesToShow = dashboardData.activities_by_category.filter(category =>
+            category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
+        );
+    } else if (categoryFilter === 'all') {
+        categoriesToShow = dashboardData.activities_by_category;
+    } else {
+        const selectedCategoryName = dashboardData.activities_by_category.find(category =>
+            category.category_name && category.category_name.toLowerCase().replace(/[^a-z0-9]/g, '') === categoryFilter
+        )?.category_name;
+
+        if (selectedCategoryName) {
+            categoriesToShow = dashboardData.activities_by_category.filter(category =>
+                category.category_name === selectedCategoryName
+            );
+        } else {
+            categoriesToShow = dashboardData.activities_by_category.filter(category =>
+                category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
+            );
+        }
+    }
+
+    // Sammle alle Aktivitäten (wie in "Alle Gruppen")
+    let allActivities = [];
+    console.log('DEBUG: New function - collecting activities...');
+    console.log('DEBUG: Categories to show:', categoriesToShow.length);
+
+    categoriesToShow.forEach(category => {
+        console.log(`DEBUG: Category "${category.category_name}" - assignments: ${category.assignments?.length || 0}, quizzes: ${category.quizzes?.length || 0}`);
+
+        // Assignments hinzufügen
+        if (category.assignments && category.assignments.length > 0) {
+            category.assignments.forEach(assignment => {
+                allActivities.push({
+                    ...assignment,
+                    activity_type: 'assignment'
+                });
+            });
+        }
+        // Quizzes hinzufügen
+        if (category.quizzes && category.quizzes.length > 0) {
+            console.log(`DEBUG: Adding ${category.quizzes.length} quizzes from category ${category.category_name}`);
+            category.quizzes.forEach(quiz => {
+                allActivities.push({
+                    ...quiz,
+                    activity_type: 'quiz'
+                });
+            });
+        }
+    });
+
+    console.log('DEBUG: Total activities collected:', allActivities.length);
+    console.log('DEBUG: Activity types:', allActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
+
+    // ZUSÄTZLICH: Versuche Quiz-Daten aus anderen Quellen zu extrahieren
+    if (dashboardData.structured_tables && dashboardData.structured_tables[currentGroup]) {
+        console.log('DEBUG: Searching for quiz data in structured_tables...');
+        const structuredData = dashboardData.structured_tables[currentGroup];
+
+        // Durchsuche alle Tabellen nach Quiz-ähnlichen Daten
+        Object.keys(structuredData).forEach(tableName => {
+            console.log(`DEBUG: Checking table: ${tableName}`);
+            if (tableName.toLowerCase().includes('quiz') || tableName.toLowerCase().includes('test')) {
+                console.log(`DEBUG: Found potential quiz table: ${tableName}`);
+                const tableData = structuredData[tableName];
+                if (tableData && tableData.rows) {
+                    console.log(`DEBUG: Table ${tableName} has ${tableData.rows.length} rows`);
+                    // Konvertiere structured_table Quiz-Daten zu activity Format
+                    tableData.rows.forEach(row => {
+                        const fakeQuizActivity = {
+                            title: row.activity_name || row.name || `Quiz aus ${tableName}`,
+                            activity_type: 'quiz',
+                            url: row.activity_url || '#',
+                            category_name: tableName,
+                            user_status: []
+                        };
+
+                        // Konvertiere Benutzer-Progress-Daten
+                        if (row.user_progress) {
+                            row.user_progress.forEach(progress => {
+                                // Finde Benutzer-Info in dashboardData.groups
+                                const groupUsers = dashboardData.groups[currentGroup].users;
+                                const userInfo = groupUsers.find(user =>
+                                    (user.user_name || user.name) === progress.user_name ||
+                                    (user.user_id || user.id) === progress.user_id
+                                );
+
+                                if (userInfo && progress.required_progress && progress.required_progress !== '0%') {
+                                    fakeQuizActivity.user_status.push({
+                                        user_name: progress.user_name,
+                                        user_id: progress.user_id,
+                                        grade: progress.required_progress, // z.B. "91%"
+                                        status: 'Completed'
+                                    });
+                                }
+                            });
+                        }
+
+                        if (fakeQuizActivity.user_status.length > 0) {
+                            console.log(`DEBUG: Adding quiz from structured_tables: ${fakeQuizActivity.title} with ${fakeQuizActivity.user_status.length} users`);
+                            allActivities.push(fakeQuizActivity);
+                        }
+                    });
+                }
+            }
+        });
+
+        console.log('DEBUG: After adding structured_tables quizzes - Total activities:', allActivities.length);
+        console.log('DEBUG: Updated activity types:', allActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
+
+        // ZUSÄTZLICH: Durchsuche Checklisten-Daten nach Quiz-ähnlichen Aktivitäten
+        if (structuredData.checklists && structuredData.checklists.rows) {
+            console.log('DEBUG: Searching checklists for quiz-like activities...');
+            structuredData.checklists.rows.forEach(checklistRow => {
+                // Prüfe ob der Checklisten-Titel auf Quiz hindeutet
+                const title = checklistRow.checklist_title || '';
+                if (title.toLowerCase().includes('quiz') ||
+                    title.toLowerCase().includes('test') ||
+                    checklistRow.checklist_category?.toLowerCase().includes('quiz')) {
+
+                    console.log(`DEBUG: Found quiz-like checklist: ${title}`);
+
+                    const quizActivity = {
+                        title: title,
+                        activity_type: 'quiz',
+                        url: checklistRow.checklist_url || '#',
+                        category_name: checklistRow.checklist_category || 'Quiz',
+                        user_status: []
+                    };
+
+                    // Extrahiere Benutzer-Progress aus Checklisten
+                    if (checklistRow.user_progress) {
+                        checklistRow.user_progress.forEach(progress => {
+                            // Verwende required_progress (Pflicht-Fortschritt) als Quiz-Ergebnis
+                            if (progress.required_progress && progress.required_progress !== '0%') {
+                                quizActivity.user_status.push({
+                                    user_name: progress.user_name || 'Unknown',
+                                    user_id: progress.user_id,
+                                    grade: progress.required_progress, // z.B. "91%"
+                                    status: 'Completed'
+                                });
+                            }
+                        });
+                    }
+
+                    if (quizActivity.user_status.length > 0) {
+                        console.log(`DEBUG: Adding quiz from checklists: ${quizActivity.title} with ${quizActivity.user_status.length} users`);
+                        allActivities.push(quizActivity);
+                    }
+                }
+            });
+        }
+    }
+
+    if (allActivities.length === 0) return;
+
+    // Hole Benutzer der aktuellen Gruppe
+    if (!dashboardData.groups || !dashboardData.groups[currentGroup]) {
+        container.innerHTML = `<p>Gruppe "${currentGroup}" nicht gefunden.</p>`;
+        return;
+    }
+
+    const groupUsers = dashboardData.groups[currentGroup].users;
+    const groupUserNames = new Set();
+    groupUsers.forEach(user => {
+        const userName = user.user_name || user.name || user.username || user.display_name;
+        if (userName) {
+            groupUserNames.add(userName);
+        }
+    });
+
+    // Filtere Aktivitäten, um nur Benutzer aus der aktuellen Gruppe zu zeigen
+    console.log('DEBUG: Group user names:', Array.from(groupUserNames));
+    const filteredActivities = allActivities.map(activity => ({
+        ...activity,
+        user_status: activity.user_status ? activity.user_status.filter(userStatus =>
+            groupUserNames.has(userStatus.user_name)
+        ) : []
+    })).filter(activity => activity.user_status.length > 0);
+
+    console.log('DEBUG: Filtered activities:', filteredActivities.length);
+    console.log('DEBUG: Filtered activity types:', filteredActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
+
+    // Debug: Zeige erste paar Aktivitäten
+    filteredActivities.slice(0, 3).forEach((activity, index) => {
+        console.log(`DEBUG: Activity ${index}: "${activity.title}" (${activity.activity_type}) - users: ${activity.user_status.length}`);
+    });
+
+    if (filteredActivities.length === 0) {
+        container.innerHTML = `<p>Keine Daten für die ausgewählte Gruppe "${currentGroup}" verfügbar.</p>`;
+        return;
+    }
+
+    // HTML generieren (gleiche Logik wie einzelne Gruppe)
+    let html = '<div style="overflow-x: auto;"><table id="pflichtTable" class="info-table dashboard-table">';
+    html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
+
+    // Header für alle Benutzer der Gruppe
+    groupUsers.forEach(user => {
+        const userName = user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
+        html += `<th style="text-align: center; min-width: 120px;">${userName}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    // Zeilen für jede Aktivität
+    filteredActivities.forEach(activity => {
+        html += '<tr>';
+        html += `<td style="min-width: 250px;">`;
+        const activityIcon = activity.activity_type === 'quiz' ? '🧭' : '📝';
+        const activityType = activity.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe';
+        html += `<a href="${activity.url}" target="_blank">${activityIcon} ${activity.title}</a>`;
+        html += `<br><small style="color: #666;">Typ: ${activityType} | Kategorie: ${activity.category_name || 'Unbekannt'}</small>`;
+        html += `</td>`;
+
+        // Status für jeden Benutzer der Gruppe
+        groupUsers.forEach(user => {
+            let status = null;
+            if (activity.user_status) {
+                const userId = user.user_id || user.id;
+                const userName = user.user_name || user.name || user.username || user.display_name;
+
+                status = activity.user_status.find(s =>
+                    (s.user_id && userId && s.user_id === userId) ||
+                    (s.user_name && userName && s.user_name === userName)
+                );
+            }
+
+            let cellContent = '';
+            let cellClass = 'progress-cell';
+            let bgColor = '';
+
+            if (status && status.grade && status.grade !== '-') {
+                cellContent = `<strong>${status.grade}</strong>`;
+                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (status && status.status === 'Zur Bewertung abgegeben') {
+                cellContent = '<span style="color: #ffc107;">bewertbar</span>';
+                bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
+            } else {
+                cellContent = '<span style="color: #dc3545;">Nicht eingereicht</span>';
+                bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
+            }
+
+            html += `<td class="${cellClass}" style="${bgColor} text-align: center;">${cellContent}</td>`;
+        });
+
+        html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+
+    // Tabelle sortierbar machen
+    makeTableSortable('pflichtTable');
+
+    // Notenberechnung für Pflichtaufgaben hinzufügen
+    addPflichtaufgabenGradeCalculation();
+
+    // Sortierung anwenden
+    const table = document.getElementById('pflichtTable');
+    if (table) {
+        const tbody = table.querySelector('tbody');
+        if (tbody) {
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            rows.sort((a, b) => {
+                const aVal = getSortValue(a, 0);
+                const bVal = getSortValue(b, 0);
+
+                if (aVal.match(/^\d+(\.\d+)?$/) && bVal.match(/^\d+(\.\d+)?$/)) {
+                    return parseFloat(aVal) - parseFloat(bVal);
+                } else {
+                    return aVal.localeCompare(bVal);
+                }
+            });
+
+            rows.forEach(row => tbody.appendChild(row));
+
+            const headers = table.querySelectorAll('th');
+            if (headers[0]) {
+                headers[0].classList.add('sort-asc');
+            }
+
+            sortState['pflichtTable_0'] = 'asc';
+        }
+    }
 }
