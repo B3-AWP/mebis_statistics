@@ -422,17 +422,6 @@ function calculateGroupStats(users) {
     const avgAllProgressTimed = currentWeek > 0 ?
         Math.round(((avgAllProgress / currentWeek) * totalWeeks) * 100) / 100 : 0;
 
-    // Debug logging to help identify the issue
-    console.log('=== calculateGroupStats DEBUG ===');
-    console.log('Total users:', totalUsers);
-    console.log('First few users avg_required_progress:', users.slice(0, 3).map(u => u.checklists.avg_required_progress));
-    console.log('Sum of avg_required_progress:', sumRequiredProgress);
-    console.log('Average should be:', avgRequiredProgress);
-    console.log('Sum of avg_all_progress:', sumAllProgress);
-    console.log('Average all progress:', avgAllProgress);
-    console.log('Current week:', currentWeek, 'Total weeks:', totalWeeks);
-    console.log('OLD way - first user timed value:', users[0]?.checklists.avg_required_progress_timed);
-    console.log('NEW way - calculated timed value:', avgRequiredProgressTimed);
 
     return {
         assignments: {
@@ -496,8 +485,9 @@ function updateOverviewStats(groupStats, users) {
 
     // Erwartete Anzahl für die ausgewählte Referenzwoche
     // Bei Woche 10 (Maximum) sollten alle Checklisten/Aufgaben erwartet werden
-    const expectedChecklistsForWeek = Math.ceil((totalChecklists / maxWeeks) * currentWeek);
-    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / maxWeeks) * currentWeek);
+    const selectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 10);
+    const expectedChecklistsForWeek = Math.ceil((totalChecklists / maxWeeks) * selectedWeek);
+    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / maxWeeks) * selectedWeek);
 
     // Prozentsätze basierend auf durchschnittlich erledigte vs. erwartete für die Woche
     const percentChecklists = expectedChecklistsForWeek > 0 ?
@@ -514,28 +504,35 @@ function updateOverviewStats(groupStats, users) {
     updateProgressRing('completionRing', Math.min(percentChecklists, 100));
 
     // Durchschnittlicher Fortschritt (wochenabhängig)
-    // Korrekte Berechnung: Erst Gruppendurchschnitt, dann Zeitprojektion
+    // Berechne die Werte direkt basierend auf der aktuell ausgewählten Woche
     const currentProgressType = document.querySelector('input[name="progressType"]:checked').value;
-    const baseProgress = currentProgressType === 'pflicht' ?
-        groupStats.checklists.avg_required_progress :
-        groupStats.checklists.avg_all_progress;
+    const cardSelectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 10);
 
-    // Zeitprojektion auf Gruppenbasis anwenden (nicht auf Benutzerbasis)
-    // Das System arbeitet mit 10 Wochen als Maximalwert (entspricht dem Slider-Maximum)
-    const progressValue = currentWeek > 0 ?
-        Math.round(((baseProgress / currentWeek) * maxWeeks) * 100) / 100 : 0;
+    // Berechne den Gruppendurchschnitt für die ausgewählte Woche
+    let cardAvgRequiredProgress = 0;
+    let cardAvgAllProgress = 0;
+    const validUsers = users.filter(user => user && user.name);
 
+    validUsers.forEach(user => {
+        const actualProgress = calculateActualProgressForWeek(user, cardSelectedWeek, 10, currentGroup);
+        cardAvgRequiredProgress += actualProgress.pflichtProgress;
+        cardAvgAllProgress += actualProgress.gesamtProgress;
+    });
 
-    document.getElementById('avgCompletionText').textContent = progressValue + '%';
-    document.getElementById('avgCompletionBar').style.width = Math.min(progressValue, 100) + '%';
-
-    // Durchschnittsnote
-    const avgGradeElement = document.getElementById('avgGradeText');
-    if (groupStats.assignments.avg_grade !== null) {
-        avgGradeElement.textContent = groupStats.assignments.avg_grade.toFixed(2);
-    } else {
-        avgGradeElement.textContent = '-';
+    if (validUsers.length > 0) {
+        cardAvgRequiredProgress = cardAvgRequiredProgress / validUsers.length;
+        cardAvgAllProgress = cardAvgAllProgress / validUsers.length;
     }
+
+    const progressValue = currentProgressType === 'pflicht' ? cardAvgRequiredProgress : cardAvgAllProgress;
+
+    document.getElementById('avgCompletionText').textContent = progressValue.toFixed(1) + '%';
+    document.getElementById('avgCompletionBar').style.width = progressValue + '%';
+
+    // Durchschnittsnote basierend auf Pflicht % (IHK-Notenschlüssel)
+    const avgGradeElement = document.getElementById('avgGradeText');
+    const calculatedGrade = calculateGradeFromPflichtProgress(cardAvgRequiredProgress);
+    avgGradeElement.textContent = calculatedGrade;
 
     // Pflichtaufgaben-Statistiken - zeigt durchschnittlich erledigte vs. erwartete für gewählte Woche
     document.getElementById('pflichtCompletedCount').textContent = avgCompletedPflichtaufgaben.toFixed(1);
@@ -545,13 +542,10 @@ function updateOverviewStats(groupStats, users) {
     // Pflicht Progress Ring aktualisieren
     updateProgressRing('pflichtCompletionRing', Math.min(percentPflichtaufgaben, 100));
 
-    // Durchschnittsnote Pflichtaufgaben
+    // Durchschnittsnote Pflichtaufgaben basierend auf Pflicht % (IHK-Notenschlüssel)
     const pflichtAvgGradeElement = document.getElementById('pflichtAverageGrade');
-    if (groupStats.assignments.avg_grade !== null) {
-        pflichtAvgGradeElement.textContent = groupStats.assignments.avg_grade.toFixed(2);
-    } else {
-        pflichtAvgGradeElement.textContent = '-';
-    }
+    const calculatedPflichtGrade = calculateGradeFromPflichtProgress(cardAvgRequiredProgress);
+    pflichtAvgGradeElement.textContent = calculatedPflichtGrade;
 
     // Detailierte Fortschritts-Tabelle generieren
     generateGroupProgressTable(users);
@@ -581,8 +575,23 @@ function calculateStatsForGroup(groupName, groupData) {
     // Grundlegende Berechnungen
     const avgCompletedChecklists = users.reduce((sum, user) => sum + user.checklists.required_100_count, 0) / totalUsers;
     const avgCompletedPflichtaufgaben = users.reduce((sum, user) => sum + user.assignments.submitted_count, 0) / totalUsers;
-    const avgRequiredProgress = users.reduce((sum, user) => sum + user.checklists.avg_required_progress, 0) / totalUsers;
-    const avgAllProgress = users.reduce((sum, user) => sum + user.checklists.avg_all_progress, 0) / totalUsers;
+
+    // Berechne tatsächliche Durchschnittswerte basierend auf der ausgewählten Woche
+    let avgRequiredProgress = 0;
+    let avgAllProgress = 0;
+
+    // Verwende week-basierte Berechnung für jeden Benutzer
+    // Hole den aktuellen Wochenwert vom Slider
+    const selectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 10);
+    users.forEach(user => {
+        const actualProgress = calculateActualProgressForWeek(user, selectedWeek, 10, groupName);
+        avgRequiredProgress += actualProgress.pflichtProgress;
+        avgAllProgress += actualProgress.gesamtProgress;
+    });
+
+    avgRequiredProgress = avgRequiredProgress / totalUsers;
+    avgAllProgress = avgAllProgress / totalUsers;
+
 
     // Durchschnittsnote: Verwende die vom Backend berechnete IHK-konforme Gruppendurchschnittsnote
     const avgGrade = groupData.assignments && groupData.assignments.avg_grade !== null ? groupData.assignments.avg_grade : null;
@@ -590,8 +599,8 @@ function calculateStatsForGroup(groupName, groupData) {
     // Erwartete Werte für aktuelle Referenzwoche
     const { totalChecklists, totalPflichtaufgaben } = getTotalCounts();
     const maxWeeks = 10; // Entspricht dem max-Wert des Sliders
-    const expectedChecklistsForWeek = Math.ceil((totalChecklists / maxWeeks) * currentWeek);
-    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / maxWeeks) * currentWeek);
+    const expectedChecklistsForWeek = Math.ceil((totalChecklists / maxWeeks) * selectedWeek);
+    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / maxWeeks) * selectedWeek);
 
     // Prozentsätze
     const checklistPercentage = expectedChecklistsForWeek > 0 ?
@@ -643,14 +652,15 @@ function generateGroupComparisonTable() {
         return;
     }
 
-    let html = '<div style="overflow-x: auto;"><table id="groupComparisonTable" class="info-table dashboard-table comparison-table">';
+    let html = '<div style="overflow-x: auto;"><table id="groupComparisonTable" class="info-table dashboard-table overview-table">';
     html += '<thead><tr class="sticky-header">';
     html += '<th class="group-name-cell">Gruppe</th>';
     html += '<th>Personen</th>';
-    html += '<th>Ø Checklisten<br>100%</th>';
-    html += '<th>Ø Pflichtaufgaben<br>eingereicht</th>';
-    html += '<th>Ø Fortschritt<br>Pflicht %</th>';
+    html += '<th>Checklisten 100%</th>';
+    html += '<th>Ø Pflicht (%)</th>';
     html += '<th>Ø Note</th>';
+    html += '<th>Ø Gesamt (%)</th>';
+    html += '<th>Eingereichte Aufgaben</th>';
     html += '</tr></thead>';
     html += '<tbody>';
 
@@ -662,13 +672,11 @@ function generateGroupComparisonTable() {
         const groupData = dashboardData.groups[groupName];
         const stats = calculateStatsForGroup(groupName, groupData);
 
-        const gradeText = stats.avgGrade !== null ? stats.avgGrade.toFixed(2) : '-';
+        // Verwende die bereits berechneten tatsächlichen Fortschrittswerte für die ausgewählte Woche
+        const displayRequiredProgress = stats.avgRequiredProgress;
 
-        // Projizierte Fortschrittswerte basierend auf ausgewählter Referenzwoche
-        const projectedRequiredProgress = currentWeek > 0 ?
-            Math.round(((stats.avgRequiredProgress / currentWeek) * maxWeeks) * 100) / 100 : 0;
-        // Keine Begrenzung - Gruppen können über 100% liegen (sind schneller als erwartet)
-        const displayRequiredProgress = projectedRequiredProgress;
+        // Berechne Note basierend auf Gruppendurchschnitt Pflicht %
+        const gradeText = calculateGradeFromPflichtProgress(displayRequiredProgress);
 
         // Zeige die gleichen Werte wie in den Cards:
         // "Ø Checklisten 100%" = avgCompletedChecklists (wie completedCount in der Card)
@@ -678,9 +686,10 @@ function generateGroupComparisonTable() {
         html += `<td class="group-name-cell"><strong>${stats.groupName}</strong></td>`;
         html += `<td style="text-align: center;">${stats.userCount}</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${Math.min(stats.avgCompletedChecklists * 10, 100)}%; --progress-color: #28a745;">${stats.avgCompletedChecklists.toFixed(1)}</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${Math.min(stats.avgCompletedPflichtaufgaben * 10, 100)}%; --progress-color: #fd7e14;">${stats.avgCompletedPflichtaufgaben.toFixed(1)}</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${displayRequiredProgress}%; --progress-color: #6f42c1;">${displayRequiredProgress.toFixed(1)}%</td>`;
+        html += `<td class="progress-cell" style="--progress-width: ${displayRequiredProgress}%; --progress-color: #007bff;">${displayRequiredProgress.toFixed(1)}%</td>`;
         html += `<td style="text-align: center; font-weight: bold;">${gradeText}</td>`;
+        html += `<td class="progress-cell" style="--progress-width: ${stats.avgAllProgress}%; --progress-color: #6f42c1;">${stats.avgAllProgress.toFixed(1)}%</td>`;
+        html += `<td class="progress-cell" style="--progress-width: ${Math.min(stats.avgCompletedPflichtaufgaben * 10, 100)}%; --progress-color: #fd7e14;">${stats.avgCompletedPflichtaufgaben.toFixed(1)}</td>`;
         html += '</tr>';
     });
 
@@ -689,6 +698,103 @@ function generateGroupComparisonTable() {
 
     // Tabelle sortierbar machen
     makeTableSortable('groupComparisonTable');
+}
+
+// Berechnet die tatsächlichen Fortschrittsprozentsätze basierend nur auf Checklisten bis zur ausgewählten Woche
+function calculateActualProgressForWeek(user, selectedWeek, maxWeeks, groupName = null) {
+    // Standardwerte falls keine strukturierten Daten verfügbar sind
+    let pflichtProgress = 0;
+    let gesamtProgress = 0;
+
+    // Bestimme die zu verwendende Gruppe
+    const targetGroup = groupName || currentGroup;
+
+    // Zugriff auf strukturierte Checklisten-Daten
+    if (dashboardData && dashboardData.structured_tables && targetGroup && targetGroup !== 'all') {
+        const tableData = dashboardData.structured_tables[targetGroup]?.checklists;
+        if (tableData && tableData.rows && tableData.headers) {
+            // Finde den Index des Benutzers in den Headern
+            const userIndex = tableData.headers.findIndex(header => header === user.name);
+
+            if (userIndex > 0) { // Index 0 ist normalerweise die Checklist-Spalte
+                const totalChecklists = tableData.rows.length;
+                const expectedChecklistsForWeek = Math.ceil((totalChecklists / maxWeeks) * selectedWeek);
+
+                // Summiere alle Pflicht- und Gesamt-Prozente von ALLEN Checklisten
+                let totalPflichtPercent = 0;
+                let totalGesamtPercent = 0;
+
+                // Durchlaufe ALLE Checklisten und summiere die Prozente
+                tableData.rows.forEach(row => {
+                    if (row.user_progress && row.user_progress[userIndex - 1]) {
+                        const progress = row.user_progress[userIndex - 1];
+                        const requiredProgressText = progress.required_progress || '0%';
+                        const allProgressText = progress.all_progress || '0%';
+
+                        const pflichtPercent = parseFloat(requiredProgressText.replace('%', ''));
+                        const gesamtPercent = parseFloat(allProgressText.replace('%', ''));
+
+                        if (!isNaN(pflichtPercent)) {
+                            totalPflichtPercent += pflichtPercent;
+                        }
+                        if (!isNaN(gesamtPercent)) {
+                            totalGesamtPercent += gesamtPercent;
+                        }
+                    }
+                });
+
+                // Berechne erwartete Gesamtpunkte für diese Woche (Anzahl Checklisten × 100%)
+                const expectedTotalPflichtPoints = expectedChecklistsForWeek * 100;
+                const expectedTotalGesamtPoints = expectedChecklistsForWeek * 100;
+
+                // Berechne Prozentsatz: Tatsächliche Punkte / Erwartete Punkte × 100
+                if (expectedTotalPflichtPoints > 0) {
+                    pflichtProgress = Math.round((totalPflichtPercent / expectedTotalPflichtPoints) * 100 * 100) / 100;
+                }
+                if (expectedTotalGesamtPoints > 0) {
+                    gesamtProgress = Math.round((totalGesamtPercent / expectedTotalGesamtPoints) * 100 * 100) / 100;
+                }
+
+                // Debug: Zeige neue Berechnungslogik
+                console.log(`DEBUG NEW: ${user.name}, Week ${selectedWeek}: Expected=${expectedChecklistsForWeek} checklists (${expectedTotalPflichtPoints} points), Total Pflicht=${totalPflichtPercent}%, Total Gesamt=${totalGesamtPercent}% → Pflicht=${pflichtProgress}%, Gesamt=${gesamtProgress}%`);
+            }
+        }
+    }
+
+    // Fallback: Verwende die ursprünglichen projizierten Werte falls strukturierte Daten nicht verfügbar
+    if (pflichtProgress === 0 && gesamtProgress === 0 && user.checklists) {
+        const projectedPflichtProgress = selectedWeek > 0 ?
+            Math.round(((user.checklists.avg_required_progress / selectedWeek) * maxWeeks) * 100) / 100 : 0;
+        const projectedGesamtProgress = selectedWeek > 0 ?
+            Math.round(((user.checklists.avg_all_progress / selectedWeek) * maxWeeks) * 100) / 100 : 0;
+
+        pflichtProgress = projectedPflichtProgress;
+        gesamtProgress = projectedGesamtProgress;
+    }
+
+    return {
+        pflichtProgress: pflichtProgress,
+        gesamtProgress: gesamtProgress
+    };
+}
+
+// Berechnet die Note basierend auf dem Pflicht % Fortschritt nach IHK-Notenschlüssel
+function calculateGradeFromPflichtProgress(pflichtProgress) {
+    if (pflichtProgress >= 92) {
+        return '1.0';
+    } else if (pflichtProgress >= 81) {
+        return '2.0';
+    } else if (pflichtProgress >= 67) {
+        return '3.0';
+    } else if (pflichtProgress >= 50) {
+        return '4.0';
+    } else if (pflichtProgress >= 30) {
+        return '5.0';
+    } else if (pflichtProgress > 0) {
+        return '6.0';
+    } else {
+        return '-';
+    }
 }
 
 // Generiert die Fortschritts-Tabelle für die Übersicht
@@ -718,36 +824,34 @@ function generateGroupProgressTable(users) {
     html += '<th class="person-name">Person</th>';
     html += '<th>Checklisten 100%</th>';
     html += '<th>Ø Pflicht (%)</th>';
+    html += '<th>Ø Note</th>';
     html += '<th>Ø Gesamt (%)</th>';
     html += '<th>Eingereichte Aufgaben</th>';
-    html += '<th>Ø Note</th>';
     html += '</tr></thead>';
     html += '<tbody>';
 
-    // Zeitprojektion für Prozentangaben anwenden
     const maxWeeks = 10; // Entspricht dem max-Wert des Sliders
 
     users.forEach(user => {
-        const gradeText = user.assignments.average_grade !== null ?
-            user.assignments.average_grade.toFixed(2) : '-';
+        // Berechne tatsächliche Prozentsätze basierend nur auf Checklisten bis zur ausgewählten Woche
+        // Hole den aktuellen Wochenwert vom Slider
+        const selectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 10);
+        const actualProgress = calculateActualProgressForWeek(user, selectedWeek, maxWeeks);
+        const displayPflichtProgress = actualProgress.pflichtProgress;
+        const displayGesamtProgress = actualProgress.gesamtProgress;
 
-        // Projizierte Prozentsätze basierend auf ausgewählter Referenzwoche
-        const projectedPflichtProgress = currentWeek > 0 ?
-            Math.round(((user.checklists.avg_required_progress / currentWeek) * maxWeeks) * 100) / 100 : 0;
-        const projectedGesamtProgress = currentWeek > 0 ?
-            Math.round(((user.checklists.avg_all_progress / currentWeek) * maxWeeks) * 100) / 100 : 0;
 
-        // Keine Begrenzung - Schüler können über 100% liegen (sind schneller als erwartet)
-        const displayPflichtProgress = projectedPflichtProgress;
-        const displayGesamtProgress = projectedGesamtProgress;
+
+        // Berechne Note basierend auf Pflicht %
+        const gradeText = calculateGradeFromPflichtProgress(displayPflichtProgress);
 
         html += '<tr>';
         html += `<td class="person-name"><strong>${user.name}</strong></td>`;
         html += `<td class="progress-cell" style="--progress-width: ${Math.min(user.checklists.required_100_count * 10, 100)}%; --progress-color: #28a745;">${user.checklists.required_100_count}</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${displayPflichtProgress}%; --progress-color: #007bff;">${displayPflichtProgress.toFixed(1)}%</td>`;
+        html += `<td style="text-align: center; font-weight: bold;">${gradeText}</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${displayGesamtProgress}%; --progress-color: #6f42c1;">${displayGesamtProgress.toFixed(1)}%</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${user.assignments.percent_submitted}%; --progress-color: #fd7e14;">${user.assignments.submitted_count}</td>`;
-        html += `<td style="text-align: center; font-weight: bold;">${gradeText}</td>`;
         html += '</tr>';
     });
 
