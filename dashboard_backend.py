@@ -206,9 +206,9 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
         except:
             pass
 
-    # Durchschnittsnote berechnen
+    # IHK-konforme Durchschnittsnote berechnen
     if grades:
-        user_data['assignments']['average_grade'] = round(sum(grades) / len(grades), 2)
+        user_data['assignments']['average_grade'] = calculate_ihk_grade_average(grades)
 
     # Prozentberechnung basierend auf Gesamtanzahl der Pflichtaufgaben
     user_data['assignments']['percent_submitted'] = round((submitted_count / total_pflicht_activities) * 100, 2) if total_pflicht_activities > 0 else 0
@@ -289,10 +289,10 @@ def calculate_group_averages(users_data):
         }
     }
 
-    # Durchschnittsnote berechnen
+    # IHK-konforme Durchschnittsnote berechnen
     grades = [user['assignments']['average_grade'] for user in users_data if user['assignments']['average_grade'] is not None]
     if grades:
-        group_data['assignments']['avg_grade'] = round(sum(grades) / len(grades), 2)
+        group_data['assignments']['avg_grade'] = calculate_ihk_grade_average(grades)
 
     return group_data
 
@@ -444,6 +444,61 @@ def create_structured_tables(groups_data, categories):
         }
 
     return structured_tables
+
+def points_to_ihk_grade(points):
+    """Konvertiert Punkte (0-100) zu IHK-Note (1-6)"""
+    if points >= 92:
+        return 1.0  # Sehr gut
+    elif points >= 81:
+        return 2.0  # Gut
+    elif points >= 67:
+        return 3.0  # Befriedigend
+    elif points >= 50:
+        return 4.0  # Ausreichend
+    elif points >= 30:
+        return 5.0  # Mangelhaft
+    else:
+        return 6.0  # Ungenügend
+
+def ihk_grade_to_points(grade):
+    """Konvertiert IHK-Note (1-6) zu mittleren Punktwert für Berechnungen"""
+    grade_to_points = {
+        1.0: 96,   # Sehr gut (92-100)
+        2.0: 86,   # Gut (81-91)
+        3.0: 73.5, # Befriedigend (67-80)
+        4.0: 58.5, # Ausreichend (50-66)
+        5.0: 40,   # Mangelhaft (30-49)
+        6.0: 15    # Ungenügend (0-29)
+    }
+    return grade_to_points.get(grade, 50)
+
+def calculate_ihk_grade_average(grades):
+    """Berechnet IHK-konformen Notendurchschnitt aus numerischen Noten"""
+    if not grades:
+        return None
+
+    # Filtere gültige Noten (1-6)
+    valid_grades = []
+    for grade in grades:
+        try:
+            if isinstance(grade, str):
+                grade_num = float(grade.replace(',', '.'))
+            else:
+                grade_num = float(grade)
+
+            # Nur Noten zwischen 1 und 6 sind gültig
+            if 1 <= grade_num <= 6:
+                valid_grades.append(grade_num)
+        except (ValueError, TypeError):
+            continue
+
+    if not valid_grades:
+        return None
+
+    # IHK-konforme Durchschnittsberechnung:
+    # Arithmetisches Mittel der Noten, gerundet auf 0.1
+    average = sum(valid_grades) / len(valid_grades)
+    return round(average, 1)
 
 def round_grade(grade_str):
     """Rundet eine Note auf ganze Zahlen: bis 0.5 ab, ab 0.5 auf"""
