@@ -407,10 +407,32 @@ function calculateGroupStats(users) {
 
     // Checklisten-Statistiken
     const totalRequired100 = users.reduce((sum, user) => sum + user.checklists.required_100_count, 0);
-    const avgRequiredProgress = users.reduce((sum, user) => sum + user.checklists.avg_required_progress, 0) / totalUsers;
-    const avgAllProgress = users.reduce((sum, user) => sum + user.checklists.avg_all_progress, 0) / totalUsers;
-    const avgRequiredProgressTimed = users.reduce((sum, user) => sum + user.checklists.avg_required_progress_timed, 0) / totalUsers;
-    const avgAllProgressTimed = users.reduce((sum, user) => sum + user.checklists.avg_all_progress_timed, 0) / totalUsers;
+    const sumRequiredProgress = users.reduce((sum, user) => sum + user.checklists.avg_required_progress, 0);
+    const sumAllProgress = users.reduce((sum, user) => sum + user.checklists.avg_all_progress, 0);
+    const avgRequiredProgress = sumRequiredProgress / totalUsers;
+    const avgAllProgress = sumAllProgress / totalUsers;
+
+    // Calculate timed values correctly at group level, not by averaging individual user timed values
+    // The timed calculation should be: (group_average / current_week) * total_weeks
+    const currentWeek = parseInt(document.getElementById('weekSlider')?.value || 10);
+    const totalWeeks = 10; // This should match the max value of the week slider
+
+    const avgRequiredProgressTimed = currentWeek > 0 ?
+        Math.round(((avgRequiredProgress / currentWeek) * totalWeeks) * 100) / 100 : 0;
+    const avgAllProgressTimed = currentWeek > 0 ?
+        Math.round(((avgAllProgress / currentWeek) * totalWeeks) * 100) / 100 : 0;
+
+    // Debug logging to help identify the issue
+    console.log('=== calculateGroupStats DEBUG ===');
+    console.log('Total users:', totalUsers);
+    console.log('First few users avg_required_progress:', users.slice(0, 3).map(u => u.checklists.avg_required_progress));
+    console.log('Sum of avg_required_progress:', sumRequiredProgress);
+    console.log('Average should be:', avgRequiredProgress);
+    console.log('Sum of avg_all_progress:', sumAllProgress);
+    console.log('Average all progress:', avgAllProgress);
+    console.log('Current week:', currentWeek, 'Total weeks:', totalWeeks);
+    console.log('OLD way - first user timed value:', users[0]?.checklists.avg_required_progress_timed);
+    console.log('NEW way - calculated timed value:', avgRequiredProgressTimed);
 
     return {
         assignments: {
@@ -496,6 +518,13 @@ function updateOverviewStats(groupStats, users) {
     const progressValue = currentProgressType === 'pflicht' ?
         groupStats.checklists.avg_required_progress_timed :
         groupStats.checklists.avg_all_progress_timed;
+
+    // Debug logging for the card display
+    console.log('=== CARD UPDATE DEBUG ===');
+    console.log('currentProgressType:', currentProgressType);
+    console.log('groupStats.checklists:', groupStats.checklists);
+    console.log('progressValue that will be displayed:', progressValue);
+    console.log('This goes to card:', progressValue + '%');
 
     document.getElementById('avgCompletionText').textContent = progressValue + '%';
     document.getElementById('avgCompletionBar').style.width = Math.min(progressValue, 100) + '%';
