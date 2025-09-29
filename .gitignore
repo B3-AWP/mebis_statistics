@@ -1,13 +1,43 @@
+# Configuration files with sensitive data
 config.ini
+.env
+*.local.conf
+
+# Temporary and generated files
 temp.html
 config.json
 activities_data.json
-config.json
 prompt.txt
-export/*
 auswertung.html
 exclude_names.txt
+
+# Export data
+export/*
+
+# Python
 venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
 Referenzprojekt/
 .claude/settings.local.json
-__pycache__/dashboard_backend.cpython-313.pyc
+
+# Logs
+*.log
+logs/
