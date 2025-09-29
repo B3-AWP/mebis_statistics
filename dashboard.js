@@ -475,7 +475,6 @@ function updateOverviewStats(groupStats, users) {
     const { totalChecklists, totalPflichtaufgaben } = getTotalCounts();
 
     // Maximale Schulwochen basierend auf dem Slider (nicht 40!)
-    const maxWeeks = 10; // Entspricht dem max-Wert des Sliders
 
     // Durchschnittliche erledigte Anzahl pro Person berechnen
     const avgCompletedChecklists = users.length > 0 ?
@@ -486,8 +485,8 @@ function updateOverviewStats(groupStats, users) {
     // Erwartete Anzahl für die ausgewählte Referenzwoche
     // Bei Woche 10 (Maximum) sollten alle Checklisten/Aufgaben erwartet werden
     const selectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 10);
-    const expectedChecklistsForWeek = Math.ceil((totalChecklists / maxWeeks) * selectedWeek);
-    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / maxWeeks) * selectedWeek);
+    const expectedChecklistsForWeek = Math.ceil((totalChecklists / 10) * selectedWeek);
+    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / 10) * selectedWeek);
 
     // Prozentsätze basierend auf durchschnittlich erledigte vs. erwartete für die Woche
     const percentChecklists = expectedChecklistsForWeek > 0 ?
@@ -598,9 +597,8 @@ function calculateStatsForGroup(groupName, groupData) {
 
     // Erwartete Werte für aktuelle Referenzwoche
     const { totalChecklists, totalPflichtaufgaben } = getTotalCounts();
-    const maxWeeks = 10; // Entspricht dem max-Wert des Sliders
-    const expectedChecklistsForWeek = Math.ceil((totalChecklists / maxWeeks) * selectedWeek);
-    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / maxWeeks) * selectedWeek);
+    const expectedChecklistsForWeek = Math.ceil((totalChecklists / 10) * selectedWeek);
+    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / 10) * selectedWeek);
 
     // Prozentsätze
     const checklistPercentage = expectedChecklistsForWeek > 0 ?
@@ -665,7 +663,6 @@ function generateGroupComparisonTable() {
     html += '<tbody>';
 
     // Zeitprojektion für Gruppenwerte anwenden
-    const maxWeeks = 10; // Entspricht dem max-Wert des Sliders
 
     // Statistiken für jede Gruppe berechnen und anzeigen
     groupsToShow.forEach(groupName => {
@@ -718,7 +715,7 @@ function calculateActualProgressForWeek(user, selectedWeek, maxWeeks, groupName 
 
             if (userIndex > 0) { // Index 0 ist normalerweise die Checklist-Spalte
                 const totalChecklists = tableData.rows.length;
-                const expectedChecklistsForWeek = Math.ceil((totalChecklists / maxWeeks) * selectedWeek);
+                const expectedChecklistsForWeek = Math.ceil((totalChecklists / 10) * selectedWeek);
 
                 // Summiere alle Pflicht- und Gesamt-Prozente von ALLEN Checklisten
                 let totalPflichtPercent = 0;
@@ -764,9 +761,9 @@ function calculateActualProgressForWeek(user, selectedWeek, maxWeeks, groupName 
     // Fallback: Verwende die ursprünglichen projizierten Werte falls strukturierte Daten nicht verfügbar
     if (pflichtProgress === 0 && gesamtProgress === 0 && user.checklists) {
         const projectedPflichtProgress = selectedWeek > 0 ?
-            Math.round(((user.checklists.avg_required_progress / selectedWeek) * maxWeeks) * 100) / 100 : 0;
+            Math.round(((user.checklists.avg_required_progress / selectedWeek) * 10) * 100) / 100 : 0;
         const projectedGesamtProgress = selectedWeek > 0 ?
-            Math.round(((user.checklists.avg_all_progress / selectedWeek) * maxWeeks) * 100) / 100 : 0;
+            Math.round(((user.checklists.avg_all_progress / selectedWeek) * 10) * 100) / 100 : 0;
 
         pflichtProgress = projectedPflichtProgress;
         gesamtProgress = projectedGesamtProgress;
@@ -830,13 +827,12 @@ function generateGroupProgressTable(users) {
     html += '</tr></thead>';
     html += '<tbody>';
 
-    const maxWeeks = 10; // Entspricht dem max-Wert des Sliders
 
     users.forEach(user => {
         // Berechne tatsächliche Prozentsätze basierend nur auf Checklisten bis zur ausgewählten Woche
         // Hole den aktuellen Wochenwert vom Slider
         const selectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 10);
-        const actualProgress = calculateActualProgressForWeek(user, selectedWeek, maxWeeks);
+        const actualProgress = calculateActualProgressForWeek(user, selectedWeek, 10);
         const displayPflichtProgress = actualProgress.pflichtProgress;
         const displayGesamtProgress = actualProgress.gesamtProgress;
 
@@ -1413,6 +1409,14 @@ function generatePflichtTableFromActivities() {
             if (status && status.grade && status.grade !== '-') {
                 cellContent = `<strong>${status.grade}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (status && status.rating && status.rating !== '-') {
+                // Alternative: Rating field for assignments
+                cellContent = `<strong>${status.rating}</strong>`;
+                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (status && status.score && status.score !== '-') {
+                // Alternative: Score field for assignments
+                cellContent = `<strong>${status.score}</strong>`;
+                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.status === 'Zur Bewertung abgegeben') {
                 cellContent = '<span style="color: #ffc107;">bewertbar</span>';
                 bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
@@ -1801,6 +1805,14 @@ function generateAllGroupsPflichtTable() {
             if (status && status.grade && status.grade !== '-') {
                 // Grade vorhanden - zeige Grade-Wert
                 cellContent = `<strong>${status.grade}</strong>`;
+                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (status && status.rating && status.rating !== '-') {
+                // Alternative: Rating field for assignments
+                cellContent = `<strong>${status.rating}</strong>`;
+                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (status && status.score && status.score !== '-') {
+                // Alternative: Score field for assignments
+                cellContent = `<strong>${status.score}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.status === 'Zur Bewertung abgegeben') {
                 // Zur Bewertung abgegeben - zeige "bewertbar"
@@ -2270,31 +2282,10 @@ function generateZentralTable() {
         return;
     }
 
-    // Kategorie-Filter anwenden (gleiche Logik wie bei generatePflichtTableFromActivities)
-    const categoryFilter = document.getElementById('zentralCategoryFilter')?.value || 'zentrale';
-    let categoriesToShow;
-
-    if (categoryFilter === 'zentrale') {
-        categoriesToShow = dashboardData.activities_by_category.filter(category =>
-            category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
-        );
-    } else if (categoryFilter === 'all') {
-        categoriesToShow = dashboardData.activities_by_category;
-    } else {
-        const selectedCategoryName = dashboardData.activities_by_category.find(category =>
-            category.category_name && category.category_name.toLowerCase().replace(/[^a-z0-9]/g, '') === categoryFilter
-        )?.category_name;
-
-        if (selectedCategoryName) {
-            categoriesToShow = dashboardData.activities_by_category.filter(category =>
-                category.category_name === selectedCategoryName
-            );
-        } else {
-            categoriesToShow = dashboardData.activities_by_category.filter(category =>
-                category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
-            );
-        }
-    }
+    // Zeige nur "Zentrale Leistungsnachweise" Kategorien (Kategorie-Filter entfernt)
+    const categoriesToShow = dashboardData.activities_by_category.filter(category =>
+        category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
+    );
 
     // Sammle sowohl assignments als auch quizzes aus den gewählten Kategorien
     let allActivities = [];
@@ -2323,6 +2314,20 @@ function generateZentralTable() {
 
     console.log('DEBUG ZENTRAL: Gefundene Kategorien:', categoriesToShow.length);
     console.log('DEBUG ZENTRAL: Alle Aktivitäten:', allActivities.length);
+
+    // Debug: Suche nach Review-Talk 1
+    const reviewTalkActivities = allActivities.filter(activity =>
+        activity.title && activity.title.includes('Review-Talk 1')
+    );
+    console.log('🔍 DEBUG: Review-Talk 1 activities found:', reviewTalkActivities.length);
+    reviewTalkActivities.forEach(activity => {
+        console.log('🔍 Review-Talk 1 activity:', {
+            title: activity.title,
+            activity_type: activity.activity_type,
+            user_status_count: activity.user_status ? activity.user_status.length : 0,
+            user_status: activity.user_status
+        });
+    });
 
     // Benutzer der ausgewählten Gruppe (gleiche Logik wie Pflichtaufgaben)
     const groupUsers = dashboardData.groups[currentGroup].users || [];
@@ -2413,6 +2418,7 @@ function generateZentralTable() {
 
             if (!status) {
                 // Kein Status gefunden für diesen Benutzer
+                console.log(`DEBUG ZENTRAL: No status found for ${activity.activity_type} "${activity.title}" for user ${userName}`);
                 cellContent = '❓ Nicht gefunden';
                 cellClass = 'status-missing';
                 bgColor = '#f8f9fa'; // Grau
@@ -2423,7 +2429,56 @@ function generateZentralTable() {
                 bgColor = '#f8d7da'; // Rot
             } else if (status.grade && status.grade !== '-') {
                 // Grade vorhanden - zeige Grade-Wert
+                console.log(`DEBUG ZENTRAL: Grade found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.grade}`);
+                if (activity.title && activity.title.includes('Review-Talk 1')) {
+                    console.log(`🎯 GRADE SUCCESS: Review-Talk 1 grade found for ${userName}: ${status.grade}`);
+                }
                 cellContent = `✓ ${status.grade}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.rating && status.rating !== '-') {
+                // Alternative: Rating field for assignments
+                console.log(`DEBUG ZENTRAL: Rating found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.rating}`);
+                if (activity.title && activity.title.includes('Review-Talk 1')) {
+                    console.log(`🎯 RATING SUCCESS: Review-Talk 1 rating found for ${userName}: ${status.rating}`);
+                }
+                cellContent = `✓ ${status.rating}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.score && status.score !== '-') {
+                // Alternative: Score field for assignments
+                console.log(`DEBUG ZENTRAL: Score found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.score}`);
+                if (activity.title && activity.title.includes('Review-Talk 1')) {
+                    console.log(`🎯 SCORE SUCCESS: Review-Talk 1 score found for ${userName}: ${status.score}`);
+                }
+                cellContent = `✓ ${status.score}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.points && status.points !== '-' && status.points !== null) {
+                // Alternative: Points field for assignments
+                console.log(`DEBUG ZENTRAL: Points found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.points}`);
+                if (activity.title && activity.title.includes('Review-Talk 1')) {
+                    console.log(`🎯 POINTS SUCCESS: Review-Talk 1 points found for ${userName}: ${status.points}`);
+                }
+                cellContent = `✓ ${status.points}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.result && status.result !== '-' && status.result !== null) {
+                // Alternative: Result field for assignments
+                console.log(`DEBUG ZENTRAL: Result found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.result}`);
+                if (activity.title && activity.title.includes('Review-Talk 1')) {
+                    console.log(`🎯 RESULT SUCCESS: Review-Talk 1 result found for ${userName}: ${status.result}`);
+                }
+                cellContent = `✓ ${status.result}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.mark && status.mark !== '-' && status.mark !== null) {
+                // Alternative: Mark field for assignments
+                console.log(`DEBUG ZENTRAL: Mark found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.mark}`);
+                if (activity.title && activity.title.includes('Review-Talk 1')) {
+                    console.log(`🎯 MARK SUCCESS: Review-Talk 1 mark found for ${userName}: ${status.mark}`);
+                }
+                cellContent = `✓ ${status.mark}`;
                 cellClass = 'status-graded';
                 bgColor = '#d4edda'; // Grün
             } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
@@ -2432,7 +2487,34 @@ function generateZentralTable() {
                 cellClass = 'status-submitted';
                 bgColor = '#fff3cd'; // Gelb
             } else {
-                // Andere Status
+                // Andere Status - Debug ALL possible grade fields
+                console.log(`DEBUG ZENTRAL: Other status for ${activity.activity_type} "${activity.title}" for user ${userName}:`, {
+                    status: status.status,
+                    grade: status.grade,
+                    rating: status.rating,
+                    score: status.score,
+                    points: status.points,
+                    result: status.result,
+                    mark: status.mark,
+                    fullStatus: status
+                });
+
+                // Spezielle Debug-Ausgabe für Review-Talk 1
+                if (activity.title && activity.title.includes('Review-Talk 1')) {
+                    console.log(`🔍 SPECIAL DEBUG: Review-Talk 1 found for user ${userName}:`, {
+                        activity_type: activity.activity_type,
+                        status_object: status,
+                        all_grade_fields: {
+                            grade: status.grade,
+                            rating: status.rating,
+                            score: status.score,
+                            points: status.points,
+                            result: status.result,
+                            mark: status.mark
+                        }
+                    });
+                }
+
                 cellContent = status.status || 'Unbekannt';
                 cellClass = 'status-other';
                 bgColor = '#e2e3e5'; // Grau
@@ -2461,31 +2543,10 @@ function generateAllGroupsZentralTable() {
 
     console.log('DEBUG ALL GROUPS ZENTRAL: Starting generateAllGroupsZentralTable');
 
-    // Kategorie-Filter anwenden (gleiche Logik wie einzelne Gruppen)
-    const categoryFilter = document.getElementById('zentralCategoryFilter')?.value || 'zentrale';
-    let categoriesToShow;
-
-    if (categoryFilter === 'zentrale') {
-        categoriesToShow = dashboardData.activities_by_category.filter(category =>
-            category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
-        );
-    } else if (categoryFilter === 'all') {
-        categoriesToShow = dashboardData.activities_by_category;
-    } else {
-        const selectedCategoryName = dashboardData.activities_by_category.find(category =>
-            category.category_name && category.category_name.toLowerCase().replace(/[^a-z0-9]/g, '') === categoryFilter
-        )?.category_name;
-
-        if (selectedCategoryName) {
-            categoriesToShow = dashboardData.activities_by_category.filter(category =>
-                category.category_name === selectedCategoryName
-            );
-        } else {
-            categoriesToShow = dashboardData.activities_by_category.filter(category =>
-                category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
-            );
-        }
-    }
+    // Zeige nur "Zentrale Leistungsnachweise" Kategorien (Kategorie-Filter entfernt)
+    const categoriesToShow = dashboardData.activities_by_category.filter(category =>
+        category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
+    );
 
     // Sammle sowohl assignments als auch quizzes aus den gewählten Kategorien
     let allActivities = [];
@@ -2612,7 +2673,38 @@ function generateAllGroupsZentralTable() {
                 cellClass = 'status-missing';
                 bgColor = '#f8d7da'; // Rot
             } else if (status.grade && status.grade !== '-') {
+                console.log(`DEBUG ZENTRAL ALL: Grade found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.grade}`);
                 cellContent = `✓<br>${status.grade}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.rating && status.rating !== '-') {
+                // Alternative: Rating field for assignments
+                console.log(`DEBUG ZENTRAL ALL: Rating found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.rating}`);
+                cellContent = `✓<br>${status.rating}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.score && status.score !== '-') {
+                // Alternative: Score field for assignments
+                console.log(`DEBUG ZENTRAL ALL: Score found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.score}`);
+                cellContent = `✓<br>${status.score}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.points && status.points !== '-' && status.points !== null) {
+                // Alternative: Points field for assignments
+                console.log(`DEBUG ZENTRAL ALL: Points found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.points}`);
+                cellContent = `✓<br>${status.points}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.result && status.result !== '-' && status.result !== null) {
+                // Alternative: Result field for assignments
+                console.log(`DEBUG ZENTRAL ALL: Result found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.result}`);
+                cellContent = `✓<br>${status.result}`;
+                cellClass = 'status-graded';
+                bgColor = '#d4edda'; // Grün
+            } else if (status.mark && status.mark !== '-' && status.mark !== null) {
+                // Alternative: Mark field for assignments
+                console.log(`DEBUG ZENTRAL ALL: Mark found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.mark}`);
+                cellContent = `✓<br>${status.mark}`;
                 cellClass = 'status-graded';
                 bgColor = '#d4edda'; // Grün
             } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
@@ -2668,10 +2760,17 @@ function applyZentralViewFilters() {
 
         // Status-Filter anwenden
         if (statusValue !== 'all') {
-            const isCompleted = row.classList.contains('status-graded');
-            if (statusValue === 'completed' && !isCompleted) {
+            // Suche nach bewerteten Zellen in der Zeile
+            const gradedCells = row.querySelectorAll('.status-graded');
+            const submittedCells = row.querySelectorAll('.status-submitted');
+            const missingCells = row.querySelectorAll('.status-missing');
+
+            const hasGrades = gradedCells.length > 0;
+            const hasSubmissions = submittedCells.length > 0;
+
+            if (statusValue === 'completed' && !hasGrades) {
                 shouldShow = false;
-            } else if (statusValue === 'pending' && isCompleted) {
+            } else if (statusValue === 'pending' && hasGrades && !hasSubmissions) {
                 shouldShow = false;
             }
         }
@@ -3271,6 +3370,14 @@ function generateSingleGroupPflichtTableFromAllData() {
 
             if (status && status.grade && status.grade !== '-') {
                 cellContent = `<strong>${status.grade}</strong>`;
+                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (status && status.rating && status.rating !== '-') {
+                // Alternative: Rating field for assignments
+                cellContent = `<strong>${status.rating}</strong>`;
+                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (status && status.score && status.score !== '-') {
+                // Alternative: Score field for assignments
+                cellContent = `<strong>${status.score}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.status === 'Zur Bewertung abgegeben') {
                 cellContent = '<span style="color: #ffc107;">bewertbar</span>';
