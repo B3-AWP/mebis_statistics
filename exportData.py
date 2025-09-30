@@ -1,5 +1,4 @@
 import os
-import configparser
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -16,18 +15,18 @@ import threading
 import requests
 import io
 
+# Sichere Konfiguration
+from config.config_manager import config_manager
+
 # TensorFlow-Logstufe auf ERROR setzen
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-def load_config():
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    return config
-
 def parse_german_datetime(datetime_str):
     """
-    Konvertiert deutsche Zeitangaben wie 'Dienstag, 23. September 2025, 07:46'
-    in ISO-Format '2025-09-23T07:46:00'
+    Konvertiert deutsche Zeitangaben in ISO-Format
+    Unterstützt beide Formate:
+    - 'Dienstag, 23. September 2025, 07:46'
+    - '24. September 2025 08:12'
     """
     if not datetime_str or datetime_str in ["Keine Abgabe", "-", ""]:
         return None
@@ -51,9 +50,22 @@ def parse_german_datetime(datetime_str):
         for german, english in german_months.items():
             datetime_str_en = datetime_str_en.replace(german, english)
 
-        # Parse: "Tuesday, 23. September 2025, 07:46"
-        dt = datetime.strptime(datetime_str_en, "%A, %d. %B %Y, %H:%M")
-        return dt.isoformat()
+        # Versuche verschiedene Formate
+        formats = [
+            "%A, %d. %B %Y, %H:%M",  # "Tuesday, 23. September 2025, 07:46"
+            "%d. %B %Y %H:%M",        # "24. September 2025 08:12"
+        ]
+
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(datetime_str_en, fmt)
+                return dt.isoformat()
+            except ValueError:
+                continue
+
+        # Wenn kein Format passt
+        print(f"Fehler beim Parsen der Zeitangabe '{datetime_str}': Kein passendes Format gefunden")
+        return datetime_str
 
     except Exception as e:
         print(f"Fehler beim Parsen der Zeitangabe '{datetime_str}': {e}")
@@ -654,13 +666,20 @@ def main():
     print("Starte Mebis-Datenexport...")
     print(f"Startzeit: {datetime.now().strftime('%H:%M:%S')}")
 
-    config = load_config()
-    username = config['login']['username']
-    password = config['login']['password']
-    base_url = config['urls']['base_url']
-    course_id = config['courses']['course_ifa12']
-    isheadless = config['mode']['headless']
-    waittime = config['mode']['waittime']
+    # Lade Konfiguration über config_manager
+    credentials = config_manager.get_login_credentials()
+    username = credentials['username']
+    password = credentials['password']
+
+    urls = config_manager.get_urls()
+    base_url = urls['base_url']
+
+    courses = config_manager.get_courses()
+    course_id = courses.get('course_ifa12')
+
+    mode_settings = config_manager.get_mode_settings()
+    isheadless = str(mode_settings['headless'])
+    waittime = mode_settings['waittime']
 
     driver = create_webdriver(headless=isheadless)
     driver.get(f"{base_url}?course={course_id}")

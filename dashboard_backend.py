@@ -14,8 +14,8 @@ from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 
 # Sichere Konfiguration und Logging
-from config_manager import config_manager
-from logger_config import get_logger, backend_logger, api_logger, data_logger
+from config.config_manager import config_manager
+from config.logger_config import get_logger, backend_logger, api_logger, data_logger
 
 # Flask App Setup mit sicherer Konfiguration
 app = Flask(__name__, static_folder='.')
@@ -141,9 +141,9 @@ def load_ignored_groups():
         logger.error(f"Error loading ignored groups: {e}")
         return set()
 
-def load_grade_mapping(config_path='config.ini'):
+def load_grade_mapping(config_path='config/config.ini'):
     """
-    Lädt das GradeMapping aus config.ini
+    Lädt das GradeMapping aus config/config.ini
 
     Args:
         config_path: Pfad zur Konfigurationsdatei

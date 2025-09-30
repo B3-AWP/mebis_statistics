@@ -27,14 +27,19 @@ class ConfigManager:
     3. Default-Werte (letzte Option)
     """
 
-    def __init__(self, config_file: str = 'config.ini'):
+    def __init__(self, config_file: str = None):
         """
         Initialisiert den Konfigurationsmanager.
 
         Args:
-            config_file: Pfad zur config.ini Datei
+            config_file: Pfad zur config.ini Datei (default: config/config.ini)
         """
-        self.config_file = config_file
+        if config_file is None:
+            # Bestimme den Pfad relativ zur Projektroot
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            self.config_file = os.path.join(current_dir, 'config.ini')
+        else:
+            self.config_file = config_file
         self.config = configparser.ConfigParser()
         self._load_config()
 

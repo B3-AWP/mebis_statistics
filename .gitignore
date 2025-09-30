@@ -1,5 +1,5 @@
 # Configuration files with sensitive data
-config.ini
+config/config.ini
 .env
 *.local.conf
 

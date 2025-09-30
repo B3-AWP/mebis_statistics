@@ -13,7 +13,7 @@ import logging.handlers
 import os
 import sys
 from typing import Optional
-from config_manager import config_manager
+from .config_manager import config_manager
 
 class DashboardLogger:
     """

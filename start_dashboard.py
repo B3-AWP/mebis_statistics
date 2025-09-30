@@ -17,8 +17,8 @@ import threading
 from pathlib import Path
 
 # Sichere Konfiguration und Logging
-from config_manager import config_manager
-from logger_config import get_logger
+from config.config_manager import config_manager
+from config.logger_config import get_logger
 
 # Logger für das Startskript
 logger = get_logger('startup')
@@ -34,9 +34,9 @@ def check_environment():
 
     # Prüfe ob .env Datei existiert
     if not Path('.env').exists():
-        logger.warning(".env file not found. Using config.ini fallback.")
-        if not Path('config.ini').exists():
-            logger.error("Neither .env nor config.ini found!")
+        logger.warning(".env file not found. Using config/config.ini fallback.")
+        if not Path('config/config.ini').exists():
+            logger.error("Neither .env nor config/config.ini found!")
             logger.error("Please copy .env.template to .env and configure your credentials.")
             return False
 
@@ -101,7 +101,7 @@ def check_credentials():
     except ValueError as e:
         logger.error(f"Credential error: {e}")
         logger.error("Please set MEBIS_USERNAME and MEBIS_PASSWORD environment variables")
-        logger.error("or configure them in config.ini")
+        logger.error("or configure them in config/config.ini")
         return False
 
 def open_browser_delayed():
