@@ -29,17 +29,21 @@ app.config.update({
     'ENV': flask_config['env']
 })
 
-def find_latest_file(directory='export'):
+def find_latest_file(directory=None):
     """
     Findet die neueste JSON-Datei im Export-Ordner
 
     Args:
-        directory: Verzeichnis zum Durchsuchen
+        directory: Verzeichnis zum Durchsuchen (None = aus Konfiguration)
 
     Returns:
         str: Pfad zur neuesten Datei oder None
     """
     logger = data_logger
+
+    # Hole Export-Ordner aus Konfiguration wenn nicht angegeben
+    if directory is None:
+        directory = config_manager.get_export_folder()
 
     try:
         pattern = os.path.join(directory, 'output_*.json')

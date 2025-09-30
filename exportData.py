@@ -932,10 +932,13 @@ def main():
     # Zeitstempel hinzufügen
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_filename = f'output_{timestamp}.json'
-    local_filename = f'./export/{json_filename}'
+
+    # Hole Export-Ordner aus Konfiguration
+    export_folder = config_manager.get_export_folder()
+    local_filename = os.path.join(export_folder, json_filename)
 
     try:
-        os.makedirs('./export', exist_ok=True)
+        os.makedirs(export_folder, exist_ok=True)
         with open(local_filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
         save_duration = time.time() - save_start_time
@@ -971,7 +974,7 @@ def main():
     if total_activities > 0:
         print(f"Durchschnitt: {(duration / total_activities):.1f}s pro Aktivitaet")
     if save_success:
-        print(f"Lokale Datei: ./export/{json_filename}")
+        print(f"Lokale Datei: {local_filename}")
     else:
         print(f"❌ Speicherung fehlgeschlagen")
     print(f"Endzeit: {datetime.now().strftime('%H:%M:%S')}")

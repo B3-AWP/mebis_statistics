@@ -154,6 +154,15 @@ class ConfigManager:
             'backup_count': self._get_int('LOG_BACKUP_COUNT', 5)
         }
 
+    def get_export_folder(self) -> str:
+        """
+        Holt Export-Ordner-Pfad aus Environment Variable.
+
+        Returns:
+            Pfad zum Export-Ordner (relativ oder absolut)
+        """
+        return os.getenv('EXPORT_FOLDER', 'export')
+
     def get_grade_mapping(self) -> Dict[int, str]:
         """
         Holt Grade Mapping aus Environment Variable.

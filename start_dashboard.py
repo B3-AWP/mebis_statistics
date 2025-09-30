@@ -41,11 +41,13 @@ def check_environment():
     else:
         logger.info(f"Configuration file found: {env_file}")
 
-    # Prüfe Export-Ordner
-    export_folder = Path("export")
+    # Prüfe Export-Ordner (aus Konfiguration)
+    export_folder_path = config_manager.get_export_folder()
+    export_folder = Path(export_folder_path)
+
     if not export_folder.exists():
-        logger.error("Export folder not found!")
-        logger.error("Please ensure the 'export' folder with JSON files exists.")
+        logger.error(f"Export folder not found: {export_folder_path}")
+        logger.error(f"Please ensure the export folder exists. You can set EXPORT_FOLDER in config/.env")
         return False
 
     json_files = list(export_folder.glob("output_*.json"))
