@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-Mebis Statistik Dashboard - Sicheres Backend
-Refactored Version mit professionellem Logging und Environment Variables Support
+Mebis Statistik Dashboard - Backend
+Version mit professionellem Logging und Environment Variables Support
 """
 
 import os
@@ -594,6 +594,13 @@ def get_data():
 
         activities_with_status = add_user_status_to_activities(activities_ordered, data, groups_data)
 
+        # Environment-Settings für Frontend
+        flask_config = config_manager.get_flask_config()
+        environment_settings = {
+            'mode': flask_config['env'],
+            'debug': flask_config['debug']
+        }
+
         # Response erstellen
         response_data = {
             'groups': groups_data,
@@ -604,7 +611,8 @@ def get_data():
             'structured_tables': structured_data,
             'ignored_groups': list(ignored_groups),
             'grade_mapping': grade_mapping,
-            'last_updated': latest_file
+            'last_updated': latest_file,
+            'environment': environment_settings
         }
 
         logger.info(f"API response created successfully with {len(groups_data)} groups")
@@ -1017,7 +1025,7 @@ def get_groups():
 
 if __name__ == '__main__':
     flask_config = config_manager.get_flask_config()
-    backend_logger.info("Starting Mebis Dashboard Backend (Secure Version)")
+    backend_logger.info("Starting Mebis Dashboard Backend")
     backend_logger.info(f"Dashboard available at: http://{flask_config['host']}:{flask_config['port']}")
 
     app.run(

@@ -162,11 +162,11 @@ class ConfigManager:
             Dictionary mit Flask-Einstellungen
         """
         return {
-            'debug': self._get_bool('FLASK_DEBUG', None, None, False),
+            'debug': self._get_bool('FLASK_DEBUG', 'environment', 'debug', False),
             'host': self._get_string('FLASK_HOST', None, None, '0.0.0.0'),
             'port': self._get_int('FLASK_PORT', None, None, 5000),
             'secret_key': os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production'),
-            'env': os.getenv('FLASK_ENV', 'production')
+            'env': self._get_string('FLASK_ENV', 'environment', 'mode', 'production')
         }
 
     def get_logging_config(self) -> Dict[str, Any]:
@@ -176,7 +176,7 @@ class ConfigManager:
         Returns:
             Dictionary mit Logging-Einstellungen
         """
-        log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+        log_level = self._get_string('LOG_LEVEL', 'environment', 'log_level', 'INFO').upper()
 
         return {
             'level': getattr(logging, log_level, logging.INFO),

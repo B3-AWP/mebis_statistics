@@ -101,21 +101,20 @@ async function loadData() {
         dashboardData = await response.json();
 
         // Load grade mapping from backend
-        console.log('DEBUG: Checking for grade_mapping in response...');
-        console.log('DEBUG: dashboardData.grade_mapping exists?', !!dashboardData.grade_mapping);
-        console.log('DEBUG: dashboardData.grade_mapping value:', dashboardData.grade_mapping);
+        dashboardLogger.debug('DATA', 'Checking for grade_mapping in response');
+        dashboardLogger.debug('DATA', 'grade_mapping exists', { exists: !!dashboardData.grade_mapping });
 
         if (dashboardData.grade_mapping) {
             gradeMapping = dashboardData.grade_mapping;
-            console.log('✓ Grade mapping loaded successfully:', gradeMapping);
+            dashboardLogger.info('DATA', 'Grade mapping loaded successfully', gradeMapping);
         } else {
-            console.error('✗ ERROR: No grade_mapping found in backend response!');
-            console.log('Available keys in dashboardData:', Object.keys(dashboardData));
+            dashboardLogger.error('DATA', 'No grade_mapping found in backend response', {
+                availableKeys: Object.keys(dashboardData)
+            });
         }
 
         // Debug: JSON-Struktur analysieren
-        console.log('=== DASHBOARD DATA LOADED ===');
-        console.log('Data structure:', {
+        dashboardLogger.info('DATA', 'Dashboard data loaded', {
             hasActivitiesByCategory: !!dashboardData.activities_by_category,
             categoriesCount: dashboardData.activities_by_category ? dashboardData.activities_by_category.length : 'undefined',
             sampleCategory: dashboardData.activities_by_category ? dashboardData.activities_by_category[0] : 'none'
@@ -123,10 +122,15 @@ async function loadData() {
 
         if (dashboardData.activities_by_category && dashboardData.activities_by_category.length > 0) {
             const firstCategory = dashboardData.activities_by_category[0];
-            console.log('First category assignments:', {
+            dashboardLogger.debug('DATA', 'First category assignments', {
                 assignmentCount: firstCategory.assignments ? firstCategory.assignments.length : 'undefined',
                 sampleAssignment: firstCategory.assignments && firstCategory.assignments.length > 0 ? firstCategory.assignments[0] : 'none'
             });
+        }
+
+        // Environment-Settings vom Backend laden
+        if (dashboardData.environment) {
+            dashboardLogger.setBackendEnvironment(dashboardData.environment);
         }
 
         // Datei-Info anzeigen
@@ -144,7 +148,7 @@ async function loadData() {
         showLoading(false);
 
     } catch (error) {
-        console.error('Fehler beim Laden der Daten:', error);
+        dashboardLogger.error('API', 'Fehler beim Laden der Daten', error);
         showError('Fehler beim Laden der Daten: ' + error.message);
         showLoading(false);
     }
@@ -160,7 +164,7 @@ function showLoading(show) {
 
 // Fehler anzeigen
 function showError(message) {
-    console.error(message);
+    dashboardLogger.error('UI', message);
     // Hier könnte eine Benutzer-freundliche Fehleranzeige implementiert werden
 }
 
@@ -778,7 +782,15 @@ function calculateActualProgressForWeek(user, selectedWeek, maxWeeks, groupName 
                 }
 
                 // Debug: Zeige neue Berechnungslogik
-                console.log(`DEBUG NEW: ${user.name}, Week ${selectedWeek}: Expected=${expectedChecklistsForWeek} checklists (${expectedTotalPflichtPoints} points), Total Pflicht=${totalPflichtPercent}%, Total Gesamt=${totalGesamtPercent}% → Pflicht=${pflichtProgress}%, Gesamt=${gesamtProgress}%`);
+                dashboardLogger.debug('CALC', `Progress calculation for ${user.name}`, {
+                    week: selectedWeek,
+                    expectedChecklists: expectedChecklistsForWeek,
+                    expectedPoints: expectedTotalPflichtPoints,
+                    totalPflicht: totalPflichtPercent,
+                    totalGesamt: totalGesamtPercent,
+                    pflichtProgress,
+                    gesamtProgress
+                });
             }
         }
     }
@@ -1059,7 +1071,7 @@ function updateAllTabs() {
 // Referenzwoche aktualisieren
 function updateReferenceWeek(week) {
     currentWeek = parseInt(week);
-    console.log('Referenzwoche geändert zu:', currentWeek);
+    dashboardLogger.info('USER', 'Referenzwoche geändert', { week: currentWeek });
 
     // Slider-Wert visuell aktualisieren
     const slider = document.getElementById('referenceWeekSlider');
@@ -1285,10 +1297,11 @@ function generatePflichtTableFromActivities() {
         });
 
         // 2. Quizzes aus ALLEN Kategorien (für umfassende Notenberechnung)
-        console.log('DEBUG: Searching for quizzes in all categories...');
+        dashboardLogger.debug('DATA', 'Searching for quizzes in all categories');
         let totalQuizzesFound = 0;
         dashboardData.activities_by_category.forEach(category => {
-            console.log(`DEBUG: Category "${category.category_name}" has ${category.quizzes ? category.quizzes.length : 0} quizzes`);
+            const quizCount = category.quizzes ? category.quizzes.length : 0;
+            dashboardLogger.debug('DATA', `Category "${category.category_name}"`, { quizzes: quizCount });
             if (category.quizzes && category.quizzes.length > 0) {
                 totalQuizzesFound += category.quizzes.length;
                 category.quizzes.forEach(quiz => {
@@ -1299,11 +1312,11 @@ function generatePflichtTableFromActivities() {
                 });
             }
         });
-        console.log('DEBUG: Total quizzes found and added:', totalQuizzesFound);
+        dashboardLogger.info('DATA', 'Total quizzes found and added', { total: totalQuizzesFound });
 
         // ZUSÄTZLICH: Prüfe structured_tables für weitere Quiz-Daten
         if (dashboardData.structured_tables && dashboardData.structured_tables[currentGroup]) {
-            console.log('DEBUG: Checking structured_tables for additional quiz data...');
+            dashboardLogger.debug('DEBUG',  Checking structured_tables for additional quiz data...');
             const structuredData = dashboardData.structured_tables[currentGroup];
 
             // Prüfe verschiedene mögliche Quiz-Felder in structured_tables
@@ -1343,8 +1356,8 @@ function generatePflichtTableFromActivities() {
         });
     }
 
-    console.log('DEBUG: Final allActivities count:', allActivities.length);
-    console.log('DEBUG: Activity types breakdown:', allActivities.reduce((acc, activity) => {
+    dashboardLogger.debug('DEBUG',  Final allActivities count:', allActivities.length);
+    dashboardLogger.debug('DEBUG',  Activity types breakdown:', allActivities.reduce((acc, activity) => {
         acc[activity.activity_type] = (acc[activity.activity_type] || 0) + 1;
         return acc;
     }, {}));
@@ -1358,7 +1371,7 @@ function generatePflichtTableFromActivities() {
 
     // Benutzer der aktuellen Gruppe sammeln
     const groupUsers = dashboardData.groups[currentGroup].users;
-    console.log('DEBUG: Erste 3 Benutzer der Gruppe:', groupUsers.slice(0, 3));
+    dashboardLogger.debug('DEBUG',  Erste 3 Benutzer der Gruppe:', groupUsers.slice(0, 3));
 
     // Prüfe verschiedene mögliche Benutzer-Name-Felder
     const groupUserNames = new Set();
@@ -1368,13 +1381,13 @@ function generatePflichtTableFromActivities() {
         if (userName) {
             groupUserNames.add(userName);
         }
-        console.log('DEBUG: User object:', user, 'extracted name:', userName);
+        dashboardLogger.debug('DEBUG',  User object:', user, 'extracted name:', userName);
     });
 
-    console.log('DEBUG: Gruppe', currentGroup, 'hat', groupUsers.length, 'Benutzer, extrahierte Namen:', Array.from(groupUserNames));
+    dashboardLogger.debug('DEBUG',  Gruppe', currentGroup, 'hat', groupUsers.length, 'Benutzer, extrahierte Namen:', Array.from(groupUserNames));
 
     // Debug: Prüfe Struktur der Activities
-    console.log('DEBUG: Assignments für Gruppe', currentGroup, ':', assignments.length);
+    dashboardLogger.debug('DEBUG',  Assignments für Gruppe', currentGroup, ':', assignments.length);
     assignments.forEach((assignment, index) => {
         if (index < 3) { // Nur erste 3 zur Debug-Ausgabe
             console.log(`Assignment ${index}:`, {
@@ -1396,7 +1409,7 @@ function generatePflichtTableFromActivities() {
         ) : []
     })).filter(assignment => assignment.user_status.length > 0);
 
-    console.log('DEBUG: Nach Filterung:', filteredAssignments.length, 'Aktivitäten übrig');
+    dashboardLogger.debug('DEBUG',  Nach Filterung:', filteredAssignments.length, 'Aktivitäten übrig');
 
     if (filteredAssignments.length === 0) {
         container.innerHTML = `<p>Keine Daten für die ausgewählte Gruppe "${currentGroup}" verfügbar.</p>
@@ -3544,8 +3557,8 @@ function generateSingleGroupPflichtTableFromAllData() {
 
     // Sammle alle Aktivitäten (wie in "Alle Gruppen")
     let allActivities = [];
-    console.log('DEBUG: New function - collecting activities...');
-    console.log('DEBUG: Categories to show:', categoriesToShow.length);
+    dashboardLogger.debug('DEBUG',  New function - collecting activities...');
+    dashboardLogger.debug('DEBUG',  Categories to show:', categoriesToShow.length);
 
     categoriesToShow.forEach(category => {
         console.log(`DEBUG: Category "${category.category_name}" - assignments: ${category.assignments?.length || 0}, quizzes: ${category.quizzes?.length || 0}`);
@@ -3571,12 +3584,12 @@ function generateSingleGroupPflichtTableFromAllData() {
         }
     });
 
-    console.log('DEBUG: Total activities collected:', allActivities.length);
-    console.log('DEBUG: Activity types:', allActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
+    dashboardLogger.debug('DEBUG',  Total activities collected:', allActivities.length);
+    dashboardLogger.debug('DEBUG',  Activity types:', allActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
 
     // ZUSÄTZLICH: Versuche Quiz-Daten aus anderen Quellen zu extrahieren
     if (dashboardData.structured_tables && dashboardData.structured_tables[currentGroup]) {
-        console.log('DEBUG: Searching for quiz data in structured_tables...');
+        dashboardLogger.debug('DEBUG',  Searching for quiz data in structured_tables...');
         const structuredData = dashboardData.structured_tables[currentGroup];
 
         // Durchsuche alle Tabellen nach Quiz-ähnlichen Daten
@@ -3627,12 +3640,12 @@ function generateSingleGroupPflichtTableFromAllData() {
             }
         });
 
-        console.log('DEBUG: After adding structured_tables quizzes - Total activities:', allActivities.length);
-        console.log('DEBUG: Updated activity types:', allActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
+        dashboardLogger.debug('DEBUG',  After adding structured_tables quizzes - Total activities:', allActivities.length);
+        dashboardLogger.debug('DEBUG',  Updated activity types:', allActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
 
         // ZUSÄTZLICH: Durchsuche Checklisten-Daten nach Quiz-ähnlichen Aktivitäten
         if (structuredData.checklists && structuredData.checklists.rows) {
-            console.log('DEBUG: Searching checklists for quiz-like activities...');
+            dashboardLogger.debug('DEBUG',  Searching checklists for quiz-like activities...');
             structuredData.checklists.rows.forEach(checklistRow => {
                 // Prüfe ob der Checklisten-Titel auf Quiz hindeutet
                 const title = checklistRow.checklist_title || '';
@@ -3692,7 +3705,7 @@ function generateSingleGroupPflichtTableFromAllData() {
     });
 
     // Filtere Aktivitäten, um nur Benutzer aus der aktuellen Gruppe zu zeigen
-    console.log('DEBUG: Group user names:', Array.from(groupUserNames));
+    dashboardLogger.debug('DEBUG',  Group user names:', Array.from(groupUserNames));
     const filteredActivities = allActivities.map(activity => ({
         ...activity,
         user_status: activity.user_status ? activity.user_status.filter(userStatus =>
@@ -3700,8 +3713,8 @@ function generateSingleGroupPflichtTableFromAllData() {
         ) : []
     })).filter(activity => activity.user_status.length > 0);
 
-    console.log('DEBUG: Filtered activities:', filteredActivities.length);
-    console.log('DEBUG: Filtered activity types:', filteredActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
+    dashboardLogger.debug('DEBUG',  Filtered activities:', filteredActivities.length);
+    dashboardLogger.debug('DEBUG',  Filtered activity types:', filteredActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
 
     // Debug: Zeige erste paar Aktivitäten
     filteredActivities.slice(0, 3).forEach((activity, index) => {

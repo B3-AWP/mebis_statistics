@@ -15,6 +15,6 @@ if errorlevel 1 (
 
 REM Starte das Dashboard
 echo Starte Dashboard...
-python start_dashboard_secure.py
+python start_dashboard.py
 
 pause

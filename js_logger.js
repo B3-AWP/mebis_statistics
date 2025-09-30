@@ -3,10 +3,6 @@
 
 class DashboardLogger {
     constructor() {
-        // Bestimme Log-Level basierend auf Environment
-        this.isDevelopment = this.checkDevelopmentMode();
-        this.logLevel = this.getLogLevel();
-
         // Log-Levels (höhere Nummer = weniger wichtig)
         this.levels = {
             ERROR: 0,
@@ -14,16 +10,37 @@ class DashboardLogger {
             INFO: 2,
             DEBUG: 3
         };
+
+        // Bestimme Log-Level basierend auf Environment
+        this.isDevelopment = this.checkDevelopmentMode();
+        this.logLevel = this.getLogLevel();
+
+        // Environment-Settings werden später vom Backend geladen
+        this.backendEnvironment = null;
     }
 
     checkDevelopmentMode() {
-        // Prüfe ob wir im Development-Modus sind
+        // 1. Prüfe Backend-Settings (wenn verfügbar)
+        if (this.backendEnvironment) {
+            return this.backendEnvironment.mode === 'development';
+        }
+
+        // 2. Fallback: Lokale Erkennung
         return (
             window.location.hostname === 'localhost' ||
             window.location.hostname === '127.0.0.1' ||
             window.location.search.includes('debug=true') ||
             localStorage.getItem('dashboard_debug') === 'true'
         );
+    }
+
+    setBackendEnvironment(environment) {
+        // Wird vom Dashboard nach API-Call aufgerufen
+        this.backendEnvironment = environment;
+        this.isDevelopment = this.checkDevelopmentMode();
+        this.logLevel = this.getLogLevel();
+
+        this.info('SYSTEM', 'Environment loaded from backend', environment);
     }
 
     getLogLevel() {

@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-Sicheres Startskript für das Mebis Statistik Dashboard
+Startskript für das Mebis Statistik Dashboard
 
-Dieses Skript startet das Dashboard mit sicherer Konfiguration und
-automatischer Erkennung von Development/Production-Modi.
+Dieses Skript startet das Dashboard mit automatischer Erkennung
+von Development/Production-Modi.
 """
 
 import subprocess
@@ -114,10 +114,10 @@ def open_browser_delayed():
     webbrowser.open(url)
 
 def start_secure_backend():
-    """Startet das sichere Backend"""
+    """Startet das Backend"""
     try:
-        logger.info("Starting secure dashboard backend...")
-        from dashboard_backend_secure import app
+        logger.info("Starting dashboard backend...")
+        from dashboard_backend import app
 
         flask_config = config_manager.get_flask_config()
 
@@ -129,7 +129,7 @@ def start_secure_backend():
 
     except ImportError as e:
         logger.error(f"Import error: {e}")
-        logger.error("Make sure dashboard_backend_secure.py is available.")
+        logger.error("Make sure dashboard_backend.py is available.")
         return False
     except Exception as e:
         logger.error(f"Error starting dashboard: {e}")
@@ -140,7 +140,7 @@ def start_secure_backend():
 def main():
     """Hauptfunktion mit verbesserter Fehlerbehandlung"""
     print("=" * 60)
-    print("         MEBIS STATISTIK DASHBOARD (SECURE)")
+    print("         MEBIS STATISTIK DASHBOARD")
     print("=" * 60)
     print()
 

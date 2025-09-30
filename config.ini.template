@@ -2,6 +2,15 @@
 username = YOUR_USERNAME_HERE
 password = YOUR_PASSWORD_HERE
 
+[environment]
+; production oder development
+mode = development
+; Log-Level: DEBUG, INFO, WARN, ERROR
+log_level = DEBUG
+; Flask Debug-Modus
+debug = False
+
+
 [mode]
 headless = True
 waittime = 1
