@@ -695,7 +695,7 @@ function generateGroupComparisonTable() {
         let pflichtGradeText = '-';
         let pflichtGradeColor = '#6C757D';
         if (groupPflichtGrade && groupPflichtGrade.grade !== null) {
-            pflichtGradeText = `${groupPflichtGrade.grade.toFixed(1)} (${groupPflichtGrade.percent.toFixed(1)}%, n=${groupPflichtGrade.count})`;
+            pflichtGradeText = `${groupPflichtGrade.grade.toFixed(0)}<br>(${groupPflichtGrade.percent.toFixed(1)}%)`;
             pflichtGradeColor = getGradeColor(groupPflichtGrade.grade);
         }
 
@@ -844,12 +844,12 @@ function generateGroupProgressTable(users) {
     let html = '<div style="overflow-x: auto;"><table id="individualProgressTable" class="info-table dashboard-table overview-table">';
     html += '<thead><tr class="sticky-header">';
     html += '<th class="person-name">Person</th>';
-    html += '<th>Checklisten 100%</th>';
-    html += '<th>Ø Pflicht (%)</th>';
+    html += '<th>Checklisten<br>100%</th>';
+    html += '<th>Ø Pflicht<br>(%)</th>';
     html += '<th>Ø Note</th>';
-    html += '<th>Ø Gesamt (%)</th>';
-    html += '<th>Eingereichte Aufgaben</th>';
-    html += '<th>Note Pflichtaufgaben</th>';
+    html += '<th>Ø Gesamt<br>(%)</th>';
+    html += '<th>Eingereichte<br>Aufgaben</th>';
+    html += '<th>Note<br>Pflichtaufgaben</th>';
     html += '</tr></thead>';
     html += '<tbody>';
 
@@ -872,7 +872,7 @@ function generateGroupProgressTable(users) {
         let pflichtGradeText = '-';
         let pflichtGradeColor = '#6C757D';
         if (pflichtGradeResult && pflichtGradeResult.grade !== null) {
-            pflichtGradeText = `${pflichtGradeResult.grade.toFixed(1)} (${pflichtGradeResult.percent.toFixed(1)}%, n=${pflichtGradeResult.count})`;
+            pflichtGradeText = `${pflichtGradeResult.grade.toFixed(0)}<br>(${pflichtGradeResult.percent.toFixed(1)}%, ${pflichtGradeResult.count} Bewertungen)`;
             pflichtGradeColor = getGradeColor(pflichtGradeResult.grade);
         }
 
