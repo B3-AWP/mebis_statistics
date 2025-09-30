@@ -559,10 +559,39 @@ function updateOverviewStats(groupStats, users) {
     // Pflicht Progress Ring aktualisieren
     updateProgressRing('pflichtCompletionRing', Math.min(percentPflichtaufgaben, 100));
 
-    // Durchschnittsnote Pflichtaufgaben basierend auf Pflicht % (IHK-Notenschlüssel)
+    // Durchschnittsnote Pflichtaufgaben
     const pflichtAvgGradeElement = document.getElementById('pflichtAverageGrade');
-    const calculatedPflichtGrade = calculateGradeFromPflichtProgress(cardAvgRequiredProgress);
-    pflichtAvgGradeElement.textContent = calculatedPflichtGrade;
+    let pflichtGradeDisplay = '-';
+
+    if (currentGroup === 'all') {
+        // Bei "Alle Gruppen": Durchschnitt aus allen Gruppen-Noten berechnen
+        if (dashboardData && dashboardData.groups) {
+            let totalPercent = 0;
+            let groupCount = 0;
+
+            Object.keys(dashboardData.groups).forEach(groupName => {
+                const groupGrade = calculatePflichtaufgabenGradeForGroup(groupName);
+                if (groupGrade && groupGrade.grade !== null) {
+                    totalPercent += groupGrade.percent;
+                    groupCount++;
+                }
+            });
+
+            if (groupCount > 0) {
+                const avgPercent = totalPercent / groupCount;
+                const avgGrade = convertPercentToIHKGrade(avgPercent);
+                pflichtGradeDisplay = `${avgGrade.toFixed(0)} (${avgPercent.toFixed(1)}%)`;
+            }
+        }
+    } else {
+        // Bei konkreter Gruppe: calculatePflichtaufgabenGradeForGroup verwenden
+        const groupGrade = calculatePflichtaufgabenGradeForGroup(currentGroup);
+        if (groupGrade && groupGrade.grade !== null) {
+            pflichtGradeDisplay = `${groupGrade.grade.toFixed(0)} (${groupGrade.percent.toFixed(1)}%)`;
+        }
+    }
+
+    pflichtAvgGradeElement.textContent = pflichtGradeDisplay;
 
     // Detailierte Fortschritts-Tabelle generieren
     generateGroupProgressTable(users);
@@ -884,7 +913,7 @@ function generateGroupProgressTable(users) {
         let pflichtGradeText = '-';
         let pflichtGradeColor = '#6C757D';
         if (pflichtGradeResult && pflichtGradeResult.grade !== null) {
-            pflichtGradeText = `${pflichtGradeResult.grade.toFixed(0)}<br>(${pflichtGradeResult.percent.toFixed(1)}%, ${pflichtGradeResult.count} Bewertungen)`;
+            pflichtGradeText = `${pflichtGradeResult.grade.toFixed(0)}<br>(${pflichtGradeResult.percent.toFixed(1)}%, N=${pflichtGradeResult.count})`;
             pflichtGradeColor = getGradeColor(pflichtGradeResult.grade);
         }
 
@@ -1316,7 +1345,7 @@ function generatePflichtTableFromActivities() {
 
         // ZUSÄTZLICH: Prüfe structured_tables für weitere Quiz-Daten
         if (dashboardData.structured_tables && dashboardData.structured_tables[currentGroup]) {
-            dashboardLogger.debug('DEBUG',  Checking structured_tables for additional quiz data...');
+            dashboardLogger.debug('DEBUG', 'Checking structured_tables for additional quiz data...');
             const structuredData = dashboardData.structured_tables[currentGroup];
 
             // Prüfe verschiedene mögliche Quiz-Felder in structured_tables
@@ -1356,8 +1385,8 @@ function generatePflichtTableFromActivities() {
         });
     }
 
-    dashboardLogger.debug('DEBUG',  Final allActivities count:', allActivities.length);
-    dashboardLogger.debug('DEBUG',  Activity types breakdown:', allActivities.reduce((acc, activity) => {
+    dashboardLogger.debug('DEBUG', 'Final allActivities count:', allActivities.length);
+    dashboardLogger.debug('DEBUG', 'Activity types breakdown:', allActivities.reduce((acc, activity) => {
         acc[activity.activity_type] = (acc[activity.activity_type] || 0) + 1;
         return acc;
     }, {}));
@@ -1371,7 +1400,7 @@ function generatePflichtTableFromActivities() {
 
     // Benutzer der aktuellen Gruppe sammeln
     const groupUsers = dashboardData.groups[currentGroup].users;
-    dashboardLogger.debug('DEBUG',  Erste 3 Benutzer der Gruppe:', groupUsers.slice(0, 3));
+    dashboardLogger.debug('DEBUG', 'Erste 3 Benutzer der Gruppe:', groupUsers.slice(0, 3));
 
     // Prüfe verschiedene mögliche Benutzer-Name-Felder
     const groupUserNames = new Set();
@@ -1381,13 +1410,13 @@ function generatePflichtTableFromActivities() {
         if (userName) {
             groupUserNames.add(userName);
         }
-        dashboardLogger.debug('DEBUG',  User object:', user, 'extracted name:', userName);
+        dashboardLogger.debug('DEBUG', 'User object:', user, 'extracted name:', userName);
     });
 
-    dashboardLogger.debug('DEBUG',  Gruppe', currentGroup, 'hat', groupUsers.length, 'Benutzer, extrahierte Namen:', Array.from(groupUserNames));
+    dashboardLogger.debug('DEBUG', 'Gruppe', currentGroup, 'hat', groupUsers.length, 'Benutzer, extrahierte Namen:', Array.from(groupUserNames));
 
     // Debug: Prüfe Struktur der Activities
-    dashboardLogger.debug('DEBUG',  Assignments für Gruppe', currentGroup, ':', assignments.length);
+    dashboardLogger.debug('DEBUG', 'Assignments für Gruppe', currentGroup, ':', assignments.length);
     assignments.forEach((assignment, index) => {
         if (index < 3) { // Nur erste 3 zur Debug-Ausgabe
             console.log(`Assignment ${index}:`, {
@@ -1409,7 +1438,7 @@ function generatePflichtTableFromActivities() {
         ) : []
     })).filter(assignment => assignment.user_status.length > 0);
 
-    dashboardLogger.debug('DEBUG',  Nach Filterung:', filteredAssignments.length, 'Aktivitäten übrig');
+    dashboardLogger.debug('DEBUG', 'Nach Filterung:', filteredAssignments.length, 'Aktivitäten übrig');
 
     if (filteredAssignments.length === 0) {
         container.innerHTML = `<p>Keine Daten für die ausgewählte Gruppe "${currentGroup}" verfügbar.</p>
@@ -2889,7 +2918,7 @@ function createPflichtaufgabenGradeHeaderRow() {
         const gradeResult = calculatePflichtaufgabenGradeForUser(i - 1); // i-1 weil erste Spalte der Aufgabenname ist
 
         if (gradeResult !== null && gradeResult.grade !== null) {
-            gradeCell.textContent = `${gradeResult.grade.toFixed(1)} (${gradeResult.percent.toFixed(1)}%, n=${gradeResult.count})`;
+            gradeCell.textContent = `${gradeResult.grade.toFixed(0)} (${gradeResult.percent.toFixed(0)}%, N=${gradeResult.count})`;
             gradeCell.style.color = getGradeColor(gradeResult.grade);
             gradeCell.title = `Durchschnitt: ${gradeResult.percent.toFixed(1)}% aus ${gradeResult.count} bewerteten Aufgaben`;
         } else {
@@ -3557,8 +3586,8 @@ function generateSingleGroupPflichtTableFromAllData() {
 
     // Sammle alle Aktivitäten (wie in "Alle Gruppen")
     let allActivities = [];
-    dashboardLogger.debug('DEBUG',  New function - collecting activities...');
-    dashboardLogger.debug('DEBUG',  Categories to show:', categoriesToShow.length);
+    dashboardLogger.debug('DEBUG', 'New function - collecting activities...');
+    dashboardLogger.debug('DEBUG', 'Categories to show:', categoriesToShow.length);
 
     categoriesToShow.forEach(category => {
         console.log(`DEBUG: Category "${category.category_name}" - assignments: ${category.assignments?.length || 0}, quizzes: ${category.quizzes?.length || 0}`);
@@ -3584,12 +3613,12 @@ function generateSingleGroupPflichtTableFromAllData() {
         }
     });
 
-    dashboardLogger.debug('DEBUG',  Total activities collected:', allActivities.length);
-    dashboardLogger.debug('DEBUG',  Activity types:', allActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
+    dashboardLogger.debug('DEBUG', 'Total activities collected:', allActivities.length);
+    dashboardLogger.debug('DEBUG', 'Activity types:', allActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
 
     // ZUSÄTZLICH: Versuche Quiz-Daten aus anderen Quellen zu extrahieren
     if (dashboardData.structured_tables && dashboardData.structured_tables[currentGroup]) {
-        dashboardLogger.debug('DEBUG',  Searching for quiz data in structured_tables...');
+        dashboardLogger.debug('DEBUG', 'Searching for quiz data in structured_tables...');
         const structuredData = dashboardData.structured_tables[currentGroup];
 
         // Durchsuche alle Tabellen nach Quiz-ähnlichen Daten
@@ -3640,12 +3669,12 @@ function generateSingleGroupPflichtTableFromAllData() {
             }
         });
 
-        dashboardLogger.debug('DEBUG',  After adding structured_tables quizzes - Total activities:', allActivities.length);
-        dashboardLogger.debug('DEBUG',  Updated activity types:', allActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
+        dashboardLogger.debug('DEBUG', 'After adding structured_tables quizzes - Total activities:', allActivities.length);
+        dashboardLogger.debug('DEBUG', 'Updated activity types:', allActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
 
         // ZUSÄTZLICH: Durchsuche Checklisten-Daten nach Quiz-ähnlichen Aktivitäten
         if (structuredData.checklists && structuredData.checklists.rows) {
-            dashboardLogger.debug('DEBUG',  Searching checklists for quiz-like activities...');
+            dashboardLogger.debug('DEBUG', 'Searching checklists for quiz-like activities...');
             structuredData.checklists.rows.forEach(checklistRow => {
                 // Prüfe ob der Checklisten-Titel auf Quiz hindeutet
                 const title = checklistRow.checklist_title || '';
@@ -3705,7 +3734,7 @@ function generateSingleGroupPflichtTableFromAllData() {
     });
 
     // Filtere Aktivitäten, um nur Benutzer aus der aktuellen Gruppe zu zeigen
-    dashboardLogger.debug('DEBUG',  Group user names:', Array.from(groupUserNames));
+    dashboardLogger.debug('DEBUG', 'Group user names:', Array.from(groupUserNames));
     const filteredActivities = allActivities.map(activity => ({
         ...activity,
         user_status: activity.user_status ? activity.user_status.filter(userStatus =>
@@ -3713,8 +3742,8 @@ function generateSingleGroupPflichtTableFromAllData() {
         ) : []
     })).filter(activity => activity.user_status.length > 0);
 
-    dashboardLogger.debug('DEBUG',  Filtered activities:', filteredActivities.length);
-    dashboardLogger.debug('DEBUG',  Filtered activity types:', filteredActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
+    dashboardLogger.debug('DEBUG', 'Filtered activities:', filteredActivities.length);
+    dashboardLogger.debug('DEBUG', 'Filtered activity types:', filteredActivities.reduce((acc, a) => { acc[a.activity_type] = (acc[a.activity_type] || 0) + 1; return acc; }, {}));
 
     // Debug: Zeige erste paar Aktivitäten
     filteredActivities.slice(0, 3).forEach((activity, index) => {
