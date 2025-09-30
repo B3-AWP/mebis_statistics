@@ -1,6 +1,6 @@
 # Configuration files with sensitive data
-config/config.ini
-.env
+config/.env
+config/exclude_names.txt
 *.local.conf
 
 # Temporary and generated files
@@ -9,7 +9,6 @@ config.json
 activities_data.json
 prompt.txt
 auswertung.html
-exclude_names.txt
 
 # Export data
 export/*

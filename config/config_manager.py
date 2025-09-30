@@ -4,12 +4,11 @@
 """
 Sicheres Konfigurationsmanagement für Mebis Statistik Dashboard
 
-Dieses Modul lädt Konfiguration aus Environment Variables oder config.ini,
-wobei Environment Variables Vorrang haben (für bessere Sicherheit).
+Dieses Modul lädt Konfiguration ausschließlich aus Environment Variables (.env Datei).
 """
 
 import os
-import configparser
+import json
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 import logging
@@ -19,48 +18,31 @@ logger = logging.getLogger(__name__)
 
 class ConfigManager:
     """
-    Zentrale Konfigurationsverwaltung mit Sicherheitsfokus.
+    Zentrale Konfigurationsverwaltung basierend auf Environment Variables.
 
-    Priorität:
-    1. Environment Variables (höchste Sicherheit)
-    2. config.ini (Fallback für lokale Entwicklung)
-    3. Default-Werte (letzte Option)
+    Lädt Konfiguration aus .env Datei im config/ Ordner.
     """
 
-    def __init__(self, config_file: str = None):
-        """
-        Initialisiert den Konfigurationsmanager.
-
-        Args:
-            config_file: Pfad zur config.ini Datei (default: config/config.ini)
-        """
-        if config_file is None:
-            # Bestimme den Pfad relativ zur Projektroot
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            self.config_file = os.path.join(current_dir, 'config.ini')
-        else:
-            self.config_file = config_file
-        self.config = configparser.ConfigParser()
+    def __init__(self):
+        """Initialisiert den Konfigurationsmanager und lädt .env"""
         self._load_config()
 
     def _load_config(self):
-        """Lädt Konfiguration aus .env und config.ini"""
-        # 1. Lade Environment Variables aus .env Datei
-        load_dotenv()
+        """Lädt Environment Variables aus .env Datei"""
+        # Bestimme den Pfad zur .env Datei im config Ordner
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        env_file = os.path.join(current_dir, '.env')
 
-        # 2. Lade config.ini als Fallback
-        if os.path.exists(self.config_file):
-            try:
-                self.config.read(self.config_file, encoding='utf-8')
-                logger.info(f"Config loaded from {self.config_file}")
-            except Exception as e:
-                logger.warning(f"Failed to load {self.config_file}: {e}")
+        # Lade .env Datei
+        if os.path.exists(env_file):
+            load_dotenv(env_file)
+            print(f"Configuration loaded from {env_file}")
         else:
-            logger.warning(f"Config file {self.config_file} not found. Using environment variables only.")
+            print(f".env file not found at {env_file}. Using system environment variables only.")
 
     def get_login_credentials(self) -> Dict[str, str]:
         """
-        Holt Login-Credentials sicher aus Environment Variables.
+        Holt Login-Credentials aus Environment Variables.
 
         Returns:
             Dictionary mit username und password
@@ -71,18 +53,9 @@ class ConfigManager:
         username = os.getenv('MEBIS_USERNAME')
         password = os.getenv('MEBIS_PASSWORD')
 
-        # Fallback auf config.ini (nur für Entwicklung!)
-        if not username and self.config.has_section('login'):
-            username = self.config.get('login', 'username', fallback=None)
-            logger.warning("Username loaded from config.ini - use environment variables in production!")
-
-        if not password and self.config.has_section('login'):
-            password = self.config.get('login', 'password', fallback=None)
-            logger.warning("Password loaded from config.ini - use environment variables in production!")
-
         if not username or not password:
             raise ValueError(
-                "Login credentials not found. Set MEBIS_USERNAME and MEBIS_PASSWORD environment variables."
+                "Login credentials not found. Set MEBIS_USERNAME and MEBIS_PASSWORD in .env file."
             )
 
         return {
@@ -98,8 +71,8 @@ class ConfigManager:
             Dictionary mit headless und waittime
         """
         return {
-            'headless': self._get_bool('MODE_HEADLESS', 'mode', 'headless', True),
-            'waittime': self._get_int('MODE_WAITTIME', 'mode', 'waittime', 10)
+            'headless': self._get_bool('MODE_HEADLESS', True),
+            'waittime': self._get_int('MODE_WAITTIME', 10)
         }
 
     def get_urls(self) -> Dict[str, str]:
@@ -110,31 +83,27 @@ class ConfigManager:
             Dictionary mit URLs
         """
         return {
-            'base_url': self._get_string(
+            'base_url': os.getenv(
                 'MEBIS_BASE_URL',
-                'urls',
-                'base_url',
                 'https://lernplattform.mebis.bycs.de/report/progress/index.php'
             ),
-            'common_params': self._get_string(
+            'common_params': os.getenv(
                 'MEBIS_COMMON_PARAMS',
-                'urls',
-                'common_params',
                 '&sifirst=&activityorder=orderincourse&activitysection=-1'
             )
         }
 
     def get_courses(self) -> Dict[str, str]:
-        """Holt Kurs-Konfiguration"""
-        courses = {}
+        """
+        Holt Kurs-Konfiguration.
 
-        # Environment Variable für Hauptkurs
+        Returns:
+            Dictionary mit course_id
+        """
+        courses = {}
         course_id = os.getenv('MEBIS_COURSE_ID')
         if course_id:
             courses['course_ifa12'] = course_id
-        elif self.config.has_section('courses'):
-            courses.update(dict(self.config.items('courses')))
-
         return courses
 
     def get_ignored_groups(self) -> set:
@@ -151,12 +120,6 @@ class ConfigManager:
         if env_ignored:
             ignored_groups.update(group.strip() for group in env_ignored.split(','))
 
-        # Fallback auf config.ini
-        if self.config.has_section('IgnoreGroups'):
-            for key, group_name in self.config.items('IgnoreGroups'):
-                if not key.startswith(';'):  # Ignore comments
-                    ignored_groups.add(group_name.strip())
-
         return ignored_groups
 
     def get_flask_config(self) -> Dict[str, Any]:
@@ -167,11 +130,11 @@ class ConfigManager:
             Dictionary mit Flask-Einstellungen
         """
         return {
-            'debug': self._get_bool('FLASK_DEBUG', 'environment', 'debug', False),
-            'host': self._get_string('FLASK_HOST', None, None, '0.0.0.0'),
-            'port': self._get_int('FLASK_PORT', None, None, 5000),
+            'debug': self._get_bool('FLASK_DEBUG', False),
+            'host': os.getenv('FLASK_HOST', '0.0.0.0'),
+            'port': self._get_int('FLASK_PORT', 5000),
             'secret_key': os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production'),
-            'env': self._get_string('FLASK_ENV', 'environment', 'mode', 'production')
+            'env': os.getenv('FLASK_ENV', 'production')
         }
 
     def get_logging_config(self) -> Dict[str, Any]:
@@ -181,50 +144,55 @@ class ConfigManager:
         Returns:
             Dictionary mit Logging-Einstellungen
         """
-        log_level = self._get_string('LOG_LEVEL', 'environment', 'log_level', 'INFO').upper()
+        log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
 
         return {
             'level': getattr(logging, log_level, logging.INFO),
             'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             'filename': os.getenv('LOG_FILE'),  # None = Console nur
-            'max_bytes': self._get_int('LOG_MAX_BYTES', None, None, 10485760),  # 10MB
-            'backup_count': self._get_int('LOG_BACKUP_COUNT', None, None, 5)
+            'max_bytes': self._get_int('LOG_MAX_BYTES', 10485760),  # 10MB
+            'backup_count': self._get_int('LOG_BACKUP_COUNT', 5)
         }
 
-    def _get_string(self, env_var: str, section: str, key: str, default: str) -> str:
-        """Holt String-Wert aus Env Var oder config.ini"""
-        value = os.getenv(env_var)
-        if value:
-            return value
+    def get_grade_mapping(self) -> Dict[int, str]:
+        """
+        Holt Grade Mapping aus Environment Variable.
 
-        if section and self.config.has_section(section):
-            return self.config.get(section, key, fallback=default)
+        Returns:
+            Dictionary mit Punkte -> Bewertung Mapping
+        """
+        grade_mapping_json = os.getenv('GRADE_MAPPING')
+        if grade_mapping_json:
+            try:
+                # Parse JSON und konvertiere String-Keys zu Integer
+                mapping = json.loads(grade_mapping_json)
+                return {int(k): v for k, v in mapping.items()}
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Invalid GRADE_MAPPING format: {e}. Using defaults.")
 
-        return default
+        # Default Mapping
+        return {
+            0: "* Nicht akzeptabel",
+            70: "** Verbesserungsbedarf",
+            100: "*** Solide Umsetzung",
+            130: "**** Exzellent"
+        }
 
-    def _get_int(self, env_var: str, section: str, key: str, default: int) -> int:
-        """Holt Integer-Wert aus Env Var oder config.ini"""
+    def _get_int(self, env_var: str, default: int) -> int:
+        """Holt Integer-Wert aus Environment Variable"""
         value = os.getenv(env_var)
         if value:
             try:
                 return int(value)
             except ValueError:
-                logger.warning(f"Invalid integer value for {env_var}: {value}")
-
-        if section and self.config.has_section(section):
-            return self.config.getint(section, key, fallback=default)
-
+                logger.warning(f"Invalid integer value for {env_var}: {value}. Using default: {default}")
         return default
 
-    def _get_bool(self, env_var: str, section: str, key: str, default: bool) -> bool:
-        """Holt Boolean-Wert aus Env Var oder config.ini"""
+    def _get_bool(self, env_var: str, default: bool) -> bool:
+        """Holt Boolean-Wert aus Environment Variable"""
         value = os.getenv(env_var)
         if value:
             return value.lower() in ('true', '1', 'yes', 'on')
-
-        if section and self.config.has_section(section):
-            return self.config.getboolean(section, key, fallback=default)
-
         return default
 
 # Globale Instanz für einfache Nutzung

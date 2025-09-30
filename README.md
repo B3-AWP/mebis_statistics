@@ -28,73 +28,51 @@ pip install -r requirements.txt
 
 Zusätzlich müssen folgende Ordner und Dateien angelegt werden:
 - Ordner `export` im Projektverzeichnis
-- Datei `exclude_names.txt` im Projektverzeichnis
+- Datei `config/exclude_names.txt` im config-Ordner (optional, für ausgeschlossene Benutzernamen)
+
+## Konfiguration
+
+1. **Erstelle die .env Datei:**
+   ```bash
+   cp config/.env.template config/.env
+   ```
+
+2. **Trage deine Mebis-Zugangsdaten ein:**
+
+   Öffne `config/.env` und passe mindestens folgende Werte an:
+   ```env
+   # Mebis Login (ERFORDERLICH!)
+   MEBIS_USERNAME=dein_mebis_username
+   MEBIS_PASSWORD=dein_mebis_passwort
+
+   # Kurs-ID (ERFORDERLICH!)
+   MEBIS_COURSE_ID=deine_kurs_id
+
+   # Ignorierte Gruppen (optional)
+   MEBIS_IGNORED_GROUPS=IT_Lehrkraft,Test Team
+   ```
+
+3. **Weitere Konfigurationsoptionen:**
+
+   Alle verfügbaren Einstellungen sind in `config/.env.template` dokumentiert:
+   - Flask Environment (production/development)
+   - Logging Level (DEBUG/INFO/WARN/ERROR)
+   - Selenium Modi (Headless, Waittime)
+   - Grade Mapping für Bewertungen
 
 ## Anleitung
-1. Erstelle config.ini Datei mit folgenden Inhalt. Hinterlege den Mebis Username und Password
-2. Starte das Python-Script init.py für Konsolenauswertung
-Alternative: Starte jsonExport2.py um ein JSON Datei zu bekommen und jsonAnalyse2.py für die Auswertung
 
-## config
-Erstelle eine config.ini Datei mit folgendem Inhalt
-```ini
-    [login]
-    username = Hello
-    password = World
+1. Stelle sicher, dass die `config/.env` Datei korrekt konfiguriert ist
+2. Starte das Python-Script `init.py` für Konsolenauswertung
+3. Alternative: Starte `jsonExport2.py` um eine JSON Datei zu bekommen und `jsonAnalyse2.py` für die Auswertung
 
-    [mode]
-    headless = True
-    waittime = 1
+### Ignorierte Gruppen
 
-    [urls]
-    base_url = https://lernplattform.mebis.bycs.de/report/progress/index.php
-    common_params = &sifirst=&activityorder=orderincourse&activitysection=-1
+Bestimmte Gruppen können vom Dashboard ausgeschlossen werden. Diese Gruppen erscheinen dann nicht in der Dashboard-Anzeige.
 
-    [courses]
-    course_ifa12 = 1657519
-
-    [groups]
-    ifa12a = 366526
-    ifa12b = 366529
-
-    [activities]
-    checklist = checklist
-    assignments = assign
-
-    [thresholds]
-    green = 90
-    yellow = 50
-    orange = 10
-    red = 0
-
-
-    [General]
-    Directory = export
-    Filename = report.html
-    TotalWeeks = 9
-    ShowCommandDialog = True
-    DefaultGroup = 1
-    ;0 = IFA12A 1 = IFA12B
-    DefaultCategories = 0
-    DefaultCurrentWeek = 7
-
-    [Analysis]
-    LaggardThreshold = 50
-    GenerateIndividualReports = True
-
-    [IgnoreGroups]
-    ; Gruppen die im Dashboard nicht angezeigt werden sollen
-    ; Beispiel: TestGruppe = IFA12A - Test Team
-    ; Entferne das Semikolon vor einer Zeile um eine Gruppe zu ignorieren:
-    ; test_group = IFA12A - Team 5
-    IT_Lehrkraft = IT-Lehrkraft
+**Konfiguration in `.env`:**
+```env
+MEBIS_IGNORED_GROUPS=IT_Lehrkraft,Test Team,Demo Gruppe
 ```
 
-### IgnoreGroups Funktionalität
-
-Die `[IgnoreGroups]` Sektion ermöglicht es, bestimmte Gruppen vom Dashboard auszuschließen. Gruppen die hier aufgelistet sind, werden nicht in der Dashboard-Anzeige erscheinen, aber weiterhin in den Export-Daten enthalten sein.
-
-**Verwendung:**
-- Füge Gruppen im Format `gruppenname = Anzeigename` hinzu
-- Kommentiere Zeilen mit `;` aus, um sie zu deaktivieren
-- Die Filterung erfolgt nur auf Dashboard-Ebene, nicht beim Datenexport
+Die Filterung erfolgt auf Dashboard-Ebene. Die Gruppen werden weiterhin in den Export-Daten erfasst.

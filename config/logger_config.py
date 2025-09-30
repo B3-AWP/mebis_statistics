@@ -13,7 +13,6 @@ import logging.handlers
 import os
 import sys
 from typing import Optional
-from .config_manager import config_manager
 
 class DashboardLogger:
     """
@@ -26,7 +25,9 @@ class DashboardLogger:
 
     def _setup_logging(self):
         """Konfiguriert das Logging-System basierend auf Environment/Config"""
-        config = config_manager.get_logging_config()
+        # Lazy import um zirkuläre Abhängigkeiten zu vermeiden
+        from .config_manager import config_manager as cm
+        config = cm.get_logging_config()
 
         # Root Logger konfigurieren
         self.logger = logging.getLogger('mebis_dashboard')

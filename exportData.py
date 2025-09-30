@@ -403,13 +403,16 @@ def get_quiz_status(driver, quiz_url, waittime):
     for row in rows:
         try:
             # Extrahiere User-ID aus dem Link zur Benutzerseite
-            user_link = row.find_element(By.CSS_SELECTOR, "td a[href*='user/view.php?id=']")
-            user_href = user_link.get_attribute("href")
-            user_id_match = re.search(r'id=(\d+)', user_href)
-            if not user_id_match:
+            try:
+                user_link = row.find_element(By.CSS_SELECTOR, "td a[href*='user/view.php?id=']")
+                user_href = user_link.get_attribute("href")
+                user_id_match = re.search(r'id=(\d+)', user_href)
+                if not user_id_match:
+                    continue
+                user_id = user_id_match.group(1)
+            except:
+                # Keine User-ID gefunden - überspringe diese Zeile (z.B. Zusammenfassungszeile)
                 continue
-
-            user_id = user_id_match.group(1)
 
             # Extrahiere die Bewertung
             grade = "-"
@@ -458,34 +461,83 @@ def get_quiz_status(driver, quiz_url, waittime):
     print(f"Quiz {quiz_id}: {len(user_statuses)} Benutzer-Status gefunden")
     return user_statuses
 
-def get_sesskey(driver):
-    # Suche nach dem versteckten Input-Feld mit dem Namen 'sesskey'
-    try:
-        sesskey_element = driver.find_element(By.CSS_SELECTOR, "input[name='sesskey']")
-        return sesskey_element.get_attribute("value")
-    except Exception as e:
-        print(f"Fehler beim Extrahieren des sesskey: {e}")
-        return None
+def get_sesskey(driver, waittime=10, max_retries=3):
+    """
+    Extrahiert den sesskey mit Wartezeit und Retry-Logik
+
+    Args:
+        driver: Selenium WebDriver
+        waittime: Maximale Wartezeit in Sekunden
+        max_retries: Maximale Anzahl an Wiederholungsversuchen
+
+    Returns:
+        str oder None: Der sesskey-Wert oder None bei Fehler
+    """
+    for attempt in range(max_retries):
+        try:
+            # Warte bis das Element verfügbar ist
+            sesskey_element = WebDriverWait(driver, waittime).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='sesskey']"))
+            )
+            sesskey_value = sesskey_element.get_attribute("value")
+
+            if sesskey_value:
+                return sesskey_value
+            else:
+                print(f"Sesskey gefunden, aber leer (Versuch {attempt + 1}/{max_retries})")
+                time.sleep(1)
+
+        except TimeoutException:
+            print(f"Timeout beim Warten auf sesskey (Versuch {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+        except Exception as e:
+            print(f"Fehler beim Extrahieren des sesskey (Versuch {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+
+    print("❌ Sesskey konnte nach allen Versuchen nicht extrahiert werden")
+    return None
 
 # Thread-local storage for WebDriver instances
 thread_local = threading.local()
 
-def get_thread_driver(isheadless, username=None, password=None, base_url=None, course_id=None):
+def get_thread_driver(isheadless, username=None, password=None, base_url=None, course_id=None, waittime=10):
     """Get or create a WebDriver instance for the current thread"""
     if not hasattr(thread_local, 'driver'):
-        thread_local.driver = create_webdriver(headless=isheadless)
-        thread_local.logged_in = False
-        thread_local.sesskey = None
+        try:
+            thread_local.driver = create_webdriver(headless=isheadless)
+            thread_local.logged_in = False
+            thread_local.sesskey = None
+        except Exception as e:
+            print(f"❌ Fehler beim Erstellen des WebDrivers: {e}")
+            return None
 
     # Login und sesskey für jeden Thread
     if not thread_local.logged_in and username and password:
-        thread_local.driver.get(f"{base_url}?course={course_id}")
-        if "login" in thread_local.driver.current_url:
-            login(thread_local.driver, username, password, 10)
+        try:
+            thread_local.driver.get(f"{base_url}?course={course_id}")
 
-        # Extrahiere sesskey für diesen Thread
-        thread_local.sesskey = get_sesskey(thread_local.driver)
-        thread_local.logged_in = True
+            # Warte kurz bis Seite geladen ist
+            time.sleep(2)
+
+            if "login" in thread_local.driver.current_url:
+                login(thread_local.driver, username, password, waittime)
+                # Warte nach Login
+                time.sleep(2)
+
+            # Extrahiere sesskey für diesen Thread mit robuster Funktion
+            thread_local.sesskey = get_sesskey(thread_local.driver, waittime)
+
+            if thread_local.sesskey:
+                thread_local.logged_in = True
+                print(f"✓ Thread-Login erfolgreich, sesskey: {thread_local.sesskey[:10]}...")
+            else:
+                print("⚠ Thread-Login abgeschlossen, aber sesskey fehlt")
+
+        except Exception as e:
+            print(f"❌ Fehler beim Thread-Login: {e}")
+            thread_local.logged_in = False
 
     return thread_local.driver
 
@@ -498,7 +550,12 @@ def get_thread_sesskey():
 def process_assignment_parallel(assignment, isheadless, waittime, username, password, base_url, course_id, index, total):
     """Process a single assignment in parallel"""
     try:
-        driver = get_thread_driver(isheadless, username, password, base_url, course_id)
+        driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
+
+        if driver is None:
+            print(f"❌ [{index+1}/{total}] Kein WebDriver verfügbar für Assignment {assignment.get('id', 'unknown')}")
+            return assignment.get('id', 'unknown'), []
+
         assignment_id = assignment["id"]
         assignment_url = assignment["url"]
         assignment_title = assignment.get("title", f"Assignment {assignment_id}")
@@ -510,17 +567,22 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
         print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege)")
         return assignment_id, status
     except Exception as e:
-        print(f"Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
+        print(f"❌ Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
         return assignment.get('id', 'unknown'), []
 
-def process_checklist_parallel(checklist, isheadless, username, password, base_url, course_id, index, total):
+def process_checklist_parallel(checklist, isheadless, username, password, base_url, course_id, index, total, waittime=10):
     """Process a single checklist in parallel"""
     try:
-        driver = get_thread_driver(isheadless, username, password, base_url, course_id)
+        driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
+
+        if driver is None:
+            print(f"❌ [{index+1}/{total}] Kein WebDriver verfügbar für Checklist {checklist.get('id', 'unknown')}")
+            return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
+
         thread_sesskey = get_thread_sesskey()
 
         if not thread_sesskey:
-            print(f"❌ Fehler: Kein sesskey für Checklist {checklist.get('id', 'unknown')}")
+            print(f"❌ [{index+1}/{total}] Kein sesskey für Checklist {checklist.get('id', 'unknown')}")
             return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
         checklist_id = checklist["id"]
@@ -543,7 +605,12 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
 def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_url, course_id, index, total):
     """Process a single quiz in parallel"""
     try:
-        driver = get_thread_driver(isheadless, username, password, base_url, course_id)
+        driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
+
+        if driver is None:
+            print(f"❌ [{index+1}/{total}] Kein WebDriver verfügbar für Quiz {quiz.get('id', 'unknown')}")
+            return quiz.get('id', 'unknown'), []
+
         quiz_id = quiz["id"]
         quiz_url = quiz["url"]
         quiz_title = quiz.get("title", f"Quiz {quiz_id}")
@@ -555,7 +622,7 @@ def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_u
         print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege)")
         return quiz_id, status
     except Exception as e:
-        print(f"Fehler bei Quiz {quiz.get('id', 'unknown')}: {e}")
+        print(f"❌ Fehler bei Quiz {quiz.get('id', 'unknown')}: {e}")
         return quiz.get('id', 'unknown'), []
     
 

@@ -33,12 +33,13 @@ def check_environment():
     logger.info("Checking environment and dependencies...")
 
     # Prüfe ob .env Datei existiert
-    if not Path('.env').exists():
-        logger.warning(".env file not found. Using config/config.ini fallback.")
-        if not Path('config/config.ini').exists():
-            logger.error("Neither .env nor config/config.ini found!")
-            logger.error("Please copy .env.template to .env and configure your credentials.")
-            return False
+    env_file = Path('config/.env')
+    if not env_file.exists():
+        logger.error(".env file not found!")
+        logger.error("Please copy config/.env.template to config/.env and configure your credentials.")
+        return False
+    else:
+        logger.info(f"Configuration file found: {env_file}")
 
     # Prüfe Export-Ordner
     export_folder = Path("export")
@@ -100,8 +101,7 @@ def check_credentials():
         return True
     except ValueError as e:
         logger.error(f"Credential error: {e}")
-        logger.error("Please set MEBIS_USERNAME and MEBIS_PASSWORD environment variables")
-        logger.error("or configure them in config/config.ini")
+        logger.error("Please set MEBIS_USERNAME and MEBIS_PASSWORD in config/.env file")
         return False
 
 def open_browser_delayed():

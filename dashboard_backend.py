@@ -97,7 +97,7 @@ def load_json_data(file_path):
         logger.error(f"Error loading JSON data from {file_path}: {e}")
         return None
 
-def load_excluded_names(file_path='exclude_names.txt'):
+def load_excluded_names(file_path='config/exclude_names.txt'):
     """
     Lädt die Liste der ausgeschlossenen Namen
 
