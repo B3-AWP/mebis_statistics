@@ -668,11 +668,12 @@ function generateGroupComparisonTable() {
     html += '<thead><tr class="sticky-header">';
     html += '<th class="group-name-cell">Gruppe</th>';
     html += '<th>Personen</th>';
-    html += '<th>Checklisten 100%</th>';
-    html += '<th>Ø Pflicht (%)</th>';
+    html += '<th>Checklisten<br>100%</th>';
+    html += '<th>Ø Pflicht<br>(%)</th>';
     html += '<th>Ø Note</th>';
-    html += '<th>Ø Gesamt (%)</th>';
-    html += '<th>Eingereichte Aufgaben</th>';
+    html += '<th>Ø Gesamt<br>(%)</th>';
+    html += '<th>Eingereichte<br>Aufgaben</th>';
+    html += '<th>Note<br>Pflichtaufgaben</th>';
     html += '</tr></thead>';
     html += '<tbody>';
 
@@ -689,6 +690,15 @@ function generateGroupComparisonTable() {
         // Berechne Note basierend auf Gruppendurchschnitt Pflicht %
         const gradeText = calculateGradeFromPflichtProgress(displayRequiredProgress);
 
+        // Berechne Pflichtaufgaben-Note für die ganze Gruppe
+        const groupPflichtGrade = calculatePflichtaufgabenGradeForGroup(groupName);
+        let pflichtGradeText = '-';
+        let pflichtGradeColor = '#6C757D';
+        if (groupPflichtGrade && groupPflichtGrade.grade !== null) {
+            pflichtGradeText = `${groupPflichtGrade.grade.toFixed(1)} (${groupPflichtGrade.percent.toFixed(1)}%, n=${groupPflichtGrade.count})`;
+            pflichtGradeColor = getGradeColor(groupPflichtGrade.grade);
+        }
+
         // Zeige die gleichen Werte wie in den Cards:
         // "Ø Checklisten 100%" = avgCompletedChecklists (wie completedCount in der Card)
         // "Ø Pflichtaufgaben eingereicht" = avgCompletedPflichtaufgaben (wie pflichtCompletedCount in der Card)
@@ -701,6 +711,7 @@ function generateGroupComparisonTable() {
         html += `<td style="text-align: center; font-weight: bold;">${gradeText}</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${stats.avgAllProgress}%; --progress-color: #6f42c1;">${stats.avgAllProgress.toFixed(1)}%</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${Math.min(stats.avgCompletedPflichtaufgaben * 10, 100)}%; --progress-color: #fd7e14;">${stats.avgCompletedPflichtaufgaben.toFixed(1)}</td>`;
+        html += `<td style="text-align: center; font-weight: bold; color: ${pflichtGradeColor};" title="Durchschnitt von ${groupPflichtGrade ? groupPflichtGrade.count : 0} Personen mit bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
         html += '</tr>';
     });
 
@@ -2914,6 +2925,44 @@ function calculatePflichtaufgabenGradeForUser(userIndex) {
         grade: grade,
         percent: averagePercent,
         count: count
+    };
+}
+
+// Berechne Pflichtaufgaben-Durchschnittsnote für eine ganze Gruppe
+function calculatePflichtaufgabenGradeForGroup(groupName) {
+    if (!dashboardData || !dashboardData.groups || !dashboardData.groups[groupName]) {
+        return null;
+    }
+
+    const groupData = dashboardData.groups[groupName];
+    const users = groupData.users || [];
+
+    if (users.length === 0) return null;
+
+    let totalPercent = 0;
+    let totalCount = 0;
+
+    // Berechne Note für jeden Benutzer und sammle die Prozentwerte
+    users.forEach(user => {
+        const userGrade = calculatePflichtaufgabenGradeForUserByName(user.name, groupName);
+        if (userGrade && userGrade.percent !== null) {
+            totalPercent += userGrade.percent;
+            totalCount++;
+        }
+    });
+
+    if (totalCount === 0) return null;
+
+    // Durchschnitt aller Benutzer-Prozentwerte
+    const averagePercent = totalPercent / totalCount;
+
+    // In IHK-Note umwandeln
+    const grade = convertPercentToIHKGrade(averagePercent);
+
+    return {
+        grade: grade,
+        percent: averagePercent,
+        count: totalCount // Anzahl der Benutzer mit Bewertungen
     };
 }
 
