@@ -167,12 +167,11 @@ def main():
     # Flask-Konfiguration laden
     flask_config = config_manager.get_flask_config()
 
-    # Browser-Thread starten (nur in Development)
-    if flask_config['debug'] or flask_config['env'] == 'development':
-        browser_thread = threading.Thread(target=open_browser_delayed)
-        browser_thread.daemon = True
-        browser_thread.start()
-        logger.info("Browser will open automatically...")
+    # Browser-Thread starten (automatisch)
+    browser_thread = threading.Thread(target=open_browser_delayed)
+    browser_thread.daemon = True
+    browser_thread.start()
+    logger.info("Browser will open automatically...")
 
     # Startup-Informationen
     logger.info("Dashboard starting...")
