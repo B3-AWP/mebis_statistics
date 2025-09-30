@@ -263,14 +263,15 @@
                     <div class="filter-group">
                         <label>Spalten anzeigen:</label>
                         <div class="progress-toggle">
-                            <label class="active">
-                                <input type="radio" name="checklistViewType" value="both" checked onchange="toggleChecklistColumns()">
-                                Pflicht + Gesamt
-                            </label>
-                            <label>
-                                <input type="radio" name="checklistViewType" value="pflicht" onchange="toggleChecklistColumns()">
+                             <label class="active">
+                                <input type="radio" name="checklistViewType" value="pflicht" checked onchange="toggleChecklistColumns()">
                                 Nur Pflicht
                             </label>
+                            <label>
+                                <input type="radio" name="checklistViewType" value="both"  onchange="toggleChecklistColumns()">
+                                Pflicht + Gesamt
+                            </label>
+                           
                         </div>
                     </div>
                     <div class="filter-group">

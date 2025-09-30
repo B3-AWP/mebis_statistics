@@ -4,7 +4,7 @@ let currentGroup = 'all';
 let currentGrouping = 'all'; // New: current grouping selection
 let currentWeek = 10;
 let totalWeeks = 40;
-let checklistViewType = 'both'; // New: track checklist column view setting
+let checklistViewType = 'pflicht'; // New: track checklist column view setting
 let sortState = {}; // Track sorting state for different tables
 let gradeMapping = {}; // GradeMapping from config.ini
 
