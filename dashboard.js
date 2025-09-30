@@ -101,9 +101,16 @@ async function loadData() {
         dashboardData = await response.json();
 
         // Load grade mapping from backend
+        console.log('DEBUG: Checking for grade_mapping in response...');
+        console.log('DEBUG: dashboardData.grade_mapping exists?', !!dashboardData.grade_mapping);
+        console.log('DEBUG: dashboardData.grade_mapping value:', dashboardData.grade_mapping);
+
         if (dashboardData.grade_mapping) {
             gradeMapping = dashboardData.grade_mapping;
-            console.log('Grade mapping loaded:', gradeMapping);
+            console.log('✓ Grade mapping loaded successfully:', gradeMapping);
+        } else {
+            console.error('✗ ERROR: No grade_mapping found in backend response!');
+            console.log('Available keys in dashboardData:', Object.keys(dashboardData));
         }
 
         // Debug: JSON-Struktur analysieren
@@ -854,7 +861,7 @@ function generateGroupProgressTable(users) {
         let pflichtGradeText = '-';
         let pflichtGradeColor = '#6C757D';
         if (pflichtGradeResult && pflichtGradeResult.grade !== null) {
-            pflichtGradeText = `${pflichtGradeResult.grade.toFixed(1)} (${pflichtGradeResult.count})`;
+            pflichtGradeText = `${pflichtGradeResult.grade.toFixed(1)} (${pflichtGradeResult.percent.toFixed(1)}%, n=${pflichtGradeResult.count})`;
             pflichtGradeColor = getGradeColor(pflichtGradeResult.grade);
         }
 
@@ -2858,9 +2865,9 @@ function createPflichtaufgabenGradeHeaderRow() {
         const gradeResult = calculatePflichtaufgabenGradeForUser(i - 1); // i-1 weil erste Spalte der Aufgabenname ist
 
         if (gradeResult !== null && gradeResult.grade !== null) {
-            gradeCell.textContent = `${gradeResult.grade.toFixed(1)} (${gradeResult.count})`;
+            gradeCell.textContent = `${gradeResult.grade.toFixed(1)} (${gradeResult.percent.toFixed(1)}%, n=${gradeResult.count})`;
             gradeCell.style.color = getGradeColor(gradeResult.grade);
-            gradeCell.title = `Durchschnitt aus ${gradeResult.count} bewerteten Aufgaben`;
+            gradeCell.title = `Durchschnitt: ${gradeResult.percent.toFixed(1)}% aus ${gradeResult.count} bewerteten Aufgaben`;
         } else {
             gradeCell.textContent = 'n/a';
             gradeCell.style.color = '#6c757d';
@@ -2879,28 +2886,34 @@ function calculatePflichtaufgabenGradeForUser(userIndex) {
     if (!table) return null;
 
     const rows = table.querySelectorAll('tbody tr:not(.pflicht-grade-row)');
-    const grades = [];
+    let totalPercent = 0;
+    let count = 0; // Expliziter Zähler
 
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
         if (cells.length > userIndex + 1) { // +1 weil erste Spalte der Aufgabenname ist
             const userCell = cells[userIndex + 1];
-            const grade = extractGradeFromCell(userCell);
+            const percent = extractPercentageFromCell(userCell);
 
-            if (grade !== null) {
-                grades.push(grade);
+            if (percent !== null) {
+                totalPercent += percent;
+                count++; // Zähle jede gefundene Bewertung
             }
         }
     });
 
-    if (grades.length === 0) return null;
+    if (count === 0) return null;
 
-    // Durchschnitt berechnen
-    const average = grades.reduce((sum, grade) => sum + grade, 0) / grades.length;
+    // Durchschnitt der Prozentwerte berechnen
+    const averagePercent = totalPercent / count;
+
+    // Erst jetzt in IHK-Note umwandeln
+    const grade = convertPercentToIHKGrade(averagePercent);
 
     return {
-        grade: average,
-        count: grades.length
+        grade: grade,
+        percent: averagePercent,
+        count: count
     };
 }
 
@@ -2911,7 +2924,8 @@ function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
         return null;
     }
 
-    const grades = [];
+    let totalPercent = 0;
+    let count = 0; // Expliziter Zähler
 
     // Finde Pflichtaufgaben-Kategorie(n)
     const pflichtCategories = dashboardData.activities_by_category.filter(category =>
@@ -2928,10 +2942,14 @@ function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
                 if (assignment.user_status) {
                     const userStatus = assignment.user_status.find(status => status.user_name === userName);
                     if (userStatus && userStatus.grade) {
-                        const grade = extractGradeFromString(userStatus.grade);
-                        if (grade !== null) {
-                            console.log(`DEBUG: Found grade ${grade} for ${userName} in assignment ${assignment.title}`);
-                            grades.push(grade);
+                        console.log(`DEBUG: Processing assignment "${assignment.title}" for ${userName}, grade value: "${userStatus.grade}"`);
+                        const percent = extractPercentageFromString(userStatus.grade);
+                        if (percent !== null) {
+                            console.log(`DEBUG: ✓ Found ${percent}% for ${userName} in assignment ${assignment.title}`);
+                            totalPercent += percent;
+                            count++; // Zähle jede gefundene Bewertung
+                        } else {
+                            console.log(`DEBUG: ✗ Could not extract percentage from "${userStatus.grade}" for ${userName} in assignment ${assignment.title}`);
                         }
                     }
                 }
@@ -2944,10 +2962,14 @@ function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
                 if (quiz.user_status) {
                     const userStatus = quiz.user_status.find(status => status.user_name === userName);
                     if (userStatus && userStatus.grade) {
-                        const grade = extractGradeFromString(userStatus.grade);
-                        if (grade !== null) {
-                            console.log(`DEBUG: Found grade ${grade} for ${userName} in quiz ${quiz.title}`);
-                            grades.push(grade);
+                        console.log(`DEBUG: Processing quiz "${quiz.title}" for ${userName}, grade value: "${userStatus.grade}"`);
+                        const percent = extractPercentageFromString(userStatus.grade);
+                        if (percent !== null) {
+                            console.log(`DEBUG: ✓ Found ${percent}% for ${userName} in quiz ${quiz.title}`);
+                            totalPercent += percent;
+                            count++; // Zähle jede gefundene Bewertung
+                        } else {
+                            console.log(`DEBUG: ✗ Could not extract percentage from "${userStatus.grade}" for ${userName} in quiz ${quiz.title}`);
                         }
                     }
                 }
@@ -2955,17 +2977,99 @@ function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
         }
     });
 
-    console.log(`DEBUG calculatePflichtaufgabenGradeForUserByName: User ${userName} has ${grades.length} grades`);
+    console.log(`DEBUG calculatePflichtaufgabenGradeForUserByName: User ${userName} has ${count} graded items`);
 
-    if (grades.length === 0) return null;
+    if (count === 0) return null;
 
-    // Durchschnitt berechnen
-    const average = grades.reduce((sum, grade) => sum + grade, 0) / grades.length;
+    // Durchschnitt der Prozentwerte berechnen
+    const averagePercent = totalPercent / count;
+    console.log(`DEBUG: Average percentage for ${userName}: ${averagePercent}%`);
+
+    // Erst jetzt in IHK-Note umwandeln
+    const grade = convertPercentToIHKGrade(averagePercent);
 
     return {
-        grade: average,
-        count: grades.length
+        grade: grade,
+        percent: averagePercent,
+        count: count
     };
+}
+
+// Extrahiere Prozentwert aus einem String (ohne Umwandlung in Note!)
+function extractPercentageFromString(gradeString) {
+    if (!gradeString || gradeString === '-' || gradeString === 'Nicht eingereicht') return null;
+
+    const content = String(gradeString).trim();
+
+    // Prüfe auf Sterne-Bewertungen basierend auf GradeMapping
+    if (content.includes('*')) {
+        console.log(`DEBUG extractPercentageFromString: Found stars in "${content}"`);
+        console.log(`DEBUG: gradeMapping keys:`, Object.keys(gradeMapping));
+
+        // Konvertiere Sterne zu Prozentwert über GradeMapping
+        const mappingEntries = Object.entries(gradeMapping)
+            .map(([score, label]) => ({ score: parseInt(score), label: label }))
+            .sort((a, b) => b.score - a.score);
+
+        console.log(`DEBUG: mappingEntries:`, mappingEntries);
+
+        for (const entry of mappingEntries) {
+            console.log(`DEBUG: Checking if "${content}" includes "${entry.label}"`);
+            if (content.includes(entry.label)) {
+                console.log(`DEBUG: ✓ MATCH! Returning score ${entry.score} for "${entry.label}"`);
+                return entry.score; // Gib den Prozentwert zurück (z.B. 70 für "** Verbesserungsbedarf", 100 für "*** Solide Umsetzung")
+            }
+        }
+
+        // Fallback: Zähle Sterne
+        console.log(`DEBUG: No label match found, counting stars...`);
+        const starCount = (content.match(/\*/g) || []).length;
+        console.log(`DEBUG: Star count = ${starCount}`);
+        if (mappingEntries.length > 0 && starCount >= 1) {
+            const sortedByStars = mappingEntries.sort((a, b) => b.score - a.score);
+            const index = Math.max(0, Math.min(starCount - 1, sortedByStars.length - 1));
+            if (starCount <= sortedByStars.length) {
+                const result = sortedByStars[sortedByStars.length - starCount].score;
+                console.log(`DEBUG: Returning ${result} based on ${starCount} stars`);
+                return result;
+            }
+        }
+        console.log(`DEBUG: ✗ Could not extract percentage from star rating`);
+    }
+
+    // Prüfe auf direkte Prozentwerte
+    const percentMatch = content.match(/(\d+(?:\.\d+)?)%/);
+    if (percentMatch) {
+        return parseFloat(percentMatch[1]);
+    }
+
+    // Prüfe auf direkte Zahlenwerte
+    const gradeMatch = content.match(/^(\d+(?:[.,]\d+)?)$/);
+    if (gradeMatch) {
+        const value = parseFloat(gradeMatch[1].replace(',', '.'));
+
+        // Zahlen > 6 als Prozentwerte interpretieren
+        if (value > 6 && value <= 100) {
+            return value;
+        }
+
+        // Noten zwischen 1.0 und 6.0 nicht unterstützt - wir brauchen Prozentwerte
+        if (value >= 1.0 && value <= 6.0) {
+            return null; // Kann nicht in Prozent umgewandelt werden
+        }
+    }
+
+    // Prüfe auf Punktzahlen (z.B. "8/10")
+    const pointsMatch = content.match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+    if (pointsMatch) {
+        const achieved = parseFloat(pointsMatch[1]);
+        const total = parseFloat(pointsMatch[2]);
+        if (total > 0) {
+            return (achieved / total) * 100;
+        }
+    }
+
+    return null;
 }
 
 // Extrahiere Note aus einem String (ähnlich wie extractGradeFromCell, aber für reinen Text)
@@ -3010,6 +3114,90 @@ function extractGradeFromString(gradeString) {
         if (total > 0) {
             const percent = (achieved / total) * 100;
             return convertPercentToIHKGrade(percent);
+        }
+    }
+
+    return null;
+}
+
+// Extrahiere Prozentwert aus einer Tabellenzelle (für korrekte Notenberechnung)
+function extractPercentageFromCell(cell) {
+    const content = cell.textContent.trim();
+    const innerHTML = cell.innerHTML.trim();
+
+    // Prüfe auf Sterne-Bewertungen basierend auf GradeMapping
+    if (content.includes('*')) {
+        // Konvertiere Sterne zu Prozentwert über GradeMapping
+        const mappingEntries = Object.entries(gradeMapping)
+            .map(([score, label]) => ({ score: parseInt(score), label: label }))
+            .sort((a, b) => b.score - a.score);
+
+        for (const entry of mappingEntries) {
+            if (content.includes(entry.label)) {
+                return entry.score; // z.B. 70 für "** Verbesserungsbedarf"
+            }
+        }
+
+        // Fallback: Zähle Sterne
+        const starCount = (content.match(/\*/g) || []).length;
+        if (mappingEntries.length > 0 && starCount >= 1 && starCount <= mappingEntries.length) {
+            const sortedByStars = mappingEntries.sort((a, b) => b.score - a.score);
+            return sortedByStars[sortedByStars.length - starCount].score;
+        }
+    }
+
+    // Prüfe auf Prozentwerte in <strong> Tags
+    const strongMatch = innerHTML.match(/<strong>([^<]+)<\/strong>/);
+    if (strongMatch) {
+        const gradeText = strongMatch[1].trim();
+
+        // Prüfe auf Prozentwerte
+        const percentMatch = gradeText.match(/(\d+(?:\.\d+)?)%/);
+        if (percentMatch) {
+            return parseFloat(percentMatch[1]);
+        }
+
+        // Prüfe auf direkte Zahlenwerte
+        const gradeMatch = gradeText.match(/^(\d+(?:[.,]\d+)?)$/);
+        if (gradeMatch) {
+            const value = parseFloat(gradeMatch[1].replace(',', '.'));
+
+            // Zahlen > 6 als Prozentwerte interpretieren
+            if (value > 6 && value <= 100) {
+                return value;
+            }
+        }
+
+        // Prüfe auf Quiz-Punktzahlen (z.B. "8/10")
+        const pointsMatch = gradeText.match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+        if (pointsMatch) {
+            const achieved = parseFloat(pointsMatch[1]);
+            const total = parseFloat(pointsMatch[2]);
+            if (total > 0) {
+                return (achieved / total) * 100;
+            }
+        }
+    }
+
+    // Prüfe auf Prozentwerte im normalen Text
+    const percentMatch = content.match(/(\d+(?:\.\d+)?)%/);
+    if (percentMatch) {
+        return parseFloat(percentMatch[1]);
+    }
+
+    // Prüfe auf Quiz-Ergebnisse mit Punktzahl (z.B. "8/10 (80%)")
+    const quizMatch = content.match(/\d+\/\d+\s*\((\d+(?:\.\d+)?)%\)/);
+    if (quizMatch) {
+        return parseFloat(quizMatch[1]);
+    }
+
+    // Prüfe auf einfache Punktzahlen ohne Prozent
+    const pointsMatch = content.match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+    if (pointsMatch) {
+        const achieved = parseFloat(pointsMatch[1]);
+        const total = parseFloat(pointsMatch[2]);
+        if (total > 0) {
+            return (achieved / total) * 100;
         }
     }
 
@@ -3222,9 +3410,9 @@ function createPflichtaufgabenGradeHeaderRowForAllGroups() {
         const gradeResult = calculatePflichtaufgabenGradeForUserAllGroups(i - 1); // i-1 weil erste Spalte der Aufgabenname ist
 
         if (gradeResult !== null && gradeResult.grade !== null) {
-            gradeCell.textContent = `${gradeResult.grade.toFixed(1)} (${gradeResult.count})`;
+            gradeCell.textContent = `${gradeResult.grade.toFixed(1)} (${gradeResult.percent.toFixed(1)}%, n=${gradeResult.count})`;
             gradeCell.style.color = getGradeColor(gradeResult.grade);
-            gradeCell.title = `Durchschnitt aus ${gradeResult.count} bewerteten Aufgaben`;
+            gradeCell.title = `Durchschnitt: ${gradeResult.percent.toFixed(1)}% aus ${gradeResult.count} bewerteten Aufgaben`;
         } else {
             gradeCell.textContent = 'n/a';
             gradeCell.style.color = '#6c757d';
@@ -3243,28 +3431,34 @@ function calculatePflichtaufgabenGradeForUserAllGroups(userIndex) {
     if (!table) return null;
 
     const rows = table.querySelectorAll('tbody tr:not(.pflicht-grade-row)');
-    const grades = [];
+    let totalPercent = 0;
+    let count = 0; // Expliziter Zähler
 
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
         if (cells.length > userIndex + 1) { // +1 weil erste Spalte der Aufgabenname ist
             const userCell = cells[userIndex + 1];
-            const grade = extractGradeFromCell(userCell);
+            const percent = extractPercentageFromCell(userCell);
 
-            if (grade !== null) {
-                grades.push(grade);
+            if (percent !== null) {
+                totalPercent += percent;
+                count++; // Zähle jede gefundene Bewertung
             }
         }
     });
 
-    if (grades.length === 0) return null;
+    if (count === 0) return null;
 
-    // Durchschnitt berechnen
-    const average = grades.reduce((sum, grade) => sum + grade, 0) / grades.length;
+    // Durchschnitt der Prozentwerte berechnen
+    const averagePercent = totalPercent / count;
+
+    // Erst jetzt in IHK-Note umwandeln
+    const grade = convertPercentToIHKGrade(averagePercent);
 
     return {
-        grade: average,
-        count: grades.length
+        grade: grade,
+        percent: averagePercent,
+        count: count
     };
 }
 
