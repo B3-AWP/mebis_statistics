@@ -71,6 +71,28 @@ def load_ignored_groups(config_path='config.ini'):
         print(f"Error loading ignored groups: {e}")
         return set()
 
+def load_grade_mapping(config_path='config.ini'):
+    """Lädt das GradeMapping aus config.ini"""
+    try:
+        import configparser
+        config = configparser.ConfigParser()
+        config.read(config_path, encoding='utf-8')
+
+        grade_mapping = {}
+        if config.has_section('GradeMapping'):
+            for key, value in config.items('GradeMapping'):
+                if not key.startswith(';'):  # Ignore comments
+                    try:
+                        grade_mapping[int(key)] = value.strip()
+                    except ValueError:
+                        print(f"Warning: Invalid grade mapping key '{key}', skipping")
+
+        print(f"DEBUG: Grade mapping loaded: {grade_mapping}")
+        return grade_mapping
+    except Exception as e:
+        print(f"Error loading grade mapping: {e}")
+        return {}
+
 def get_assignment_details(assignments_by_category):
     """Erstellt ein Dictionary mit Assignment-Details"""
     assignment_details = {}
@@ -693,6 +715,13 @@ def get_data():
             ignored_groups = set()
 
         try:
+            grade_mapping = load_grade_mapping()
+            print(f"DEBUG API: grade_mapping geladen: {len(grade_mapping)} Einträge")
+        except Exception as e:
+            print(f"DEBUG API: Error loading grade_mapping: {e}")
+            grade_mapping = {}
+
+        try:
             assignment_details = get_assignment_details(data['activities_by_category'])
             print(f"DEBUG API: assignment_details erstellt: {len(assignment_details)} Details")
         except Exception as e:
@@ -877,6 +906,7 @@ def get_data():
                 'activities_by_category': activities_with_status,  # Korrekte Frontend-Erwartung
                 'structured_tables': structured_data,
                 'ignored_groups': list(ignored_groups),
+                'grade_mapping': grade_mapping,
                 'last_updated': latest_file
             }
             print(f"DEBUG API: Response-Daten erstellt mit {len(groups_data)} Gruppen")

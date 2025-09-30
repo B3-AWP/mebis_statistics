@@ -6,6 +6,7 @@ let currentWeek = 10;
 let totalWeeks = 40;
 let checklistViewType = 'both'; // New: track checklist column view setting
 let sortState = {}; // Track sorting state for different tables
+let gradeMapping = {}; // GradeMapping from config.ini
 
 // Tab-Management
 function showTab(tabName) {
@@ -98,6 +99,12 @@ async function loadData() {
         }
 
         dashboardData = await response.json();
+
+        // Load grade mapping from backend
+        if (dashboardData.grade_mapping) {
+            gradeMapping = dashboardData.grade_mapping;
+            console.log('Grade mapping loaded:', gradeMapping);
+        }
 
         // Debug: JSON-Struktur analysieren
         console.log('=== DASHBOARD DATA LOADED ===');
@@ -2995,22 +3002,32 @@ function extractGradeFromCell(cell) {
     return null;
 }
 
-// Konvertiere Sterne-Bewertung zu Note basierend auf config.ini Mapping
+// Konvertiere Sterne-Bewertung zu Note basierend auf config.ini GradeMapping
 function convertStarRatingToGrade(starRating) {
-    // Mapping basierend auf config.ini GradeMapping
-    // 0 = * Nicht akzeptabel
-    // 70 = ** Verbesserungsbedarf
-    // 100 = *** Solide Umsetzung
-    // 130 = **** Exzellent
+    // Use dynamic grade mapping from config.ini
+    // Convert mapping to array and sort by score descending
+    const mappingEntries = Object.entries(gradeMapping)
+        .map(([score, label]) => ({ score: parseInt(score), label: label }))
+        .sort((a, b) => b.score - a.score);
 
-    if (starRating.includes('**** Exzellent') || starRating.includes('****')) {
-        return convertPercentToIHKGrade(130); // Exzellent
-    } else if (starRating.includes('*** Solide Umsetzung') || starRating.includes('***')) {
-        return convertPercentToIHKGrade(100); // Solide Umsetzung
-    } else if (starRating.includes('** Verbesserungsbedarf') || starRating.includes('**')) {
-        return convertPercentToIHKGrade(70); // Verbesserungsbedarf
-    } else if (starRating.includes('* Nicht akzeptabel') || starRating.includes('*')) {
-        return convertPercentToIHKGrade(0); // Nicht akzeptabel
+    // Try to match star rating with mapping entries
+    for (const entry of mappingEntries) {
+        if (starRating.includes(entry.label)) {
+            return convertPercentToIHKGrade(entry.score);
+        }
+    }
+
+    // Fallback: count stars if no text match found
+    const starCount = (starRating.match(/\*/g) || []).length;
+
+    // Map star count to the highest matching score
+    // 4 stars = highest, 3 = second highest, etc.
+    if (mappingEntries.length > 0) {
+        const sortedByStars = mappingEntries.sort((a, b) => b.score - a.score);
+        const index = Math.max(0, Math.min(starCount - 1, sortedByStars.length - 1));
+        if (starCount >= 1 && starCount <= sortedByStars.length) {
+            return convertPercentToIHKGrade(sortedByStars[sortedByStars.length - starCount].score);
+        }
     }
 
     return null;
