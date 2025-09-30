@@ -831,6 +831,7 @@ function generateGroupProgressTable(users) {
     html += '<th>Ø Note</th>';
     html += '<th>Ø Gesamt (%)</th>';
     html += '<th>Eingereichte Aufgaben</th>';
+    html += '<th>Note Pflichtaufgaben</th>';
     html += '</tr></thead>';
     html += '<tbody>';
 
@@ -848,6 +849,15 @@ function generateGroupProgressTable(users) {
         // Berechne Note basierend auf Pflicht %
         const gradeText = calculateGradeFromPflichtProgress(displayPflichtProgress);
 
+        // Berechne Pflichtaufgaben-Note
+        const pflichtGradeResult = calculatePflichtaufgabenGradeForUserByName(user.name, currentGroup);
+        let pflichtGradeText = '-';
+        let pflichtGradeColor = '#6C757D';
+        if (pflichtGradeResult && pflichtGradeResult.grade !== null) {
+            pflichtGradeText = `${pflichtGradeResult.grade.toFixed(1)} (${pflichtGradeResult.count})`;
+            pflichtGradeColor = getGradeColor(pflichtGradeResult.grade);
+        }
+
         html += '<tr>';
         html += `<td class="person-name"><strong>${user.name}</strong></td>`;
         html += `<td class="progress-cell" style="--progress-width: ${Math.min(user.checklists.required_100_count * 10, 100)}%; --progress-color: #28a745;">${user.checklists.required_100_count}</td>`;
@@ -855,6 +865,7 @@ function generateGroupProgressTable(users) {
         html += `<td style="text-align: center; font-weight: bold;">${gradeText}</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${displayGesamtProgress}%; --progress-color: #6f42c1;">${displayGesamtProgress.toFixed(1)}%</td>`;
         html += `<td class="progress-cell" style="--progress-width: ${user.assignments.percent_submitted}%; --progress-color: #fd7e14;">${user.assignments.submitted_count}</td>`;
+        html += `<td style="text-align: center; font-weight: bold; color: ${pflichtGradeColor};" title="Durchschnitt aus ${pflichtGradeResult ? pflichtGradeResult.count : 0} bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
         html += '</tr>';
     });
 
@@ -2891,6 +2902,118 @@ function calculatePflichtaufgabenGradeForUser(userIndex) {
         grade: average,
         count: grades.length
     };
+}
+
+// Berechne Pflichtaufgaben-Durchschnittsnote für einen Benutzer basierend auf activities_by_category
+function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
+    if (!dashboardData || !dashboardData.activities_by_category) {
+        console.log('DEBUG calculatePflichtaufgabenGradeForUserByName: No dashboard data or activities_by_category');
+        return null;
+    }
+
+    const grades = [];
+
+    // Finde Pflichtaufgaben-Kategorie(n)
+    const pflichtCategories = dashboardData.activities_by_category.filter(category =>
+        category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
+    );
+
+    console.log(`DEBUG calculatePflichtaufgabenGradeForUserByName: Found ${pflichtCategories.length} Pflicht categories for user ${userName}`);
+
+    // Durchlaufe alle Pflichtaufgaben-Kategorien
+    pflichtCategories.forEach(category => {
+        // Prüfe Assignments
+        if (category.assignments) {
+            category.assignments.forEach(assignment => {
+                if (assignment.user_status) {
+                    const userStatus = assignment.user_status.find(status => status.user_name === userName);
+                    if (userStatus && userStatus.grade) {
+                        const grade = extractGradeFromString(userStatus.grade);
+                        if (grade !== null) {
+                            console.log(`DEBUG: Found grade ${grade} for ${userName} in assignment ${assignment.title}`);
+                            grades.push(grade);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Prüfe Quizzes
+        if (category.quizzes) {
+            category.quizzes.forEach(quiz => {
+                if (quiz.user_status) {
+                    const userStatus = quiz.user_status.find(status => status.user_name === userName);
+                    if (userStatus && userStatus.grade) {
+                        const grade = extractGradeFromString(userStatus.grade);
+                        if (grade !== null) {
+                            console.log(`DEBUG: Found grade ${grade} for ${userName} in quiz ${quiz.title}`);
+                            grades.push(grade);
+                        }
+                    }
+                }
+            });
+        }
+    });
+
+    console.log(`DEBUG calculatePflichtaufgabenGradeForUserByName: User ${userName} has ${grades.length} grades`);
+
+    if (grades.length === 0) return null;
+
+    // Durchschnitt berechnen
+    const average = grades.reduce((sum, grade) => sum + grade, 0) / grades.length;
+
+    return {
+        grade: average,
+        count: grades.length
+    };
+}
+
+// Extrahiere Note aus einem String (ähnlich wie extractGradeFromCell, aber für reinen Text)
+function extractGradeFromString(gradeString) {
+    if (!gradeString || gradeString === '-' || gradeString === 'Nicht eingereicht') return null;
+
+    const content = String(gradeString).trim();
+
+    // Prüfe auf Sterne-Bewertungen
+    if (content.includes('*')) {
+        return convertStarRatingToGrade(content);
+    }
+
+    // Prüfe auf Prozentwerte
+    const percentMatch = content.match(/(\d+(?:\.\d+)?)%/);
+    if (percentMatch) {
+        const percent = parseFloat(percentMatch[1]);
+        return convertPercentToIHKGrade(percent);
+    }
+
+    // Prüfe auf direkte Notenwerte
+    const gradeMatch = content.match(/^(\d+(?:[.,]\d+)?)$/);
+    if (gradeMatch) {
+        const value = parseFloat(gradeMatch[1].replace(',', '.'));
+
+        // Noten zwischen 1.0 und 6.0
+        if (value >= 1.0 && value <= 6.0) {
+            return value;
+        }
+
+        // Zahlen > 6 als Prozentwerte interpretieren
+        if (value > 6 && value <= 100) {
+            return convertPercentToIHKGrade(value);
+        }
+    }
+
+    // Prüfe auf Punktzahlen (z.B. "8/10")
+    const pointsMatch = content.match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+    if (pointsMatch) {
+        const achieved = parseFloat(pointsMatch[1]);
+        const total = parseFloat(pointsMatch[2]);
+        if (total > 0) {
+            const percent = (achieved / total) * 100;
+            return convertPercentToIHKGrade(percent);
+        }
+    }
+
+    return null;
 }
 
 // Extrahiere Note aus einer Tabellenzelle (nur tatsächlich bewertete Aufgaben)
