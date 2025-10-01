@@ -75,9 +75,14 @@ def parse_german_datetime(datetime_str):
 def create_webdriver(headless=False):
     options = Options()
     if headless == "True":
-        options.add_argument('--headless')
+        options.add_argument('--headless=new')  # Neues Headless-Mode
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
+        # Wichtig für Headless: Window-Size setzen
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        # User-Agent für bessere Kompatibilität
+        options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
     # Performance-Optimierungen (sicher)
     options.add_argument('--disable-images')  # Bilder nicht laden
@@ -92,7 +97,6 @@ def create_webdriver(headless=False):
     options.add_argument('--disable-renderer-backgrounding')
     options.add_argument('--disable-background-networking')
     options.add_argument('--disable-sync')
-    options.add_argument('--disable-features=VizDisplayCompositor')
     options.add_argument('--disable-logging')
     options.add_argument('--log-level=3')
     options.add_argument('--disable-translate')
@@ -110,9 +114,44 @@ def create_webdriver(headless=False):
     return webdriver.Chrome(options=options)
 
 def login(driver, username, password, waittime):
-    WebDriverWait(driver, waittime).until(EC.visibility_of_element_located((By.ID, "input-username"))).send_keys(username)
-    driver.find_element(By.ID, "input-password").send_keys(password)
-    driver.find_element(By.ID, "button-do-log-in").click()
+    """Robuster Login mit mehreren Fallback-Strategien"""
+    try:
+        # Warte bis die Seite vollständig geladen ist
+        time.sleep(2)
+
+        # Strategie 1: Warte auf visibility_of_element
+        try:
+            username_field = WebDriverWait(driver, waittime).until(
+                EC.visibility_of_element_located((By.ID, "input-username"))
+            )
+        except:
+            # Strategie 2: Warte nur auf presence (für headless mode)
+            print("[INFO] Visibility fehlgeschlagen, versuche presence_of_element...")
+            username_field = WebDriverWait(driver, waittime).until(
+                EC.presence_of_element_located((By.ID, "input-username"))
+            )
+
+        # Lösche vorhandenen Text und gebe Username ein
+        username_field.clear()
+        username_field.send_keys(username)
+
+        # Passwort-Feld
+        password_field = driver.find_element(By.ID, "input-password")
+        password_field.clear()
+        password_field.send_keys(password)
+
+        # Login-Button
+        login_button = driver.find_element(By.ID, "button-do-log-in")
+        login_button.click()
+
+        # Warte kurz bis Login durchgeführt wurde
+        time.sleep(2)
+
+    except Exception as e:
+        print(f"[FEHLER] Login fehlgeschlagen: {e}")
+        import traceback
+        print(f"[FEHLER] Traceback: {traceback.format_exc()}")
+        raise
 
 def get_select_options(driver, select_name, waittime):
     select_element = WebDriverWait(driver, waittime).until(
@@ -642,7 +681,11 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
         print(f"  └─ Abgeschlossen in {duration:.1f}s ({req_count} req, {all_count} all)")
         return checklist_id, progress
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
         print(f"[FEHLER] Fehler bei Checklist {checklist.get('id', 'unknown')}: {e}")
+        print(f"[FEHLER] Traceback: {error_details}")
+        sys.stdout.flush()
         return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
 def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_url, course_id, index, total):
