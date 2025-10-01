@@ -150,7 +150,10 @@ def login(driver, username, password, waittime):
     except Exception as e:
         print(f"[FEHLER] Login fehlgeschlagen: {e}")
         import traceback
-        print(f"[FEHLER] Traceback: {traceback.format_exc()}")
+        try:
+            print(f"[FEHLER] Traceback: {traceback.format_exc()}")
+        except UnicodeEncodeError:
+            print(f"[FEHLER] Traceback enthaelt Unicode-Zeichen")
         raise
 
 def get_select_options(driver, select_name, waittime):
@@ -611,7 +614,7 @@ def get_thread_driver(isheadless, username=None, password=None, base_url=None, c
                 thread_local.logged_in = True
                 print(f"[OK] Thread-Login erfolgreich, sesskey: {thread_local.sesskey[:10]}...")
             else:
-                print("⚠ Thread-Login abgeschlossen, aber sesskey fehlt")
+                print("[WARNUNG] Thread-Login abgeschlossen, aber sesskey fehlt")
 
         except Exception as e:
             print(f"[FEHLER] Fehler beim Thread-Login: {e}")
@@ -647,7 +650,14 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
         print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege)")
         return assignment_id, status
     except Exception as e:
-        print(f"[FEHLER] Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
+        import traceback
+        try:
+            print(f"[FEHLER] Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
+            print(f"[FEHLER] Traceback: {traceback.format_exc()}")
+        except UnicodeEncodeError:
+            print(f"[FEHLER] Fehler bei Assignment {assignment.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
+            print(f"[FEHLER] Traceback enthaelt Unicode-Zeichen")
+        sys.stdout.flush()
         return assignment.get('id', 'unknown'), []
 
 def process_checklist_parallel(checklist, isheadless, username, password, base_url, course_id, index, total, waittime=10):
@@ -678,13 +688,19 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
 
         req_count = len(progress.get('required_progress', {}))
         all_count = len(progress.get('all_progress', {}))
-        print(f"  └─ Abgeschlossen in {duration:.1f}s ({req_count} req, {all_count} all)")
+        print(f"  [OK] Abgeschlossen in {duration:.1f}s ({req_count} req, {all_count} all)")
         return checklist_id, progress
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        print(f"[FEHLER] Fehler bei Checklist {checklist.get('id', 'unknown')}: {e}")
-        print(f"[FEHLER] Traceback: {error_details}")
+        # Encode error details to avoid Unicode issues on Windows
+        try:
+            print(f"[FEHLER] Fehler bei Checklist {checklist.get('id', 'unknown')}: {e}")
+            print(f"[FEHLER] Traceback: {error_details}")
+        except UnicodeEncodeError:
+            # Fallback: nur ASCII-sichere Ausgabe
+            print(f"[FEHLER] Fehler bei Checklist {checklist.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
+            print(f"[FEHLER] Traceback enthaelt Unicode-Zeichen (siehe Logfile)")
         sys.stdout.flush()
         return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
@@ -710,7 +726,14 @@ def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_u
         print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege)")
         return quiz_id, status
     except Exception as e:
-        print(f"[FEHLER] Fehler bei Quiz {quiz.get('id', 'unknown')}: {e}")
+        import traceback
+        try:
+            print(f"[FEHLER] Fehler bei Quiz {quiz.get('id', 'unknown')}: {e}")
+            print(f"[FEHLER] Traceback: {traceback.format_exc()}")
+        except UnicodeEncodeError:
+            print(f"[FEHLER] Fehler bei Quiz {quiz.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
+            print(f"[FEHLER] Traceback enthaelt Unicode-Zeichen")
+        sys.stdout.flush()
         return quiz.get('id', 'unknown'), []
     
 

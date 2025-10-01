@@ -122,9 +122,11 @@ Dieser Befehl:
 - Validiert Login-Credentials
 - Prüft ob Export-Daten vorhanden sind
 - Startet das Flask-Dashboard
-- Öffnet automatisch den Browser (im Development-Modus)
+- Öffnet automatisch den Browser
 
 Das Dashboard ist dann erreichbar unter: `http://localhost:5000`
+
+**Tipp:** Du kannst den Datenexport auch direkt aus dem Dashboard starten! Klicke auf den **"Aktualisieren"**-Button oben im Dashboard. Der Export läuft dann im Hintergrund und zeigt den Fortschritt an.
 
 ### Workflow
 
@@ -136,11 +138,31 @@ Das Dashboard ist dann erreichbar unter: `http://localhost:5000`
 3. Dashboard starten (start_dashboard.py / start_dashboard.cmd)
    ↓
 4. Dashboard im Browser nutzen (http://localhost:5000)
+   ↓
+5. (Optional) Daten aktualisieren über "Aktualisieren"-Button im Dashboard
 ```
 
-Bei Bedarf Schritt 2 wiederholen um aktuelle Daten zu laden.
+**Hinweis:** Du musst Schritt 2 nur beim ersten Mal manuell ausführen. Danach kannst du Daten bequem über den "Aktualisieren"-Button im Dashboard aktualisieren.
 
 ## Features
+
+### Datenexport über Dashboard
+
+Der Export kann direkt aus dem Dashboard heraus gestartet werden:
+
+1. Klicke auf den **"Aktualisieren"**-Button oben im Dashboard
+2. Ein Fortschritts-Panel erscheint am rechten Bildschirmrand
+3. Der Export zeigt live an:
+   - Fortschritt in Prozent
+   - Anzahl verarbeiteter Assignments, Checklists und Quizzes
+   - Geschätzte Restzeit
+4. Nach Abschluss wird das Dashboard automatisch mit den neuen Daten aktualisiert
+
+**Vorteile:**
+- Kein manuelles Ausführen von exportData.py nötig
+- Live-Fortschrittsanzeige
+- Export läuft im Hintergrund (Headless-Mode)
+- Dashboard bleibt bedienbar während Export läuft
 
 ### Ignorierte Gruppen
 
@@ -189,4 +211,10 @@ Format: JSON mit Punktzahl als Key (String) und Bewertungstext als Value.
 - Lösung: Erstelle den Ordner oder passe `EXPORT_FOLDER` in `.env` an
 
 **Problem: Dashboard zeigt veraltete Daten**
-- Lösung: Führe `python exportData.py` aus um neue Daten zu exportieren
+- Lösung: Klicke auf den "Aktualisieren"-Button im Dashboard oder führe `python exportData.py` manuell aus
+
+**Problem: Export-Button im Dashboard funktioniert nicht**
+- Lösung 1: Prüfe die Browser-Konsole auf Fehlermeldungen
+- Lösung 2: Erhöhe `MODE_WAITTIME` in `.env` auf 5 oder 10 Sekunden
+- Lösung 3: Setze `MODE_HEADLESS=False` in `.env` um zu sehen, was passiert
+- Lösung 4: Prüfe die Logs in der Konsole wo `start_dashboard.py` läuft
