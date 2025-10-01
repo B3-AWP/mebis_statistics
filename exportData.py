@@ -1,4 +1,5 @@
 import os
+import sys
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -243,6 +244,44 @@ def extract_progress(driver):
     progress_data = {}
     user_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='user/view.php?id=']")
     progress_elements = driver.find_elements(By.CSS_SELECTOR, "div.checklist_percentcomplete")
+
+    # Wenn keine User-Links gefunden wurden, versuche zeilenweise zu parsen
+    if len(user_links) == 0:
+        # Versuche, die Tabelle zeilenweise zu parsen
+        rows = driver.find_elements(By.CSS_SELECTOR, "table.generaltable tbody tr")
+
+        for row in rows:
+            try:
+                # Suche User-Link in der Zeile
+                user_link = row.find_element(By.CSS_SELECTOR, "a[href*='user/view.php?id=']")
+                user_id = re.search(r'id=(\d+)', user_link.get_attribute("href")).group(1)
+
+                # Suche Progress-Element in derselben Zeile
+                try:
+                    progress_elem = row.find_element(By.CSS_SELECTOR, "div.checklist_percentcomplete")
+                    progress_percent = progress_elem.text.strip()
+                    progress_data[user_id] = progress_percent
+                except:
+                    # Kein Progress-Element in dieser Zeile
+                    pass
+            except:
+                # Keine User-ID in dieser Zeile
+                continue
+
+        return progress_data
+
+    # Wenn keine Progress-Elemente gefunden wurden, versuche alternative Selektoren
+    if len(progress_elements) == 0:
+        # Versuche span.checklist_percentcomplete
+        progress_elements = driver.find_elements(By.CSS_SELECTOR, "span.checklist_percentcomplete")
+
+        if len(progress_elements) == 0:
+            # Versuche beliebige Elemente mit checklist_percentcomplete
+            progress_elements = driver.find_elements(By.CSS_SELECTOR, "[class*='checklist_percentcomplete']")
+
+        if len(progress_elements) == 0:
+            # Versuche td-Elemente mit Prozent-Zeichen
+            progress_elements = driver.find_elements(By.XPATH, "//td[contains(text(), '%')]")
 
     for link, progress in zip(user_links, progress_elements):
         user_id = re.search(r'id=(\d+)', link.get_attribute("href")).group(1)
@@ -496,7 +535,7 @@ def get_sesskey(driver, waittime=10, max_retries=3):
             if attempt < max_retries - 1:
                 time.sleep(2)
 
-    print("❌ Sesskey konnte nach allen Versuchen nicht extrahiert werden")
+    print("[FEHLER] Sesskey konnte nach allen Versuchen nicht extrahiert werden")
     return None
 
 # Thread-local storage for WebDriver instances
@@ -510,7 +549,7 @@ def get_thread_driver(isheadless, username=None, password=None, base_url=None, c
             thread_local.logged_in = False
             thread_local.sesskey = None
         except Exception as e:
-            print(f"❌ Fehler beim Erstellen des WebDrivers: {e}")
+            print(f"[FEHLER] Fehler beim Erstellen des WebDrivers: {e}")
             return None
 
     # Login und sesskey für jeden Thread
@@ -531,12 +570,12 @@ def get_thread_driver(isheadless, username=None, password=None, base_url=None, c
 
             if thread_local.sesskey:
                 thread_local.logged_in = True
-                print(f"✓ Thread-Login erfolgreich, sesskey: {thread_local.sesskey[:10]}...")
+                print(f"[OK] Thread-Login erfolgreich, sesskey: {thread_local.sesskey[:10]}...")
             else:
                 print("⚠ Thread-Login abgeschlossen, aber sesskey fehlt")
 
         except Exception as e:
-            print(f"❌ Fehler beim Thread-Login: {e}")
+            print(f"[FEHLER] Fehler beim Thread-Login: {e}")
             thread_local.logged_in = False
 
     return thread_local.driver
@@ -553,7 +592,7 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
         driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
 
         if driver is None:
-            print(f"❌ [{index+1}/{total}] Kein WebDriver verfügbar für Assignment {assignment.get('id', 'unknown')}")
+            print(f"[FEHLER] [{index+1}/{total}] Kein WebDriver verfügbar für Assignment {assignment.get('id', 'unknown')}")
             return assignment.get('id', 'unknown'), []
 
         assignment_id = assignment["id"]
@@ -561,13 +600,15 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
         assignment_title = assignment.get("title", f"Assignment {assignment_id}")
 
         print(f"[{index+1}/{total}] Verarbeite Assignment: {assignment_title[:50]}...")
+        print(f"PROGRESS|assignments|{index+1}|{total}")
+        sys.stdout.flush()
         start_time = time.time()
         status = get_assignment_status(driver, assignment_url, waittime)
         duration = time.time() - start_time
         print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege)")
         return assignment_id, status
     except Exception as e:
-        print(f"❌ Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
+        print(f"[FEHLER] Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
         return assignment.get('id', 'unknown'), []
 
 def process_checklist_parallel(checklist, isheadless, username, password, base_url, course_id, index, total, waittime=10):
@@ -576,13 +617,13 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
         driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
 
         if driver is None:
-            print(f"❌ [{index+1}/{total}] Kein WebDriver verfügbar für Checklist {checklist.get('id', 'unknown')}")
+            print(f"[FEHLER] [{index+1}/{total}] Kein WebDriver verfügbar für Checklist {checklist.get('id', 'unknown')}")
             return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
         thread_sesskey = get_thread_sesskey()
 
         if not thread_sesskey:
-            print(f"❌ [{index+1}/{total}] Kein sesskey für Checklist {checklist.get('id', 'unknown')}")
+            print(f"[FEHLER] [{index+1}/{total}] Kein sesskey für Checklist {checklist.get('id', 'unknown')}")
             return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
         checklist_id = checklist["id"]
@@ -590,6 +631,8 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
         checklist_title = checklist.get("title", f"Checklist {checklist_id}")
 
         print(f"[{index+1}/{total}] Verarbeite Checklist: {checklist_title[:50]}...")
+        print(f"PROGRESS|checklists|{index+1}|{total}")
+        sys.stdout.flush()
         start_time = time.time()
         progress = get_checklist_progress_optimized(driver, checklist_url, thread_sesskey)
         duration = time.time() - start_time
@@ -599,7 +642,7 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
         print(f"  └─ Abgeschlossen in {duration:.1f}s ({req_count} req, {all_count} all)")
         return checklist_id, progress
     except Exception as e:
-        print(f"❌ Fehler bei Checklist {checklist.get('id', 'unknown')}: {e}")
+        print(f"[FEHLER] Fehler bei Checklist {checklist.get('id', 'unknown')}: {e}")
         return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
 def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_url, course_id, index, total):
@@ -608,7 +651,7 @@ def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_u
         driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
 
         if driver is None:
-            print(f"❌ [{index+1}/{total}] Kein WebDriver verfügbar für Quiz {quiz.get('id', 'unknown')}")
+            print(f"[FEHLER] [{index+1}/{total}] Kein WebDriver verfügbar für Quiz {quiz.get('id', 'unknown')}")
             return quiz.get('id', 'unknown'), []
 
         quiz_id = quiz["id"]
@@ -616,13 +659,15 @@ def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_u
         quiz_title = quiz.get("title", f"Quiz {quiz_id}")
 
         print(f"[{index+1}/{total}] Verarbeite Quiz: {quiz_title[:50]}...")
+        print(f"PROGRESS|quizzes|{index+1}|{total}")
+        sys.stdout.flush()
         start_time = time.time()
         status = get_quiz_status(driver, quiz_url, waittime)
         duration = time.time() - start_time
         print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege)")
         return quiz_id, status
     except Exception as e:
-        print(f"❌ Fehler bei Quiz {quiz.get('id', 'unknown')}: {e}")
+        print(f"[FEHLER] Fehler bei Quiz {quiz.get('id', 'unknown')}: {e}")
         return quiz.get('id', 'unknown'), []
     
 
@@ -732,8 +777,11 @@ def main():
     start_time = time.time()
     print("Starte Mebis-Datenexport...")
     print(f"Startzeit: {datetime.now().strftime('%H:%M:%S')}")
+    sys.stdout.flush()
 
     # Lade Konfiguration über config_manager
+    print("Lade Konfiguration...")
+    sys.stdout.flush()
     credentials = config_manager.get_login_credentials()
     username = credentials['username']
     password = credentials['password']
@@ -748,23 +796,33 @@ def main():
     isheadless = str(mode_settings['headless'])
     waittime = mode_settings['waittime']
 
+    print("Erstelle WebDriver...")
+    sys.stdout.flush()
     driver = create_webdriver(headless=isheadless)
     driver.get(f"{base_url}?course={course_id}")
-    
+
+    print("Führe Login durch...")
+    sys.stdout.flush()
     login(driver, username, password, waittime)
 
     # Extrahiere den sesskey nach dem Login
+    print("Extrahiere Sesskey...")
+    sys.stdout.flush()
     sesskey = get_sesskey(driver)
     if not sesskey:
         print("Sesskey konnte nicht extrahiert werden. Überprüfe den Login-Prozess.")
         driver.quit()
         return
 
+    print("Lade Gruppen und Optionen...")
+    sys.stdout.flush()
     group_options = get_select_options(driver, "group", waittime)
     activityinclude_options = get_select_options(driver, "activityinclude", waittime)
     activitysection_options = get_select_options(driver, "activitysection", waittime)
 
     # Erfasse die Aktivitäten einmalig
+    print("Erfasse Aktivitäten...")
+    sys.stdout.flush()
     activities = get_activity_urls(driver)
 
     # Aktualisiere Aktivitäten mit Kategorieinformationen
@@ -801,6 +859,8 @@ def main():
 
 
     print("Analysiere Status Assignments (parallel)")
+    print(f"PROGRESS|assignments|0|{len(activities['assignments'])}")
+    sys.stdout.flush()
     assignments_status = {}
 
     # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Assignments
@@ -823,6 +883,8 @@ def main():
     # No need to duplicate data structure here
 
     print("Analysiere Status Checkliste (parallel)")
+    print(f"PROGRESS|checklists|0|{len(activities['checklists'])}")
+    sys.stdout.flush()
     checklist_progress = {}
 
     # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Checklists
@@ -841,7 +903,10 @@ def main():
                 checklist_id, progress = future.result()
                 checklist_progress[checklist_id] = progress
 
+
     print("Analysiere Quiz Status (parallel)")
+    print(f"PROGRESS|quizzes|0|{len(activities['quizzes'])}")
+    sys.stdout.flush()
     quizzes_status = {}
 
     # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Quizzes
@@ -903,6 +968,7 @@ def main():
                 user_checklist_progress = checklist_progress[checklist["id"]]
                 required_progress = user_checklist_progress.get('required_progress', {}).get(user["id"])
                 all_progress = user_checklist_progress.get('all_progress', {}).get(user["id"])
+
                 if required_progress or all_progress:
                     user["activities"]["checklists"].append({
                         "id": checklist["id"],
@@ -976,7 +1042,7 @@ def main():
     if save_success:
         print(f"Lokale Datei: {local_filename}")
     else:
-        print(f"❌ Speicherung fehlgeschlagen")
+        print(f"[FEHLER] Speicherung fehlgeschlagen")
     print(f"Endzeit: {datetime.now().strftime('%H:%M:%S')}")
     print("="*60)
 

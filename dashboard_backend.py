@@ -10,6 +10,9 @@ import os
 import json
 import glob
 import math
+import subprocess
+import threading
+import time as time_module
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 
@@ -1026,6 +1029,170 @@ def get_groups():
     except Exception as e:
         logger.error(f"Error in get_groups: {e}")
         return jsonify({'error': str(e)}), 500
+
+# Globale Variable für Export-Status
+export_status = {
+    'running': False,
+    'progress': 0,
+    'message': '',
+    'error': None,
+    'details': {
+        'assignments': {'current': 0, 'total': 0},
+        'checklists': {'current': 0, 'total': 0},
+        'quizzes': {'current': 0, 'total': 0}
+    },
+    'start_time': None,
+    'estimated_time_remaining': None
+}
+
+def run_export_script():
+    """Führt exportData.py als Hintergrundprozess aus"""
+    global export_status
+    logger = api_logger
+
+    try:
+        logger.info("run_export_script() called")
+        export_status['running'] = True
+        export_status['progress'] = 0
+        export_status['message'] = 'Export wird gestartet...'
+        export_status['error'] = None
+        export_status['start_time'] = time_module.time()
+        export_status['details'] = {
+            'assignments': {'current': 0, 'total': 0},
+            'checklists': {'current': 0, 'total': 0},
+            'quizzes': {'current': 0, 'total': 0}
+        }
+
+        logger.info("Status initialized, starting export script...")
+
+        # Führe exportData.py aus
+        import sys
+        script_path = os.path.join(os.path.dirname(__file__), 'exportData.py')
+        logger.info(f"Script path: {script_path}")
+        logger.info(f"Python executable: {sys.executable}")
+
+        if not os.path.exists(script_path):
+            raise FileNotFoundError(f"exportData.py not found at {script_path}")
+
+        logger.info("Creating subprocess...")
+        process = subprocess.Popen(
+            [sys.executable, script_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+        logger.info(f"Subprocess created with PID: {process.pid}")
+
+        # Lese Output
+        for line in process.stdout:
+            line = line.strip()
+            if line:
+                logger.info(f"Export: {line}")
+
+                # Parse PROGRESS Meldungen: PROGRESS|type|current|total
+                if line.startswith('PROGRESS|'):
+                    try:
+                        parts = line.split('|')
+                        activity_type = parts[1]
+                        current = int(parts[2])
+                        total = int(parts[3])
+
+                        export_status['details'][activity_type] = {
+                            'current': current,
+                            'total': total
+                        }
+
+                        # Berechne Gesamtfortschritt
+                        total_items = sum(d['total'] for d in export_status['details'].values())
+                        completed_items = sum(d['current'] for d in export_status['details'].values())
+
+                        if total_items > 0:
+                            export_status['progress'] = int((completed_items / total_items) * 85)  # 0-85%
+
+                        # Berechne geschätzte verbleibende Zeit
+                        if completed_items > 0:
+                            elapsed_time = time_module.time() - export_status['start_time']
+                            avg_time_per_item = elapsed_time / completed_items
+                            remaining_items = total_items - completed_items
+                            estimated_remaining = avg_time_per_item * remaining_items
+                            export_status['estimated_time_remaining'] = int(estimated_remaining)
+
+                        # Aktualisiere Nachricht
+                        export_status['message'] = f"Verarbeite {activity_type}: {current}/{total}"
+
+                    except (IndexError, ValueError) as e:
+                        logger.warning(f"Failed to parse progress line: {line} - {e}")
+                else:
+                    # Normale Nachricht
+                    export_status['message'] = line
+
+                # Spezielle Status-Nachrichten
+                if 'Speichere Daten' in line:
+                    export_status['progress'] = 90
+                    export_status['message'] = 'Speichere Daten...'
+                elif 'EXPORT ABGESCHLOSSEN' in line:
+                    export_status['progress'] = 100
+                    export_status['estimated_time_remaining'] = 0
+
+        # Warte auf Prozessende
+        return_code = process.wait()
+
+        if return_code == 0:
+            export_status['running'] = False
+            export_status['progress'] = 100
+            export_status['message'] = 'Export erfolgreich abgeschlossen'
+            logger.info("Export completed successfully")
+        else:
+            stderr_output = process.stderr.read()
+            export_status['running'] = False
+            export_status['error'] = f"Export fehlgeschlagen: {stderr_output}"
+            logger.error(f"Export failed with return code {return_code}: {stderr_output}")
+
+    except Exception as e:
+        export_status['running'] = False
+        export_status['error'] = str(e)
+        logger.error(f"Error running export: {e}")
+
+@app.route('/api/export/start', methods=['POST'])
+def start_export():
+    """Startet den Datenexport"""
+    logger = api_logger
+
+    try:
+        logger.info("Export start request received")
+
+        if export_status['running']:
+            logger.warning("Export already running")
+            return jsonify({
+                'success': False,
+                'message': 'Export läuft bereits'
+            }), 409
+
+        # Starte Export in separatem Thread
+        logger.info("Starting export thread...")
+        export_thread = threading.Thread(target=run_export_script)
+        export_thread.daemon = True
+        export_thread.start()
+
+        logger.info("Export thread started successfully")
+
+        return jsonify({
+            'success': True,
+            'message': 'Export wurde gestartet'
+        })
+
+    except Exception as e:
+        logger.error(f"Error starting export: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/export/status')
+def get_export_status():
+    """Gibt den aktuellen Export-Status zurück"""
+    return jsonify(export_status)
 
 if __name__ == '__main__':
     flask_config = config_manager.get_flask_config()

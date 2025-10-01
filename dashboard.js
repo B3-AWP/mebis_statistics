@@ -53,6 +53,8 @@ function showTab(tabName) {
 function displayFileInfo(filename) {
     const container = document.getElementById('fileInfoContainer');
     const textElement = document.getElementById('fileInfoText');
+    const ageWarning = document.getElementById('fileAgeWarning');
+    const ageDaysElement = document.getElementById('fileAgeDays');
 
     if (!filename || !container || !textElement) {
         return;
@@ -75,20 +77,166 @@ function displayFileInfo(filename) {
         const minute = timeStr.substring(2, 4);
         const second = timeStr.substring(4, 6);
 
+        // Erstelle Date-Objekt für Alter-Berechnung
+        const fileDate = new Date(year, month - 1, day, hour, minute, second);
+        const now = new Date();
+        const ageInMs = now - fileDate;
+        const ageInDays = Math.floor(ageInMs / (1000 * 60 * 60 * 24));
+
         // Formatiere für Anzeige
         const formattedDateTime = `${day}.${month}.${year} ${hour}:${minute}:${second}`;
         textElement.textContent = formattedDateTime;
 
         // Container anzeigen
         container.style.display = 'flex';
+
+        // Zeige Warnung nur wenn älter als 1 Tag
+        if (ageInDays > 1 && ageWarning && ageDaysElement) {
+            ageDaysElement.textContent = ageInDays;
+            ageWarning.style.display = 'block';
+        } else if (ageWarning) {
+            ageWarning.style.display = 'none';
+        }
     } else {
         // Fallback: zeige rohen Dateinamen
         textElement.textContent = filename.replace(/.*[\\\/]/, ''); // Nur Dateiname ohne Pfad
         container.style.display = 'flex';
+        if (ageWarning) {
+            ageWarning.style.display = 'none';
+        }
     }
 }
 
-// Daten laden
+// Hilfsfunktion: Formatiere Sekunden in lesbare Zeit
+function formatTime(seconds) {
+    if (seconds < 60) {
+        return `${Math.round(seconds)}s`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return `${minutes}min ${secs}s`;
+}
+
+// Schließe Export-Panel
+function closeExportPanel() {
+    document.getElementById('exportProgressPanel').style.display = 'none';
+}
+
+// Export starten und Dashboard neu laden
+async function startExportAndReload() {
+    const refreshBtn = document.getElementById('refreshBtn');
+    const panel = document.getElementById('exportProgressPanel');
+    const progressBar = document.getElementById('exportProgressBar');
+    const progressMessage = document.getElementById('exportProgressMessage');
+    const estimatedTime = document.getElementById('exportEstimatedTime');
+    const assignmentsProgress = document.getElementById('exportAssignmentsProgress');
+    const checklistsProgress = document.getElementById('exportChecklistsProgress');
+    const quizzesProgress = document.getElementById('exportQuizzesProgress');
+
+    try {
+        // Deaktiviere Button
+        refreshBtn.disabled = true;
+        refreshBtn.classList.add('loading');
+
+        // Zeige Progress Panel
+        panel.style.display = 'block';
+        panel.style.border = '2px solid #007bff';
+        progressMessage.textContent = 'Export wird gestartet...';
+        estimatedTime.textContent = 'Schätze Zeit...';
+
+        // Starte Export
+        const response = await fetch('/api/export/start', {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.message || 'Export konnte nicht gestartet werden');
+        }
+
+        // Polling: Überwache Export-Status
+        const checkStatus = async () => {
+            const statusResponse = await fetch('/api/export/status');
+            const status = await statusResponse.json();
+
+            // Update Fortschrittsbalken
+            progressBar.style.width = status.progress + '%';
+            progressBar.textContent = status.progress + '%';
+
+            // Update Message
+            progressMessage.textContent = status.message || 'Export läuft...';
+
+            // Update geschätzte Zeit
+            if (status.estimated_time_remaining !== null && status.estimated_time_remaining > 0) {
+                estimatedTime.textContent = `Noch ca. ${formatTime(status.estimated_time_remaining)}`;
+            } else if (status.progress < 100) {
+                estimatedTime.textContent = 'Schätze Zeit...';
+            }
+
+            // Update Details
+            if (status.details) {
+                const a = status.details.assignments;
+                const c = status.details.checklists;
+                const q = status.details.quizzes;
+
+                assignmentsProgress.textContent = `${a.current}/${a.total}`;
+                checklistsProgress.textContent = `${c.current}/${c.total}`;
+                quizzesProgress.textContent = `${q.current}/${q.total}`;
+            }
+
+            // Fehlerbehandlung
+            if (status.error) {
+                panel.style.border = '2px solid #dc3545';
+                progressBar.style.background = '#dc3545';
+                progressMessage.textContent = 'Fehler: ' + status.error;
+                estimatedTime.textContent = 'Export fehlgeschlagen';
+                refreshBtn.disabled = false;
+                refreshBtn.classList.remove('loading');
+                return;
+            }
+
+            // Weiter prüfen oder abschließen
+            if (status.running) {
+                setTimeout(checkStatus, 2000);
+            } else if (status.progress === 100) {
+                // Export abgeschlossen
+                panel.style.border = '2px solid #28a745';
+                progressBar.style.background = 'linear-gradient(90deg, #28a745, #1e7e34)';
+                progressMessage.textContent = 'Export abgeschlossen! Lade Dashboard neu...';
+                estimatedTime.textContent = 'Abgeschlossen';
+
+                // Lade Dashboard-Daten neu
+                await loadData();
+
+                progressMessage.textContent = 'Dashboard aktualisiert!';
+                refreshBtn.disabled = false;
+                refreshBtn.classList.remove('loading');
+
+                // Auto-Close nach 5 Sekunden
+                setTimeout(() => {
+                    panel.style.display = 'none';
+                    // Reset für nächsten Export
+                    progressBar.style.width = '0%';
+                    progressBar.style.background = 'linear-gradient(90deg, #007bff, #0056b3)';
+                    panel.style.border = '2px solid #007bff';
+                }, 5000);
+            }
+        };
+
+        // Starte Status-Überwachung
+        setTimeout(checkStatus, 1000);
+
+    } catch (error) {
+        console.error('Export-Fehler:', error);
+        panel.style.border = '2px solid #dc3545';
+        progressBar.style.background = '#dc3545';
+        progressMessage.textContent = 'Fehler: ' + error.message;
+        estimatedTime.textContent = 'Fehler beim Starten';
+        refreshBtn.disabled = false;
+        refreshBtn.classList.remove('loading');
+    }
+}
 async function loadData() {
     showLoading(true);
 
