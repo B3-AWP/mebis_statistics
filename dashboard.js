@@ -728,14 +728,14 @@ function updateOverviewStats(groupStats, users) {
             if (groupCount > 0) {
                 const avgPercent = totalPercent / groupCount;
                 const avgGrade = convertPercentToIHKGrade(avgPercent);
-                pflichtGradeDisplay = `${avgGrade.toFixed(0)} (${avgPercent.toFixed(1)}%)`;
+                pflichtGradeDisplay = `${avgGrade.toFixed(1)} (${avgPercent.toFixed(1)}%)`;
             }
         }
     } else {
         // Bei konkreter Gruppe: calculatePflichtaufgabenGradeForGroup verwenden
         const groupGrade = calculatePflichtaufgabenGradeForGroup(currentGroup);
         if (groupGrade && groupGrade.grade !== null) {
-            pflichtGradeDisplay = `${groupGrade.grade.toFixed(0)} (${groupGrade.percent.toFixed(1)}%)`;
+            pflichtGradeDisplay = `${groupGrade.grade.toFixed(1)} (${groupGrade.percent.toFixed(1)}%)`;
         }
     }
 
@@ -3190,20 +3190,29 @@ function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
     let totalPercent = 0;
     let count = 0; // Expliziter Zähler
 
+    console.log(`\n========== Calculating Pflichtaufgaben grade for ${userName} ==========`);
+
     // Finde Pflichtaufgaben-Kategorie(n)
     const pflichtCategories = dashboardData.activities_by_category.filter(category =>
         category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
     );
 
+    console.log(`Found ${pflichtCategories.length} Pflichtaufgaben categories`);
+
     // Durchlaufe alle Pflichtaufgaben-Kategorien
     pflichtCategories.forEach(category => {
+        console.log(`Processing category: ${category.category_name}`);
+
         // Prüfe Assignments
         if (category.assignments) {
+            console.log(`  Checking ${category.assignments.length} assignments`);
             category.assignments.forEach(assignment => {
                 if (assignment.user_status) {
                     const userStatus = assignment.user_status.find(status => status.user_name === userName);
                     if (userStatus && userStatus.grade) {
+                        console.log(`  Assignment "${assignment.name}": grade = "${userStatus.grade}"`);
                         const percent = extractPercentageFromString(userStatus.grade);
+                        console.log(`    -> Extracted percentage: ${percent}`);
                         if (percent !== null) {
                             totalPercent += percent;
                             count++; // Zähle jede gefundene Bewertung
@@ -3215,11 +3224,14 @@ function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
 
         // Prüfe Quizzes
         if (category.quizzes) {
+            console.log(`  Checking ${category.quizzes.length} quizzes`);
             category.quizzes.forEach(quiz => {
                 if (quiz.user_status) {
                     const userStatus = quiz.user_status.find(status => status.user_name === userName);
                     if (userStatus && userStatus.grade) {
+                        console.log(`  Quiz "${quiz.name}": grade = "${userStatus.grade}"`);
                         const percent = extractPercentageFromString(userStatus.grade);
+                        console.log(`    -> Extracted percentage: ${percent}`);
                         if (percent !== null) {
                             totalPercent += percent;
                             count++; // Zähle jede gefundene Bewertung
@@ -3267,8 +3279,8 @@ function extractPercentageFromString(gradeString) {
         for (const entry of mappingEntries) {
             console.log(`DEBUG: Checking if "${content}" includes "${entry.label}"`);
             if (content.includes(entry.label)) {
-                console.log(`DEBUG: ✓ MATCH! Returning score ${entry.score} for "${entry.label}"`);
-                return entry.score; // Gib den Prozentwert zurück (z.B. 70 für "** Verbesserungsbedarf", 100 für "*** Solide Umsetzung")
+                console.log(`DEBUG: ✓ MATCH! Returning score ${entry.score}% for "${entry.label}"`);
+                return entry.score; // Gib den Score direkt als Prozentwert zurück (z.B. 70%, 100%, 130%)
             }
         }
 
@@ -3281,7 +3293,7 @@ function extractPercentageFromString(gradeString) {
             const index = Math.max(0, Math.min(starCount - 1, sortedByStars.length - 1));
             if (starCount <= sortedByStars.length) {
                 const result = sortedByStars[sortedByStars.length - starCount].score;
-                console.log(`DEBUG: Returning ${result} based on ${starCount} stars`);
+                console.log(`DEBUG: Returning ${result}% based on ${starCount} stars`);
                 return result;
             }
         }

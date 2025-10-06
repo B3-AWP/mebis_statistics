@@ -148,39 +148,6 @@ def load_ignored_groups():
         logger.error(f"Error loading ignored groups: {e}")
         return set()
 
-def load_grade_mapping(config_path='config/config.ini'):
-    """
-    Lädt das GradeMapping aus config/config.ini
-
-    Args:
-        config_path: Pfad zur Konfigurationsdatei
-
-    Returns:
-        dict: Dictionary mit Grade-Mapping (numerische Schlüssel zu String-Werten)
-    """
-    logger = data_logger
-
-    try:
-        import configparser
-        config = configparser.ConfigParser()
-        config.read(config_path, encoding='utf-8')
-
-        grade_mapping = {}
-        if config.has_section('GradeMapping'):
-            for key, value in config.items('GradeMapping'):
-                if not key.startswith(';'):  # Ignore comments
-                    try:
-                        grade_mapping[int(key)] = value.strip()
-                    except ValueError:
-                        logger.warning(f"Invalid grade mapping key '{key}', skipping")
-
-        logger.info(f"Grade mapping loaded successfully: {grade_mapping}")
-        return grade_mapping
-
-    except Exception as e:
-        logger.error(f"Error loading grade mapping: {e}")
-        return {}
-
 def get_assignment_details(assignments_by_category):
     """
     Erstellt ein Dictionary mit Assignment-Details
@@ -473,8 +440,8 @@ def get_data():
 
         # Grade Mapping laden
         try:
-            grade_mapping = load_grade_mapping()
-            logger.info(f"Grade mapping loaded: {len(grade_mapping)} entries")
+            grade_mapping = config_manager.get_grade_mapping()
+            logger.info(f"Grade mapping loaded: {len(grade_mapping)} entries - {grade_mapping}")
         except Exception as e:
             logger.error(f"Error loading grade_mapping: {e}")
             grade_mapping = {}
