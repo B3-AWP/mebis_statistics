@@ -1983,15 +1983,53 @@ function generateAllGroupsPflichtTable() {
 
     if (assignments.length === 0) return;
 
-    // Alle Benutzer sammeln
+    // Bestimme welche Gruppen basierend auf der aktuellen Gruppierung angezeigt werden sollen
+    let groupsToShow = [];
+    if (currentGrouping === 'all') {
+        // Alle Gruppen anzeigen
+        groupsToShow = Object.keys(dashboardData.groups);
+    } else {
+        // Nur Gruppen der aktuellen Gruppierung anzeigen
+        const groupings = extractGroupings();
+        groupsToShow = groupings[currentGrouping] || [];
+    }
+
+    // Sammle alle User-IDs aus den gefilterten Gruppen (für Filterung)
+    // Erstelle eine Mapping von Name -> ID aus den Assignments
+    const nameToIdMap = new Map();
+    assignments.forEach(assignment => {
+        if (assignment.user_status) {
+            assignment.user_status.forEach(userStatus => {
+                nameToIdMap.set(userStatus.user_name, userStatus.user_id);
+            });
+        }
+    });
+
+    const allowedUserIds = new Set();
+    groupsToShow.forEach(groupName => {
+        const group = dashboardData.groups[groupName];
+        if (group && group.users) {
+            group.users.forEach(user => {
+                const userId = nameToIdMap.get(user.name);
+                if (userId) {
+                    allowedUserIds.add(userId);
+                }
+            });
+        }
+    });
+
+    // Alle Benutzer sammeln (aus den Assignments wie vorher)
     let allUsersSet = new Set();
     assignments.forEach(assignment => {
         if (assignment.user_status) {
             assignment.user_status.forEach(userStatus => {
-                allUsersSet.add(JSON.stringify({
-                    id: userStatus.user_id,
-                    name: userStatus.user_name
-                }));
+                // Nur Benutzer hinzufügen, die in den gefilterten Gruppen sind
+                if (allowedUserIds.has(userStatus.user_id)) {
+                    allUsersSet.add(JSON.stringify({
+                        id: userStatus.user_id,
+                        name: userStatus.user_name
+                    }));
+                }
             });
         }
     });
@@ -2499,9 +2537,6 @@ function generateZentralTable() {
     }
 
     // Für einzelne Gruppen: Filtere Daten nach Gruppe (gleiche Logik wie generatePflichtTableFromActivities)
-    console.log('DEBUG ZENTRAL: Verfügbare Gruppen:', Object.keys(dashboardData.groups || {}));
-    console.log('DEBUG ZENTRAL: Gewählte Gruppe:', currentGroup);
-
     if (!dashboardData.groups || !dashboardData.groups[currentGroup]) {
         container.innerHTML = `<p>Gruppe "${currentGroup}" nicht gefunden.</p>
                                <p>Verfügbare Gruppen: ${Object.keys(dashboardData.groups || {}).join(', ')}</p>`;
@@ -2538,33 +2573,13 @@ function generateZentralTable() {
         }
     });
 
-    console.log('DEBUG ZENTRAL: Gefundene Kategorien:', categoriesToShow.length);
-    console.log('DEBUG ZENTRAL: Alle Aktivitäten:', allActivities.length);
-
-    // Debug: Suche nach Review-Talk 1
-    const reviewTalkActivities = allActivities.filter(activity =>
-        activity.title && activity.title.includes('Review-Talk 1')
-    );
-    console.log('🔍 DEBUG: Review-Talk 1 activities found:', reviewTalkActivities.length);
-    reviewTalkActivities.forEach(activity => {
-        console.log('🔍 Review-Talk 1 activity:', {
-            title: activity.title,
-            activity_type: activity.activity_type,
-            user_status_count: activity.user_status ? activity.user_status.length : 0,
-            user_status: activity.user_status
-        });
-    });
-
     // Benutzer der ausgewählten Gruppe (gleiche Logik wie Pflichtaufgaben)
     const groupUsers = dashboardData.groups[currentGroup].users || [];
     const groupUserNames = new Set();
     groupUsers.forEach(user => {
         const userName = user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
         groupUserNames.add(userName);
-        console.log('DEBUG ZENTRAL: User object:', user, 'extracted name:', userName);
     });
-
-    console.log('DEBUG ZENTRAL: Gruppe', currentGroup, 'hat', groupUsers.length, 'Benutzer, extrahierte Namen:', Array.from(groupUserNames));
 
     // Aktivitäten filtern um nur Benutzer aus der aktuellen Gruppe zu zeigen
     const filteredActivities = allActivities.map(activity => ({
@@ -2573,8 +2588,6 @@ function generateZentralTable() {
             groupUserNames.has(userStatus.user_name)
         ) : []
     })).filter(activity => activity.user_status.length > 0);
-
-    console.log('DEBUG ZENTRAL: Nach Filterung:', filteredActivities.length, 'Aktivitäten übrig');
 
     if (filteredActivities.length === 0) {
         container.innerHTML = `<p>Keine Zentrale Leistungsnachweise für die ausgewählte Gruppe "${currentGroup}" verfügbar.</p>
@@ -2594,8 +2607,6 @@ function generateZentralTable() {
         }
     });
     const sortedUsers = Array.from(allUsers).sort();
-
-    console.log('DEBUG ZENTRAL: Gefundene Benutzer:', sortedUsers);
 
     let html = '<div style="overflow-x: auto;"><table id="zentralTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
@@ -2768,8 +2779,6 @@ function generateAllGroupsZentralTable() {
     const container = document.getElementById('zentralData');
     if (!container || !dashboardData || !dashboardData.activities_by_category) return;
 
-    console.log('DEBUG ALL GROUPS ZENTRAL: Starting generateAllGroupsZentralTable');
-
     // Zeige nur "Zentrale Leistungsnachweise" Kategorien (Kategorie-Filter entfernt)
     const categoriesToShow = dashboardData.activities_by_category.filter(category =>
         category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
@@ -2800,39 +2809,54 @@ function generateAllGroupsZentralTable() {
         }
     });
 
-    console.log('DEBUG ALL GROUPS ZENTRAL: Gefundene Aktivitäten:', allActivities.length);
-
     if (allActivities.length === 0) {
         container.innerHTML = '<p>Keine Zentrale Leistungsnachweise verfügbar.</p>';
         return;
     }
 
-    // Sammle alle Benutzer aus allen Gruppen
+    // Bestimme welche Gruppen basierend auf der aktuellen Gruppierung angezeigt werden sollen
+    let groupsToShow = [];
+    if (currentGrouping === 'all') {
+        // Alle Gruppen anzeigen (außer ignorierte)
+        groupsToShow = Object.keys(dashboardData.groups).filter(groupName => {
+            return !(dashboardData.ignored_groups && dashboardData.ignored_groups.includes(groupName));
+        });
+    } else {
+        // Nur Gruppen der aktuellen Gruppierung anzeigen
+        const groupings = extractGroupings();
+        groupsToShow = groupings[currentGrouping] || [];
+    }
+
+    // Erstelle eine Mapping von Name -> ID aus den Aktivitäten
+    const nameToIdMap = new Map();
+    allActivities.forEach(activity => {
+        if (activity.user_status) {
+            activity.user_status.forEach(userStatus => {
+                nameToIdMap.set(userStatus.user_name, userStatus.user_id);
+            });
+        }
+    });
+
+    // Sammle nur Benutzer aus den gefilterten Gruppen
     const allUsers = new Map(); // fullUserKey -> { userName, groupName, userId }
     if (dashboardData.groups) {
-        Object.keys(dashboardData.groups).forEach(groupName => {
-            // Überspringe ignorierte Gruppen
-            if (dashboardData.ignored_groups && dashboardData.ignored_groups.includes(groupName)) {
-                console.log(`DEBUG ALL GROUPS ZENTRAL: Skipping ignored group: ${groupName}`);
-                return;
-            }
-
-            const groupUsers = dashboardData.groups[groupName].users || [];
+        groupsToShow.forEach(groupName => {
+            const groupUsers = dashboardData.groups[groupName]?.users || [];
             groupUsers.forEach(user => {
                 const userName = user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
-                const userId = user.user_id;
+                const userId = nameToIdMap.get(userName); // Verwende die gemappte ID
                 const fullUserKey = `${userName} (${groupName})`;
 
-                allUsers.set(fullUserKey, {
-                    userName: userName,
-                    groupName: groupName,
-                    userId: userId
-                });
+                if (userId) { // Nur hinzufügen wenn wir eine ID haben
+                    allUsers.set(fullUserKey, {
+                        userName: userName,
+                        groupName: groupName,
+                        userId: userId
+                    });
+                }
             });
         });
     }
-
-    console.log('DEBUG ALL GROUPS ZENTRAL: Gefundene Benutzer:', allUsers.size);
 
     // Sortiere Aktivitäten alphabetisch
     const sortedActivities = allActivities.sort((a, b) => a.title.localeCompare(b.title));
@@ -3160,7 +3184,6 @@ function calculatePflichtaufgabenGradeForGroup(groupName) {
 // Berechne Pflichtaufgaben-Durchschnittsnote für einen Benutzer basierend auf activities_by_category
 function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
     if (!dashboardData || !dashboardData.activities_by_category) {
-        console.log('DEBUG calculatePflichtaufgabenGradeForUserByName: No dashboard data or activities_by_category');
         return null;
     }
 
@@ -3172,8 +3195,6 @@ function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
         category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))
     );
 
-    console.log(`DEBUG calculatePflichtaufgabenGradeForUserByName: Found ${pflichtCategories.length} Pflicht categories for user ${userName}`);
-
     // Durchlaufe alle Pflichtaufgaben-Kategorien
     pflichtCategories.forEach(category => {
         // Prüfe Assignments
@@ -3182,14 +3203,10 @@ function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
                 if (assignment.user_status) {
                     const userStatus = assignment.user_status.find(status => status.user_name === userName);
                     if (userStatus && userStatus.grade) {
-                        console.log(`DEBUG: Processing assignment "${assignment.title}" for ${userName}, grade value: "${userStatus.grade}"`);
                         const percent = extractPercentageFromString(userStatus.grade);
                         if (percent !== null) {
-                            console.log(`DEBUG: ✓ Found ${percent}% for ${userName} in assignment ${assignment.title}`);
                             totalPercent += percent;
                             count++; // Zähle jede gefundene Bewertung
-                        } else {
-                            console.log(`DEBUG: ✗ Could not extract percentage from "${userStatus.grade}" for ${userName} in assignment ${assignment.title}`);
                         }
                     }
                 }
@@ -3202,22 +3219,16 @@ function calculatePflichtaufgabenGradeForUserByName(userName, groupName) {
                 if (quiz.user_status) {
                     const userStatus = quiz.user_status.find(status => status.user_name === userName);
                     if (userStatus && userStatus.grade) {
-                        console.log(`DEBUG: Processing quiz "${quiz.title}" for ${userName}, grade value: "${userStatus.grade}"`);
                         const percent = extractPercentageFromString(userStatus.grade);
                         if (percent !== null) {
-                            console.log(`DEBUG: ✓ Found ${percent}% for ${userName} in quiz ${quiz.title}`);
                             totalPercent += percent;
                             count++; // Zähle jede gefundene Bewertung
-                        } else {
-                            console.log(`DEBUG: ✗ Could not extract percentage from "${userStatus.grade}" for ${userName} in quiz ${quiz.title}`);
                         }
                     }
                 }
             });
         }
     });
-
-    console.log(`DEBUG calculatePflichtaufgabenGradeForUserByName: User ${userName} has ${count} graded items`);
 
     if (count === 0) return null;
 
@@ -3449,17 +3460,8 @@ function extractGradeFromCell(cell) {
     const content = cell.textContent.trim();
     const innerHTML = cell.innerHTML.trim();
 
-    // Debug für Bastian Brenner
-    const isDebugCell = content && !content.includes('Nicht eingereicht') && !content.includes('bewertbar');
-    if (isDebugCell) {
-        console.log('DEBUG extractGradeFromCell:');
-        console.log('  textContent:', content);
-        console.log('  innerHTML:', innerHTML);
-    }
-
     // Prüfe auf Sterne-Bewertungen basierend auf GradeMapping aus config.ini
     if (content.includes('*')) {
-        if (isDebugCell) console.log('  -> Found star rating');
         return convertStarRatingToGrade(content);
     }
 
@@ -3467,13 +3469,11 @@ function extractGradeFromCell(cell) {
     const strongMatch = innerHTML.match(/<strong>([^<]+)<\/strong>/);
     if (strongMatch) {
         const gradeText = strongMatch[1].trim();
-        if (isDebugCell) console.log('  -> Found strong tag:', gradeText);
 
         // Prüfe auf Prozentwerte
         const percentMatch = gradeText.match(/(\d+(?:\.\d+)?)%/);
         if (percentMatch) {
             const percent = parseFloat(percentMatch[1]);
-            if (isDebugCell) console.log('  -> Extracted percentage from strong:', percent);
             return convertPercentToIHKGrade(percent);
         }
 
@@ -3484,13 +3484,11 @@ function extractGradeFromCell(cell) {
 
             // Noten zwischen 1.0 und 6.0
             if (value >= 1.0 && value <= 6.0) {
-                if (isDebugCell) console.log('  -> Extracted direct grade from strong:', value);
                 return value;
             }
 
             // Zahlen > 6 als Prozentwerte interpretieren (Quiz-Ergebnisse ohne % Zeichen)
             if (value > 6 && value <= 100) {
-                if (isDebugCell) console.log('  -> Treating number as percentage from strong:', value);
                 return convertPercentToIHKGrade(value);
             }
         }
@@ -3502,7 +3500,6 @@ function extractGradeFromCell(cell) {
             const total = parseFloat(pointsMatch[2]);
             if (total > 0) {
                 const percent = (achieved / total) * 100;
-                if (isDebugCell) console.log('  -> Calculated percentage from points in strong:', percent);
                 return convertPercentToIHKGrade(percent);
             }
         }
@@ -3512,7 +3509,6 @@ function extractGradeFromCell(cell) {
     const percentMatch = content.match(/(\d+(?:\.\d+)?)%/);
     if (percentMatch) {
         const percent = parseFloat(percentMatch[1]);
-        if (isDebugCell) console.log('  -> Found percentage:', percent);
         return convertPercentToIHKGrade(percent);
     }
 
@@ -3520,7 +3516,6 @@ function extractGradeFromCell(cell) {
     const quizMatch = content.match(/\d+\/\d+\s*\((\d+(?:\.\d+)?)%\)/);
     if (quizMatch) {
         const percent = parseFloat(quizMatch[1]);
-        if (isDebugCell) console.log('  -> Found quiz with percentage:', percent);
         return convertPercentToIHKGrade(percent);
     }
 
@@ -3531,7 +3526,6 @@ function extractGradeFromCell(cell) {
         const total = parseFloat(pointsMatch[2]);
         if (total > 0) {
             const percent = (achieved / total) * 100;
-            if (isDebugCell) console.log('  -> Calculated percentage from points:', percent);
             return convertPercentToIHKGrade(percent);
         }
     }
@@ -3541,12 +3535,9 @@ function extractGradeFromCell(cell) {
     if (gradeMatch) {
         const grade = parseFloat(gradeMatch[1].replace(',', '.'));
         if (grade >= 1.0 && grade <= 6.0) {
-            if (isDebugCell) console.log('  -> Found direct grade:', grade);
             return grade;
         }
     }
-
-    if (isDebugCell) console.log('  -> No grade found, returning null');
 
     // Für alle anderen Fälle (nicht eingereicht, zur Bewertung abgegeben, etc.)
     // wird KEINE Note zurückgegeben - diese Aufgaben fließen nicht in die Berechnung ein
