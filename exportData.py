@@ -415,6 +415,15 @@ def get_assignment_status(driver, assignment_url, waittime):
             except:
                 submission_time = None
 
+        # Korrigiere Status basierend auf der Bewertung
+        # Wenn eine gültige Bewertung vorhanden ist, sollte der Status nicht "Nicht eingereicht" sein
+        if grade and grade not in ["Keine Bewertung", "-", ""]:
+            # Es gibt eine Bewertung
+            if status == "Nicht eingereicht":
+                status = "Zur Bewertung abgegeben"
+            if status2 == "Nicht bewertet":
+                status2 = "Bewertet"
+
         user_statuses.append({
             "user_id": user_id,
             "status": status,
@@ -427,120 +436,146 @@ def get_assignment_status(driver, assignment_url, waittime):
 
     return user_statuses
 
-def get_quiz_status(driver, quiz_url, waittime):
-    """Extrahiert Quiz-Status und Noten aus der Quiz-Report-Seite"""
-    # Navigiere zur Quiz-Report-Seite mit den gewünschten Parametern
-    # mode=overview: Übersichts-Modus
-    # attempts=enrolled_with: alle eingeschriebenen Benutzer
-    # onlygraded=1: nur bewertete Versuche
-    # group=0: alle Gruppen
-    # onlyregraded=0: alle Bewertungen
-    # slotmarks=1: zeige Slot-Markierungen
-    quiz_id = re.search(r'id=(\d+)', quiz_url).group(1)
-    report_url = f"https://lernplattform.mebis.bycs.de/mod/quiz/report.php?id={quiz_id}&mode=overview&attempts=enrolled_with&onlygraded=1&group=0&onlyregraded=0&slotmarks=1"
-    driver.get(report_url)
+def get_grader_report_data(driver, course_id, group_id, waittime):
+    """
+    Extrahiert alle Bewertungsdaten aus der Grader-Report-Seite
+    Diese Seite zeigt alle Aktivitäten (Quizzes, Assignments, etc.) in einer Tabelle
+    mit Personen in Zeilen und Aktivitäten in Spalten
+    """
+    grader_url = f"https://lernplattform.mebis.bycs.de/grade/report/grader/index.php?id={course_id}&groupsearchvalue=&group={group_id}"
+    driver.get(grader_url)
 
     try:
-        # Warte auf das Laden der Tabelle
+        # Warte auf das Laden der Haupttabelle
         table_element = WebDriverWait(driver, waittime).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "table.generaltable"))
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table.gradereport-grader-table#user-grades"))
         )
     except TimeoutException:
-        print(f"Keine Quiz-Tabelle für Quiz {quiz_id} gefunden")
-        return []
+        print(f"Grader-Report-Tabelle für Kurs {course_id}, Gruppe {group_id} nicht gefunden")
+        return {}
 
-    # Finde die Header, um die korrekten Spalten zu identifizieren
-    headers = driver.find_elements(By.CSS_SELECTOR, "th.header")
-    time_finish_column_class = None
-    grade_column_class = None
+    # Extrahiere die Header-Struktur (Aktivitäten) und erstelle Spalten-Mapping
+    quizzes = {}
+    column_to_quiz = {}
 
-    for header in headers:
-        header_text = header.text.strip()
-        # Suche nach "Beendet"-Spalte (für das Datum)
-        if "Beendet" in header_text:
-            classes = header.get_attribute("class").split()
-            for cls in classes:
-                if cls.startswith("c") and cls[1:].isdigit():
-                    time_finish_column_class = cls
-                    break
-        # Suche nach "Bewertung"-Spalte (für die Note)
-        elif "Bewertung" in header_text and "/" in header_text:
-            classes = header.get_attribute("class").split()
-            for cls in classes:
-                if cls.startswith("c") and cls[1:].isdigit():
-                    grade_column_class = cls
-                    break
+    try:
+        # Finde alle Header-Links zu Aktivitäten
+        header_links = driver.find_elements(By.CSS_SELECTOR, "table.gradereport-grader-table th a.gradeitemheader")
 
-    if not grade_column_class:
-        print(f"Bewertungsspalte für Quiz {quiz_id} nicht gefunden")
-        return []
+        for link in header_links:
+            href = link.get_attribute("href")
+            title = link.get_attribute("title") or link.text
 
-    # Finde alle Zeilen der Tabelle
-    tbody = table_element.find_element(By.CSS_SELECTOR, "tbody")
-    rows = tbody.find_elements(By.CSS_SELECTOR, "tr")
+            # Extrahiere Aktivitäts-ID und Typ aus der URL
+            if "mod/quiz/view.php?id=" in href:
+                activity_id = re.search(r'id=(\d+)', href).group(1)
 
-    user_statuses = []
+                # Finde das übergeordnete th-Element
+                header = link.find_element(By.XPATH, "./ancestor::th")
 
-    for row in rows:
-        try:
-            # Extrahiere User-ID aus dem Link zur Benutzerseite
+                # Extrahiere die Spalten-Klasse (z.B. "c15")
+                header_class = header.get_attribute("class")
+                col_class_match = re.search(r'\bc(\d+)\b', header_class)
+
+                if col_class_match and activity_id not in quizzes:
+                    col_class = f"c{col_class_match.group(1)}"
+
+                    quizzes[activity_id] = {
+                        "type": "quiz",
+                        "title": title,
+                        "url": href,
+                        "column_class": col_class,
+                        "grades": {}
+                    }
+                    column_to_quiz[col_class] = activity_id
+
+            elif "mod/assign/view.php?id=" in href:
+                activity_id = re.search(r'id=(\d+)', href).group(1)
+
+                # Finde das übergeordnete th-Element
+                header = link.find_element(By.XPATH, "./ancestor::th")
+
+                # Extrahiere die Spalten-Klasse (z.B. "c15")
+                header_class = header.get_attribute("class")
+                col_class_match = re.search(r'\bc(\d+)\b', header_class)
+
+                if col_class_match and activity_id not in quizzes:
+                    col_class = f"c{col_class_match.group(1)}"
+
+                    quizzes[activity_id] = {
+                        "type": "assignment",
+                        "title": title,
+                        "url": href,
+                        "column_class": col_class,
+                        "grades": {}
+                    }
+                    column_to_quiz[col_class] = activity_id
+
+    except Exception as e:
+        print(f"Fehler beim Extrahieren der Activity-Header: {e}")
+
+    # Extrahiere die Benutzerdaten (Zeilen)
+    try:
+        tbody = table_element.find_element(By.CSS_SELECTOR, "tbody")
+        rows = tbody.find_elements(By.CSS_SELECTOR, "tr")
+
+        for row in rows:
             try:
-                user_link = row.find_element(By.CSS_SELECTOR, "td a[href*='user/view.php?id=']")
+                # Extrahiere User-ID aus dem Link
+                user_link = row.find_element(By.CSS_SELECTOR, "th a[href*='user/view.php?id=']")
                 user_href = user_link.get_attribute("href")
                 user_id_match = re.search(r'id=(\d+)', user_href)
                 if not user_id_match:
                     continue
                 user_id = user_id_match.group(1)
+
+                # Finde alle Bewertungs-Zellen in dieser Zeile
+                grade_cells = row.find_elements(By.CSS_SELECTOR, "td")
+
+                # Durchlaufe alle Zellen und versuche, Bewertungen zu extrahieren
+                for cell in grade_cells:
+                    try:
+                        # Extrahiere die Spalten-Klasse aus der Zelle
+                        cell_class = cell.get_attribute("class")
+                        col_class_match = re.search(r'\bc(\d+)\b', cell_class)
+
+                        if not col_class_match:
+                            continue
+
+                        col_class = f"c{col_class_match.group(1)}"
+
+                        # Prüfe ob diese Spalte ein Quiz/Assignment ist
+                        if col_class in column_to_quiz:
+                            activity_id = column_to_quiz[col_class]
+
+                            # Extrahiere die Bewertung aus der Zelle
+                            grade_text = cell.text.strip()
+
+                            # Entferne "Zellaktionen" und andere Menü-Texte
+                            grade_text = grade_text.split('\n')[0].strip()
+
+                            # Speichere die Bewertung für diese Aktivität und diesen Benutzer
+                            quizzes[activity_id]["grades"][user_id] = grade_text
+                    except:
+                        continue
+
             except:
-                # Keine User-ID gefunden - überspringe diese Zeile (z.B. Zusammenfassungszeile)
+                # Keine User-Zeile, überspringe
                 continue
 
-            # Extrahiere die Bewertung
-            grade = "-"
-            try:
-                grade_cell = row.find_element(By.CSS_SELECTOR, f"td.{grade_column_class}")
-                grade = grade_cell.text.strip()
-                if not grade or grade == "-":
-                    grade = "Nicht bewertet"
-            except:
-                grade = "Nicht bewertet"
+    except Exception as e:
+        print(f"Fehler beim Extrahieren der Benutzerdaten: {e}")
 
-            # Extrahiere das Abschluss-Datum
-            submission_time = None
-            if time_finish_column_class:
-                try:
-                    time_cell = row.find_element(By.CSS_SELECTOR, f"td.{time_finish_column_class}")
-                    time_text = time_cell.text.strip()
-                    if time_text and time_text != "-":
-                        # Konvertiere deutsche Zeitangabe in ISO-Format
-                        submission_time = parse_german_datetime(time_text)
-                except:
-                    submission_time = None
+    return quizzes
 
-            # Bestimme den Status basierend auf der Bewertung
-            if grade == "Nicht bewertet" or grade == "-":
-                status = "Nicht eingereicht"
-                status2 = "Nicht bewertet"
-            else:
-                status = "Zur Bewertung abgegeben"
-                status2 = "Bewertet"
 
-            user_statuses.append({
-                "user_id": user_id,
-                "status": status,
-                "status2": status2,
-                "submission": "Quiz abgeschlossen",
-                "submission_time": submission_time,
-                "grade_options": [],
-                "grade": grade
-            })
-
-        except Exception as e:
-            print(f"Fehler beim Verarbeiten einer Quiz-Zeile für Quiz {quiz_id}: {e}")
-            continue
-
-    print(f"Quiz {quiz_id}: {len(user_statuses)} Benutzer-Status gefunden")
-    return user_statuses
+def get_quiz_status(driver, quiz_url, waittime):
+    """
+    VERALTET: Diese Funktion wird nicht mehr verwendet.
+    Verwende stattdessen get_grader_report_data()
+    """
+    print("[WARNUNG] get_quiz_status ist veraltet. Verwende get_grader_report_data()")
+    return []
 
 def get_sesskey(driver, waittime=10, max_retries=3):
     """
@@ -970,26 +1005,8 @@ def main():
                 checklist_progress[checklist_id] = progress
 
 
-    print("Analysiere Quiz Status (parallel)")
-    print(f"PROGRESS|quizzes|0|{len(activities['quizzes'])}")
+    print("Quiz-Daten werden nun aus Grader-Report extrahiert (siehe unten bei Gruppen-Verarbeitung)")
     sys.stdout.flush()
-    quizzes_status = {}
-
-    # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Quizzes
-    max_workers = min(2, len(activities["quizzes"]))
-
-    if activities["quizzes"]:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Erstelle Future-Tasks für alle Quizzes
-            future_to_quiz = {
-                executor.submit(process_quiz_parallel, quiz, isheadless, waittime, username, password, base_url, course_id, idx, len(activities["quizzes"])): quiz
-                for idx, quiz in enumerate(activities["quizzes"])
-            }
-
-            # Sammle die Ergebnisse
-            for future in as_completed(future_to_quiz):
-                quiz_id, status = future.result()
-                quizzes_status[quiz_id] = status
 
     # Zentralisierte Speicherung der Aktivitäten
     data = {
@@ -1009,7 +1026,14 @@ def main():
         }
         data["groups"].append(group_data)
 
+    # Extrahiere Grader-Report-Daten (einmalig für alle Gruppen mit group=0)
+    print("\nExtrahiere Bewertungsdaten aus Grader-Report (alle Gruppen)...")
+    sys.stdout.flush()
+    grader_data = get_grader_report_data(driver, course_id, "0", waittime)
+    print(f"  Gefunden: {len(grader_data)} Aktivitäten mit Bewertungen")
+
     for group in data["groups"]:
+
         for user in group["users"]:
             user["activities"] = {
                 "assignments": [],
@@ -1017,7 +1041,7 @@ def main():
                 "feedbacks": [],
                 "quizzes": []
             }
-            
+
             # Verwende die zuvor erfassten Assignment-Status
             for assignment in activities["assignments"]:
                 user_assignment_status = next((status for status in assignments_status[assignment["id"]] if status["user_id"] == user["id"]), None)
@@ -1047,13 +1071,32 @@ def main():
                         # "category_name": checklist.get("category_name")
                     })
 
-            # Verwende die zuvor erfassten Quiz-Status
+            # Verwende die Grader-Report-Daten für Quiz-Status
             for quiz in activities["quizzes"]:
-                user_quiz_status = next((status for status in quizzes_status[quiz["id"]] if status["user_id"] == user["id"]), None)
-                if user_quiz_status:
+                quiz_id = quiz["id"]
+                # Suche Quiz-Daten im Grader-Report
+                if quiz_id in grader_data and user["id"] in grader_data[quiz_id]["grades"]:
+                    grade = grader_data[quiz_id]["grades"][user["id"]]
+
+                    # Bestimme Status basierend auf der Bewertung
+                    if grade == "-" or grade == "" or "Nicht bewertet" in grade:
+                        status = "Nicht eingereicht"
+                        status2 = "Nicht bewertet"
+                    else:
+                        status = "Zur Bewertung abgegeben"
+                        status2 = "Bewertet"
+
                     user["activities"]["quizzes"].append({
-                        "id": quiz["id"],
-                        "status": user_quiz_status,
+                        "id": quiz_id,
+                        "status": {
+                            "user_id": user["id"],
+                            "status": status,
+                            "status2": status2,
+                            "submission": "Quiz abgeschlossen" if status2 == "Bewertet" else "Nicht abgeschlossen",
+                            "submission_time": None,
+                            "grade_options": [],
+                            "grade": grade
+                        },
                         "category_id": quiz.get("category_id"),
                         "category_name": quiz.get("category_name")
                     })

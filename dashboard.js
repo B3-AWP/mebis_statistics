@@ -2648,12 +2648,8 @@ function generateZentralTable() {
                 cellContent = '❓ Nicht gefunden';
                 cellClass = 'status-missing';
                 bgColor = '#f8f9fa'; // Grau
-            } else if (status.status === 'Nicht eingereicht' || !status.status) {
-                // Nicht eingereicht - zeige "-"
-                cellContent = '❌ -';
-                cellClass = 'status-missing';
-                bgColor = '#f8d7da'; // Rot
             } else if (status.grade && status.grade !== '-') {
+                // WICHTIG: Grade muss VOR Status geprüft werden (z.B. bei Gruppeneinreichungen)
                 // Grade vorhanden - zeige Grade-Wert
                 console.log(`DEBUG ZENTRAL: Grade found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.grade}`);
                 if (activity.title && activity.title.includes('Review-Talk 1')) {
@@ -2662,6 +2658,11 @@ function generateZentralTable() {
                 cellContent = `✓ ${status.grade}`;
                 cellClass = 'status-graded';
                 bgColor = '#d4edda'; // Grün
+            } else if (status.status === 'Nicht eingereicht' || !status.status) {
+                // Nicht eingereicht - zeige "-"
+                cellContent = '❌ -';
+                cellClass = 'status-missing';
+                bgColor = '#f8d7da'; // Rot
             } else if (status.rating && status.rating !== '-') {
                 // Alternative: Rating field for assignments
                 console.log(`DEBUG ZENTRAL: Rating found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.rating}`);
