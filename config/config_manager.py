@@ -187,6 +187,15 @@ class ConfigManager:
             130: "**** Exzellent"
         }
 
+    def get_max_schoolweeks(self) -> int:
+        """
+        Holt maximale Anzahl der Schulwochen aus Environment Variable.
+
+        Returns:
+            Maximale Anzahl der Schulwochen (Standard: 9)
+        """
+        return self._get_int('MAX_SCHOOLWEEKS', 9)
+
     def _get_int(self, env_var: str, default: int) -> int:
         """Holt Integer-Wert aus Environment Variable"""
         value = os.getenv(env_var)

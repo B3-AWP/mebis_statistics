@@ -2,8 +2,8 @@
 let dashboardData = null;
 let currentGroup = 'all';
 let currentGrouping = 'all'; // New: current grouping selection
-let currentWeek = 10;
-let totalWeeks = 40;
+let currentWeek = 9; // Aktuelle ausgewählte Woche (wird durch Slider aktualisiert)
+let maxSchoolweeks = 9; // Maximale Schulwochen (aus Backend geladen, ersetzt totalWeeks)
 let checklistViewType = 'pflicht'; // New: track checklist column view setting
 let sortState = {}; // Track sorting state for different tables
 let gradeMapping = {}; // GradeMapping from config.ini
@@ -259,6 +259,25 @@ async function loadData() {
             dashboardLogger.error('DATA', 'No grade_mapping found in backend response', {
                 availableKeys: Object.keys(dashboardData)
             });
+        }
+
+        // Load max_schoolweeks from backend
+        if (dashboardData.max_schoolweeks) {
+            maxSchoolweeks = dashboardData.max_schoolweeks;
+            dashboardLogger.info('DATA', `Max schoolweeks loaded: ${maxSchoolweeks}`);
+        } else {
+            dashboardLogger.warn('DATA', `No max_schoolweeks found, using default: ${maxSchoolweeks}`);
+        }
+
+        // Update Slider max value and labels
+        const slider = document.getElementById('referenceWeekSlider');
+        if (slider) {
+            slider.max = maxSchoolweeks;
+            slider.value = maxSchoolweeks; // Setze auf Maximum
+            const maxLabel = document.querySelector('.slider-value.max');
+            if (maxLabel) {
+                maxLabel.textContent = maxSchoolweeks;
+            }
         }
 
         // Debug: JSON-Struktur analysieren
@@ -579,14 +598,13 @@ function calculateGroupStats(users) {
     const avgAllProgress = sumAllProgress / totalUsers;
 
     // Calculate timed values correctly at group level, not by averaging individual user timed values
-    // The timed calculation should be: (group_average / current_week) * total_weeks
-    const currentWeek = parseInt(document.getElementById('weekSlider')?.value || 10);
-    const totalWeeks = 10; // This should match the max value of the week slider
+    // The timed calculation should be: (group_average / current_week) * max_schoolweeks
+    const currentWeek = parseInt(document.getElementById('weekSlider')?.value || maxSchoolweeks);
 
     const avgRequiredProgressTimed = currentWeek > 0 ?
-        Math.round(((avgRequiredProgress / currentWeek) * totalWeeks) * 100) / 100 : 0;
+        Math.round(((avgRequiredProgress / currentWeek) * maxSchoolweeks) * 100) / 100 : 0;
     const avgAllProgressTimed = currentWeek > 0 ?
-        Math.round(((avgAllProgress / currentWeek) * totalWeeks) * 100) / 100 : 0;
+        Math.round(((avgAllProgress / currentWeek) * maxSchoolweeks) * 100) / 100 : 0;
 
 
     return {
@@ -609,30 +627,65 @@ function calculateGroupStats(users) {
 
 // Gesamtanzahl Checklisten und Pflichtaufgaben aus den Daten ermitteln
 function getTotalCounts() {
-    if (!dashboardData || !dashboardData.structured_tables) {
-        return { totalChecklists: 38, totalPflichtaufgaben: 22 }; // Fallback-Werte
+    // Verwende activities_by_category für die Gesamtzahl (globale Anzahl, nicht gruppenspezifisch)
+    if (dashboardData && dashboardData.activities_by_category) {
+        let totalMandatoryChecklists = 0;
+        let totalPflichtaufgaben = 0;
+
+        dashboardData.activities_by_category.forEach(category => {
+            // Zähle nur Pflicht-Checklisten
+            if (category.checklists) {
+                const mandatoryChecklists = category.checklists.filter(cl =>
+                    cl.is_mandatory !== undefined ? cl.is_mandatory : true
+                );
+                totalMandatoryChecklists += mandatoryChecklists.length;
+            }
+
+            // Zähle Pflichtaufgaben (nur aus Pflichtaufgaben-Kategorie)
+            if (category.category_name && (category.category_name.includes('Pflichtaufgaben') || category.category_name.includes('🎯'))) {
+                if (category.assignments) {
+                    totalPflichtaufgaben += category.assignments.length;
+                }
+                if (category.quizzes) {
+                    totalPflichtaufgaben += category.quizzes.length;
+                }
+            }
+        });
+
+        return {
+            totalChecklists: totalMandatoryChecklists || 23,
+            totalPflichtaufgaben: totalPflichtaufgaben || 22
+        };
     }
 
-    let maxChecklists = 0;
-    let maxPflichtaufgaben = 0;
+    // Fallback: Verwende structured_tables
+    if (dashboardData && dashboardData.structured_tables) {
+        let maxChecklists = 0;
+        let maxPflichtaufgaben = 0;
 
-    // Durch alle Gruppen iterieren und die maximale Anzahl finden
-    Object.keys(dashboardData.structured_tables).forEach(groupName => {
-        const groupData = dashboardData.structured_tables[groupName];
+        Object.keys(dashboardData.structured_tables).forEach(groupName => {
+            const groupData = dashboardData.structured_tables[groupName];
 
-        if (groupData.checklists && groupData.checklists.rows) {
-            maxChecklists = Math.max(maxChecklists, groupData.checklists.rows.length);
-        }
+            if (groupData.checklists && groupData.checklists.rows) {
+                const mandatoryChecklists = groupData.checklists.rows.filter(row =>
+                    row.is_mandatory !== undefined ? row.is_mandatory : true
+                );
+                maxChecklists = Math.max(maxChecklists, mandatoryChecklists.length);
+            }
 
-        if (groupData.pflichtaufgaben && groupData.pflichtaufgaben.rows) {
-            maxPflichtaufgaben = Math.max(maxPflichtaufgaben, groupData.pflichtaufgaben.rows.length);
-        }
-    });
+            if (groupData.pflichtaufgaben && groupData.pflichtaufgaben.rows) {
+                maxPflichtaufgaben = Math.max(maxPflichtaufgaben, groupData.pflichtaufgaben.rows.length);
+            }
+        });
 
-    return {
-        totalChecklists: maxChecklists || 38, // Fallback wenn keine Daten gefunden
-        totalPflichtaufgaben: maxPflichtaufgaben || 22 // Fallback wenn keine Daten gefunden
-    };
+        return {
+            totalChecklists: maxChecklists || 23,
+            totalPflichtaufgaben: maxPflichtaufgaben || 22
+        };
+    }
+
+    // Letzter Fallback
+    return { totalChecklists: 23, totalPflichtaufgaben: 22 };
 }
 
 // Übersichts-Statistiken aktualisieren
@@ -649,10 +702,10 @@ function updateOverviewStats(groupStats, users) {
         users.reduce((sum, user) => sum + user.assignments.submitted_count, 0) / users.length : 0;
 
     // Erwartete Anzahl für die ausgewählte Referenzwoche
-    // Bei Woche 10 (Maximum) sollten alle Checklisten/Aufgaben erwartet werden
-    const selectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 10);
-    const expectedChecklistsForWeek = Math.ceil((totalChecklists / 10) * selectedWeek);
-    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / 10) * selectedWeek);
+    // Bei der maximalen Woche sollten alle Checklisten/Aufgaben erwartet werden
+    const selectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || maxSchoolweeks);
+    const expectedChecklistsForWeek = Math.ceil((totalChecklists / maxSchoolweeks) * selectedWeek);
+    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / maxSchoolweeks) * selectedWeek);
 
     // Prozentsätze basierend auf durchschnittlich erledigte vs. erwartete für die Woche
     const percentChecklists = expectedChecklistsForWeek > 0 ?
@@ -792,8 +845,8 @@ function calculateStatsForGroup(groupName, groupData) {
 
     // Erwartete Werte für aktuelle Referenzwoche
     const { totalChecklists, totalPflichtaufgaben } = getTotalCounts();
-    const expectedChecklistsForWeek = Math.ceil((totalChecklists / 10) * selectedWeek);
-    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / 10) * selectedWeek);
+    const expectedChecklistsForWeek = Math.ceil((totalChecklists / maxSchoolweeks) * selectedWeek);
+    const expectedPflichtaufgabenForWeek = Math.ceil((totalPflichtaufgaben / maxSchoolweeks) * selectedWeek);
 
     // Prozentsätze
     const checklistPercentage = expectedChecklistsForWeek > 0 ?
@@ -920,35 +973,50 @@ function calculateActualProgressForWeek(user, selectedWeek, maxWeeks, groupName 
             const userIndex = tableData.headers.findIndex(header => header === user.name);
 
             if (userIndex > 0) { // Index 0 ist normalerweise die Checklist-Spalte
-                const totalChecklists = tableData.rows.length;
-                const expectedChecklistsForWeek = Math.ceil((totalChecklists / 10) * selectedWeek);
+                // Zähle Pflicht-Checklisten (is_mandatory: true) für Pflicht-Spalte
+                const mandatoryChecklists = tableData.rows.filter(row =>
+                    row.is_mandatory !== undefined ? row.is_mandatory : true
+                );
+                const totalMandatoryChecklists = mandatoryChecklists.length;
 
-                // Summiere alle Pflicht- und Gesamt-Prozente von ALLEN Checklisten
+                // Für Gesamt: ALLE Checklisten zählen (Pflicht + Optional)
+                const totalAllChecklists = tableData.rows.length;
+
+                // Summiere Pflicht-Prozente von NUR PFLICHT-Checklisten
                 let totalPflichtPercent = 0;
-                let totalGesamtPercent = 0;
-
-                // Durchlaufe ALLE Checklisten und summiere die Prozente
-                tableData.rows.forEach(row => {
+                mandatoryChecklists.forEach(row => {
                     if (row.user_progress && row.user_progress[userIndex - 1]) {
                         const progress = row.user_progress[userIndex - 1];
                         const requiredProgressText = progress.required_progress || '0%';
-                        const allProgressText = progress.all_progress || '0%';
-
                         const pflichtPercent = parseFloat(requiredProgressText.replace('%', ''));
-                        const gesamtPercent = parseFloat(allProgressText.replace('%', ''));
 
                         if (!isNaN(pflichtPercent)) {
                             totalPflichtPercent += pflichtPercent;
                         }
+                    }
+                });
+
+                // Summiere Gesamt-Prozente von ALLEN Checklisten (Pflicht + Optional)
+                let totalGesamtPercent = 0;
+                tableData.rows.forEach(row => {
+                    if (row.user_progress && row.user_progress[userIndex - 1]) {
+                        const progress = row.user_progress[userIndex - 1];
+                        const allProgressText = progress.all_progress || '0%';
+                        const gesamtPercent = parseFloat(allProgressText.replace('%', ''));
+
                         if (!isNaN(gesamtPercent)) {
                             totalGesamtPercent += gesamtPercent;
                         }
                     }
                 });
 
-                // Berechne erwartete Gesamtpunkte für diese Woche (Anzahl Checklisten × 100%)
-                const expectedTotalPflichtPoints = expectedChecklistsForWeek * 100;
-                const expectedTotalGesamtPoints = expectedChecklistsForWeek * 100;
+                // Berechne erwartete Punkte direkt proportional zur Woche
+                // Pflicht: Nur Pflicht-Checklisten (z.B. 23 → 2300 Punkte bei Woche 9)
+                // Gesamt: ALLE Checklisten (z.B. 38 → 3800 Punkte bei Woche 9)
+                const maxPflichtPoints = totalMandatoryChecklists * 100; // 23 * 100 = 2300
+                const maxGesamtPoints = totalAllChecklists * 100; // 38 * 100 = 3800
+                const expectedTotalPflichtPoints = (maxPflichtPoints / maxSchoolweeks) * selectedWeek;
+                const expectedTotalGesamtPoints = (maxGesamtPoints / maxSchoolweeks) * selectedWeek;
 
                 // Berechne Prozentsatz: Tatsächliche Punkte / Erwartete Punkte × 100
                 if (expectedTotalPflichtPoints > 0) {
@@ -961,8 +1029,13 @@ function calculateActualProgressForWeek(user, selectedWeek, maxWeeks, groupName 
                 // Debug: Zeige neue Berechnungslogik
                 dashboardLogger.debug('CALC', `Progress calculation for ${user.name}`, {
                     week: selectedWeek,
-                    expectedChecklists: expectedChecklistsForWeek,
-                    expectedPoints: expectedTotalPflichtPoints,
+                    maxSchoolweeks: maxSchoolweeks,
+                    totalMandatoryChecklists: totalMandatoryChecklists,
+                    totalAllChecklists: totalAllChecklists,
+                    maxPflichtPoints: maxPflichtPoints,
+                    maxGesamtPoints: maxGesamtPoints,
+                    expectedPflichtPoints: Math.round(expectedTotalPflichtPoints * 10) / 10,
+                    expectedGesamtPoints: Math.round(expectedTotalGesamtPoints * 10) / 10,
                     totalPflicht: totalPflichtPercent,
                     totalGesamt: totalGesamtPercent,
                     pflichtProgress,

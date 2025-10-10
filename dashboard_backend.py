@@ -585,6 +585,7 @@ def get_data():
             'structured_tables': structured_data,
             'ignored_groups': list(ignored_groups),
             'grade_mapping': grade_mapping,
+            'max_schoolweeks': config_manager.get_max_schoolweeks(),
             'last_updated': latest_file,
             'environment': environment_settings
         }
@@ -725,29 +726,33 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
     expected_pflicht_for_week = math.ceil((total_pflicht_activities / total_weeks) * current_week)
     user_data['assignments']['percent_submitted_timed'] = round((submitted_count / expected_pflicht_for_week) * 100, 2) if expected_pflicht_for_week > 0 else 0
 
-    # Checklisten verarbeiten
+    # Checklisten verarbeiten - nur Pflicht-Checklisten (is_mandatory: true)
     checklists = user['activities'].get('checklists', [])
-    total_checklists = len(checklists)
+    mandatory_checklists = [c for c in checklists if c.get('is_mandatory', True)]  # Default: true für Abwärtskompatibilität
+    total_mandatory_checklists = len(mandatory_checklists)
 
-    required_100 = [c for c in checklists if c['progress']['required_progress'] == "100%"]
+    # Nur Pflicht-Checklisten mit 100% zählen
+    required_100 = [c for c in mandatory_checklists if c['progress']['required_progress'] == "100%"]
     user_data['checklists']['required_100_count'] = len(required_100)
 
-    # Individuelle Checklisten-Details sammeln
+    # Individuelle Checklisten-Details sammeln (alle, nicht nur Pflicht)
     for checklist in checklists:
         checklist_detail = {
             'id': checklist['id'],
             'title': checklist.get('title', 'Unbekannt'),
             'url': checklist.get('url', '#'),
             'required_progress': checklist['progress']['required_progress'],
-            'all_progress': checklist['progress']['all_progress']
+            'all_progress': checklist['progress']['all_progress'],
+            'is_mandatory': checklist.get('is_mandatory', True)
         }
         user_data['checklists']['individual_checklists'].append(checklist_detail)
 
-    if total_checklists > 0:
+    # Durchschnitte nur für Pflicht-Checklisten berechnen
+    if total_mandatory_checklists > 0:
         user_data['checklists']['avg_required_progress'] = round(
-            sum(float(c['progress']['required_progress'].strip('%')) for c in checklists if c['progress']['required_progress']) / total_checklists, 2)
+            sum(float(c['progress']['required_progress'].strip('%')) for c in mandatory_checklists if c['progress']['required_progress']) / total_mandatory_checklists, 2)
         user_data['checklists']['avg_all_progress'] = round(
-            sum(float(c['progress']['all_progress'].strip('%')) for c in checklists if c['progress']['all_progress']) / total_checklists, 2)
+            sum(float(c['progress']['all_progress'].strip('%')) for c in mandatory_checklists if c['progress']['all_progress']) / total_mandatory_checklists, 2)
     else:
         user_data['checklists']['avg_required_progress'] = 0
         user_data['checklists']['avg_all_progress'] = 0
