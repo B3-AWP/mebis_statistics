@@ -825,7 +825,8 @@ def create_structured_tables(groups_data, categories):
                 'id': checklist['id'],
                 'title': checklist['title'],
                 'url': checklist.get('url', '#'),
-                'category_name': category['category_name']
+                'category_name': category['category_name'],
+                'is_mandatory': checklist.get('is_mandatory', False)
             })
 
         # Pflichtaufgaben sammeln (nur aus Pflichtaufgaben-Kategorie)
@@ -892,6 +893,7 @@ def create_structured_tables(groups_data, categories):
                 'checklist_title': checklist['title'],
                 'checklist_url': checklist['url'],
                 'checklist_category': checklist['category_name'],
+                'is_mandatory': checklist.get('is_mandatory', False),
                 'user_progress': []
             }
 

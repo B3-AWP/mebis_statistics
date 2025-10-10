@@ -1341,6 +1341,13 @@ function generateChecklistTable() {
 
     // Zeilen für jede Checkliste
     tableData.rows.forEach(row => {
+        const isMandatory = row.is_mandatory !== undefined ? row.is_mandatory : true; // Default: true für Abwärtskompatibilität
+
+        // Filter "Nur Pflicht": Überspringe optionale Checklisten
+        if (checklistViewType === 'pflicht' && !isMandatory) {
+            return; // Zeile komplett ausblenden
+        }
+
         html += '<tr>';
 
         // Checkliste-Name (mit Link)
@@ -1357,8 +1364,14 @@ function generateChecklistTable() {
             const pflichtPercent = parseFloat(requiredProgressText.replace('%', ''));
             const gesamtPercent = parseFloat(allProgressText.replace('%', ''));
 
-            // Pflicht-Fortschritt
-            html += `<td class="progress-cell" style="--progress-width: ${pflichtPercent}%; --progress-color: #28a745;">${requiredProgressText}</td>`;
+            // Pflicht-Fortschritt: Bei nicht-Pflicht Checklisten "-" anzeigen
+            let pflichtDisplay = requiredProgressText;
+            let pflichtProgressWidth = pflichtPercent;
+            if (!isMandatory) {
+                pflichtDisplay = '-';
+                pflichtProgressWidth = 0;
+            }
+            html += `<td class="progress-cell" style="--progress-width: ${pflichtProgressWidth}%; --progress-color: #28a745;">${pflichtDisplay}</td>`;
 
             // Gesamt-Fortschritt (mit gesamt-column Klasse für ein-/ausblenden)
             html += `<td class="progress-cell gesamt-column" style="--progress-width: ${gesamtPercent}%; --progress-color: #6f42c1;">${allProgressText}</td>`;
@@ -1841,7 +1854,8 @@ function generateAllGroupsChecklistTable() {
                     id: row.checklist_id,
                     title: row.checklist_title,
                     url: row.checklist_url,
-                    category: row.checklist_category
+                    category: row.checklist_category,
+                    is_mandatory: row.is_mandatory !== undefined ? row.is_mandatory : true
                 }));
             });
 
@@ -1878,6 +1892,13 @@ function generateAllGroupsChecklistTable() {
 
     // Zeilen für jede Checkliste
     checklistsArray.forEach(checklist => {
+        const isMandatory = checklist.is_mandatory !== undefined ? checklist.is_mandatory : true;
+
+        // Filter "Nur Pflicht": Überspringe optionale Checklisten
+        if (checklistViewType === 'pflicht' && !isMandatory) {
+            return; // Zeile komplett ausblenden
+        }
+
         html += '<tr>';
         html += `<td class="checklist-name-cell">`;
         html += `<a href="${checklist.url}" target="_blank">${checklist.title}</a>`;
@@ -1908,7 +1929,14 @@ function generateAllGroupsChecklistTable() {
             const pflichtPercent = parseFloat(requiredProgressText.replace('%', ''));
             const gesamtPercent = parseFloat(allProgressText.replace('%', ''));
 
-            html += `<td class="progress-cell" style="--progress-width: ${pflichtPercent}%; --progress-color: #28a745;">${requiredProgressText}</td>`;
+            // Pflicht-Fortschritt: Bei nicht-Pflicht Checklisten "-" anzeigen
+            let pflichtDisplay = requiredProgressText;
+            let pflichtProgressWidth = pflichtPercent;
+            if (!isMandatory) {
+                pflichtDisplay = '-';
+                pflichtProgressWidth = 0;
+            }
+            html += `<td class="progress-cell" style="--progress-width: ${pflichtProgressWidth}%; --progress-color: #28a745;">${pflichtDisplay}</td>`;
             html += `<td class="progress-cell gesamt-column" style="--progress-width: ${gesamtPercent}%; --progress-color: #6f42c1;">${allProgressText}</td>`;
         });
 
@@ -2298,7 +2326,12 @@ function toggleChecklistColumns() {
     // Status speichern
     checklistViewType = viewType;
 
+    // Tabelle komplett neu generieren, damit Zeilen-Filter greifen
+    generateChecklistTable();
+
+    // Spaltenansicht anwenden (für Spalten ein-/ausblenden)
     applyChecklistColumnView();
+
     // View-Filter nach Spaltenänderung erneut anwenden
     applyChecklistViewFilter();
 }
