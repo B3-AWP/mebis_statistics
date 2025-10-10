@@ -256,7 +256,7 @@ def get_activity_urls(driver):
     print(f"Total activities found: {len(activity_urls['assignments'])} assignments, {len(activity_urls['checklists'])} checklists, {len(activity_urls['feedbacks'])} feedbacks, {len(activity_urls['quizzes'])} quizzes")
     return activity_urls
 
-def get_checklist_progress_optimized(driver, checklist_url, sesskey):
+def get_checklist_progress_optimized(driver, checklist_url, sesskey, course_id):
     progress_data = {}
 
     # Erste URL mit 'showprogressbars', um die Fortschrittsbalken anzuzeigen
@@ -281,6 +281,57 @@ def get_checklist_progress_optimized(driver, checklist_url, sesskey):
     progress_data['all_progress'] = extract_progress(driver)
 
     return progress_data
+
+def get_checklists_mandatory_status(driver, course_id):
+    """
+    Ermittelt für alle Checklisten, ob sie Pflicht-Elemente enthalten.
+    Gibt ein Dictionary zurück: {checklist_id: is_mandatory (bool)}
+    """
+    mandatory_status = {}
+
+    # Lade die Übersichtsseite aller Checklisten
+    overview_url = f"https://lernplattform.mebis.bycs.de/mod/checklist/index.php?id={course_id}"
+    driver.get(overview_url)
+
+    try:
+        # Warte auf die Tabelle
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table"))
+        )
+
+        # Finde alle Zeilen in der Tabelle
+        rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+
+        for row in rows:
+            try:
+                # Extrahiere die Checklisten-ID aus dem Link in der ersten Spalte
+                link = row.find_element(By.CSS_SELECTOR, "td.cell.c0 a")
+                href = link.get_attribute("href")
+                checklist_id_match = re.search(r'id=(\d+)', href)
+
+                if not checklist_id_match:
+                    continue
+
+                checklist_id = checklist_id_match.group(1)
+
+                # Prüfe, ob in der zweiten Spalte ein Progress-Bar-Element vorhanden ist
+                # Falls ja: Pflicht-Checkliste, falls nein: keine Pflicht
+                try:
+                    row.find_element(By.CSS_SELECTOR, "td.cell.c1 div.checklist_progress_outer")
+                    # Element gefunden = Pflicht-Checkliste
+                    mandatory_status[checklist_id] = True
+                except:
+                    # Element nicht gefunden = keine Pflicht-Checkliste
+                    mandatory_status[checklist_id] = False
+
+            except Exception as e:
+                # Fehler beim Verarbeiten dieser Zeile - überspringe
+                continue
+
+    except Exception as e:
+        print(f"Fehler beim Laden der Checklisten-Übersicht: {e}")
+
+    return mandatory_status
 
 def extract_progress(driver):
     progress_data = {}
@@ -718,7 +769,7 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
         print(f"PROGRESS|checklists|{index+1}|{total}")
         sys.stdout.flush()
         start_time = time.time()
-        progress = get_checklist_progress_optimized(driver, checklist_url, thread_sesskey)
+        progress = get_checklist_progress_optimized(driver, checklist_url, thread_sesskey, course_id)
         duration = time.time() - start_time
 
         req_count = len(progress.get('required_progress', {}))
@@ -926,6 +977,12 @@ def main():
     sys.stdout.flush()
     activities = get_activity_urls(driver)
 
+    # Ermittle den Pflicht-Status aller Checklisten (vor der Kategorisierung)
+    print("Ermittle Pflicht-Status der Checklisten...")
+    sys.stdout.flush()
+    checklists_mandatory = get_checklists_mandatory_status(driver, course_id)
+    print(f"  Pflicht-Status für {len(checklists_mandatory)} Checklisten ermittelt")
+
     # Aktualisiere Aktivitäten mit Kategorieinformationen
     activities_by_category = []
 
@@ -941,6 +998,10 @@ def main():
         for activity in activities[activity_type]:
             category_data = all_categories_data.get(activity["id"], {"category_id": "-1", "category_name": "nicht bewertet"})
             activity.update(category_data)
+
+            # Füge is_mandatory zu Checklisten hinzu
+            if activity_type == "checklists":
+                activity["is_mandatory"] = checklists_mandatory.get(activity["id"], False)
 
             # Suche oder erstelle die Kategorie in der Liste
             category_entry = next((cat for cat in activities_by_category if cat["id"] == category_data["category_id"]), None)
@@ -1062,6 +1123,7 @@ def main():
                 if required_progress or all_progress:
                     user["activities"]["checklists"].append({
                         "id": checklist["id"],
+                        "is_mandatory": checklists_mandatory.get(checklist["id"], False),
                         "progress": {
                             "required_progress": required_progress,
                             "all_progress": all_progress
