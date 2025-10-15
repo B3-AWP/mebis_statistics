@@ -44,8 +44,8 @@ function showTab(tabName) {
         loadChecklistsTab();
     } else if (tabName === 'pflicht') {
         loadPflichtTab();
-    } else if (tabName === 'zentral') {
-        loadZentralTab();
+    } else if (tabName === 'exam') {
+        loadExamTab();
     }
 }
 
@@ -1311,10 +1311,10 @@ function updateAllTabs() {
         generatePflichtTable();
     }
 
-    // Zentrale Leistungsnachweise-Tab aktualisieren falls sichtbar
-    const zentralTab = document.getElementById('zentralTab');
-    if (zentralTab && zentralTab.style.display !== 'none') {
-        generateZentralTable();
+    // Leistungsnachweise-Tab aktualisieren falls sichtbar
+    const examTab = document.getElementById('examTab');
+    if (examTab && examTab.style.display !== 'none') {
+        generateExamTable();
     }
 }
 
@@ -1470,12 +1470,12 @@ function loadPflichtTab() {
     }, 500);
 }
 
-// Zentrale Leistungsnachweise-Tab laden
-function loadZentralTab() {
-    const filterSection = document.getElementById('zentralFilterSection');
+// Leistungsnachweise-Tab laden
+function loadExamTab() {
+    const filterSection = document.getElementById('examFilterSection');
 
     setTimeout(() => {
-        generateZentralTable();
+        generateExamTable();
         if (filterSection) filterSection.style.display = 'block';
     }, 500);
 }
@@ -2630,15 +2630,15 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// ============= ZENTRALE LEISTUNGSNACHWEISE FUNKTIONEN =============
+// =============  LEISTUNGSNACHWEISE FUNKTIONEN =============
 
-// Zentrale Leistungsnachweise-Tabelle generieren (Zeilen = Aufgaben, Spalten = Benutzer)
-function generateZentralTable() {
-    const container = document.getElementById('zentralData');
+// Leistungsnachweise-Tabelle generieren (Zeilen = Aufgaben, Spalten = Benutzer)
+function generateExamTable() {
+    const container = document.getElementById('examData');
 
     // Bei "Alle Gruppen" verwende die spezielle Funktion
     if (currentGroup === 'all') {
-        generateAllGroupsZentralTable();
+        generateAllGroupsExamTable();
         return;
     }
 
@@ -2649,9 +2649,9 @@ function generateZentralTable() {
         return;
     }
 
-    // Zeige nur "Zentrale Leistungsnachweise" Kategorien (Kategorie-Filter entfernt)
+    // Zeige nur "Leistungsnachweise" Kategorien (Kategorie-Filter entfernt)
     const categoriesToShow = dashboardData.activities_by_category.filter(category =>
-        category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
+        category.category_name && (category.category_name.includes('Leistungsnachweise') || category.category_name.includes('📊'))
     );
 
     // Sammle sowohl assignments als auch quizzes aus den gewählten Kategorien
@@ -2696,7 +2696,7 @@ function generateZentralTable() {
     })).filter(activity => activity.user_status.length > 0);
 
     if (filteredActivities.length === 0) {
-        container.innerHTML = `<p>Keine Zentrale Leistungsnachweise für die ausgewählte Gruppe "${currentGroup}" verfügbar.</p>
+        container.innerHTML = `<p>Keine Leistungsnachweise für die ausgewählte Gruppe "${currentGroup}" verfügbar.</p>
                                <p>Debug: ${allActivities.length} Aktivitäten gefunden, aber keine für Benutzer dieser Gruppe.</p>`;
         return;
     }
@@ -2714,7 +2714,7 @@ function generateZentralTable() {
     });
     const sortedUsers = Array.from(allUsers).sort();
 
-    let html = '<div style="overflow-x: auto;"><table id="zentralTable" class="info-table dashboard-table">';
+    let html = '<div style="overflow-x: auto;"><table id="examTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
 
     // Header: Aufgabe + Benutzernamen
@@ -2761,14 +2761,14 @@ function generateZentralTable() {
 
             if (!status) {
                 // Kein Status gefunden für diesen Benutzer
-                console.log(`DEBUG ZENTRAL: No status found for ${activity.activity_type} "${activity.title}" for user ${userName}`);
+                console.log(`DEBUG EXAM: No status found for ${activity.activity_type} "${activity.title}" for user ${userName}`);
                 cellContent = '❓ Nicht gefunden';
                 cellClass = 'status-missing';
                 bgColor = '#f8f9fa'; // Grau
             } else if (status.grade && status.grade !== '-') {
                 // WICHTIG: Grade muss VOR Status geprüft werden (z.B. bei Gruppeneinreichungen)
                 // Grade vorhanden - zeige Grade-Wert
-                console.log(`DEBUG ZENTRAL: Grade found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.grade}`);
+                console.log(`DEBUG EXAM: Grade found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.grade}`);
                 if (activity.title && activity.title.includes('Review-Talk 1')) {
                     console.log(`🎯 GRADE SUCCESS: Review-Talk 1 grade found for ${userName}: ${status.grade}`);
                 }
@@ -2782,7 +2782,7 @@ function generateZentralTable() {
                 bgColor = '#f8d7da'; // Rot
             } else if (status.rating && status.rating !== '-') {
                 // Alternative: Rating field for assignments
-                console.log(`DEBUG ZENTRAL: Rating found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.rating}`);
+                console.log(`DEBUG EXAM: Rating found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.rating}`);
                 if (activity.title && activity.title.includes('Review-Talk 1')) {
                     console.log(`🎯 RATING SUCCESS: Review-Talk 1 rating found for ${userName}: ${status.rating}`);
                 }
@@ -2791,7 +2791,7 @@ function generateZentralTable() {
                 bgColor = '#d4edda'; // Grün
             } else if (status.score && status.score !== '-') {
                 // Alternative: Score field for assignments
-                console.log(`DEBUG ZENTRAL: Score found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.score}`);
+                console.log(`DEBUG EXAM: Score found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.score}`);
                 if (activity.title && activity.title.includes('Review-Talk 1')) {
                     console.log(`🎯 SCORE SUCCESS: Review-Talk 1 score found for ${userName}: ${status.score}`);
                 }
@@ -2800,7 +2800,7 @@ function generateZentralTable() {
                 bgColor = '#d4edda'; // Grün
             } else if (status.points && status.points !== '-' && status.points !== null) {
                 // Alternative: Points field for assignments
-                console.log(`DEBUG ZENTRAL: Points found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.points}`);
+                console.log(`DEBUG EXAM: Points found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.points}`);
                 if (activity.title && activity.title.includes('Review-Talk 1')) {
                     console.log(`🎯 POINTS SUCCESS: Review-Talk 1 points found for ${userName}: ${status.points}`);
                 }
@@ -2809,7 +2809,7 @@ function generateZentralTable() {
                 bgColor = '#d4edda'; // Grün
             } else if (status.result && status.result !== '-' && status.result !== null) {
                 // Alternative: Result field for assignments
-                console.log(`DEBUG ZENTRAL: Result found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.result}`);
+                console.log(`DEBUG EXAM: Result found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.result}`);
                 if (activity.title && activity.title.includes('Review-Talk 1')) {
                     console.log(`🎯 RESULT SUCCESS: Review-Talk 1 result found for ${userName}: ${status.result}`);
                 }
@@ -2818,7 +2818,7 @@ function generateZentralTable() {
                 bgColor = '#d4edda'; // Grün
             } else if (status.mark && status.mark !== '-' && status.mark !== null) {
                 // Alternative: Mark field for assignments
-                console.log(`DEBUG ZENTRAL: Mark found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.mark}`);
+                console.log(`DEBUG EXAM: Mark found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.mark}`);
                 if (activity.title && activity.title.includes('Review-Talk 1')) {
                     console.log(`🎯 MARK SUCCESS: Review-Talk 1 mark found for ${userName}: ${status.mark}`);
                 }
@@ -2832,7 +2832,7 @@ function generateZentralTable() {
                 bgColor = '#fff3cd'; // Gelb
             } else {
                 // Andere Status - Debug ALL possible grade fields
-                console.log(`DEBUG ZENTRAL: Other status for ${activity.activity_type} "${activity.title}" for user ${userName}:`, {
+                console.log(`DEBUG EXAM: Other status for ${activity.activity_type} "${activity.title}" for user ${userName}:`, {
                     status: status.status,
                     grade: status.grade,
                     rating: status.rating,
@@ -2874,20 +2874,20 @@ function generateZentralTable() {
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
-    makeTableSortable('zentralTable');
+    makeTableSortable('examTable');
 
     // Filter anwenden falls nötig
-    applyZentralViewFilters();
+    applyExamViewFilters();
 }
 
-// Zentrale Leistungsnachweise für alle Gruppen (Zeilen = Benutzer, Spalten = Leistungsnachweise)
-function generateAllGroupsZentralTable() {
-    const container = document.getElementById('zentralData');
+// Leistungsnachweise für alle Gruppen (Zeilen = Benutzer, Spalten = Leistungsnachweise)
+function generateAllGroupsexamTable() {
+    const container = document.getElementById('examData');
     if (!container || !dashboardData || !dashboardData.activities_by_category) return;
 
-    // Zeige nur "Zentrale Leistungsnachweise" Kategorien (Kategorie-Filter entfernt)
+    // Zeige nur "Leistungsnachweise" Kategorien (Kategorie-Filter entfernt)
     const categoriesToShow = dashboardData.activities_by_category.filter(category =>
-        category.category_name && (category.category_name.includes('Zentrale Leistungsnachweise') || category.category_name.includes('📊'))
+        category.category_name && (category.category_name.includes('Leistungsnachweise') || category.category_name.includes('📊'))
     );
 
     // Sammle sowohl assignments als auch quizzes aus den gewählten Kategorien
@@ -2916,7 +2916,7 @@ function generateAllGroupsZentralTable() {
     });
 
     if (allActivities.length === 0) {
-        container.innerHTML = '<p>Keine Zentrale Leistungsnachweise verfügbar.</p>';
+        container.innerHTML = '<p>Keine Leistungsnachweise verfügbar.</p>';
         return;
     }
 
@@ -2974,7 +2974,7 @@ function generateAllGroupsZentralTable() {
         return nameA.localeCompare(nameB);
     });
 
-    let html = '<div style="overflow-x: auto;"><table id="allGroupsZentralTable" class="info-table dashboard-table">';
+    let html = '<div style="overflow-x: auto;"><table id="allGroupsexamTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
 
     // Header: Benutzer + Gruppe + alle Activities
@@ -3007,7 +3007,7 @@ function generateAllGroupsZentralTable() {
 
         // Status für jede Activity (gleiche Logik wie einzelne Gruppen)
         sortedActivities.forEach(activity => {
-            // Finde den Status für diesen Benutzer (gleiche Logik wie generateZentralTable)
+            // Finde den Status für diesen Benutzer (gleiche Logik wie generateExamTable)
             let status = null;
             if (activity.user_status) {
                 status = activity.user_status.find(s =>
@@ -3030,37 +3030,37 @@ function generateAllGroupsZentralTable() {
                 cellClass = 'status-missing';
                 bgColor = '#f8d7da'; // Rot
             } else if (status.grade && status.grade !== '-') {
-                console.log(`DEBUG ZENTRAL ALL: Grade found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.grade}`);
+                console.log(`DEBUG EXAM ALL: Grade found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.grade}`);
                 cellContent = `✓<br>${status.grade}`;
                 cellClass = 'status-graded';
                 bgColor = '#d4edda'; // Grün
             } else if (status.rating && status.rating !== '-') {
                 // Alternative: Rating field for assignments
-                console.log(`DEBUG ZENTRAL ALL: Rating found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.rating}`);
+                console.log(`DEBUG EXAM ALL: Rating found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.rating}`);
                 cellContent = `✓<br>${status.rating}`;
                 cellClass = 'status-graded';
                 bgColor = '#d4edda'; // Grün
             } else if (status.score && status.score !== '-') {
                 // Alternative: Score field for assignments
-                console.log(`DEBUG ZENTRAL ALL: Score found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.score}`);
+                console.log(`DEBUG EXAM ALL: Score found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.score}`);
                 cellContent = `✓<br>${status.score}`;
                 cellClass = 'status-graded';
                 bgColor = '#d4edda'; // Grün
             } else if (status.points && status.points !== '-' && status.points !== null) {
                 // Alternative: Points field for assignments
-                console.log(`DEBUG ZENTRAL ALL: Points found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.points}`);
+                console.log(`DEBUG EXAM ALL: Points found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.points}`);
                 cellContent = `✓<br>${status.points}`;
                 cellClass = 'status-graded';
                 bgColor = '#d4edda'; // Grün
             } else if (status.result && status.result !== '-' && status.result !== null) {
                 // Alternative: Result field for assignments
-                console.log(`DEBUG ZENTRAL ALL: Result found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.result}`);
+                console.log(`DEBUG EXAM ALL: Result found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.result}`);
                 cellContent = `✓<br>${status.result}`;
                 cellClass = 'status-graded';
                 bgColor = '#d4edda'; // Grün
             } else if (status.mark && status.mark !== '-' && status.mark !== null) {
                 // Alternative: Mark field for assignments
-                console.log(`DEBUG ZENTRAL ALL: Mark found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.mark}`);
+                console.log(`DEBUG EXAM ALL: Mark found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.mark}`);
                 cellContent = `✓<br>${status.mark}`;
                 cellClass = 'status-graded';
                 bgColor = '#d4edda'; // Grün
@@ -3084,30 +3084,29 @@ function generateAllGroupsZentralTable() {
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
-    makeTableSortable('allGroupsZentralTable');
+    makeTableSortable('allGroupsexamTable');
 
-    // Filter anwenden
-    applyZentralViewFilters();
+    // Filter anweExam();
 }
 
-// Filter für Zentrale Leistungsnachweise anwenden
-function applyZentralFilters() {
-    generateZentralTable();
+// Filter für  Leistungsnachweise anwenden
+function applyExamFilters() {
+    generateExamTable();
     // Status- und Typ-Filter anwenden
-    applyZentralViewFilters();
+    funExam();
 }
 
-// Status- und Typ-Filter für Zentrale Leistungsnachweise anwenden
-function applyZentralViewFilters() {
-    const statusFilter = document.getElementById('zentralStatusFilter');
-    const typeFilter = document.getElementById('zentralTypeFilter');
+// Status- und Typ-Filter für Leistungsnachweise anwenden
+function funExam() {
+    const statusFilter = document.getElementById('examStatusFilter');
+    const typeFilter = document.getElementById('examTypeFilter');
 
     if (!statusFilter || !typeFilter) return;
 
     const statusValue = statusFilter.value;
     const typeValue = typeFilter.value;
 
-    const table = document.getElementById('zentralTable') || document.getElementById('allGroupsZentralTable');
+    const table = document.getElementById('examTable') || document.getElementById('allGroupsexamTable');
     if (!table) return;
 
     const rows = table.querySelectorAll('tbody tr');

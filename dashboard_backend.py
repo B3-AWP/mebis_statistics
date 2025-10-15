@@ -13,12 +13,15 @@ import math
 import subprocess
 import threading
 import time as time_module
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, request, send_file
 from flask_cors import CORS
 
 # Sichere Konfiguration und Logging
 from config.config_manager import config_manager
 from config.logger_config import get_logger, backend_logger, api_logger, data_logger
+
+# PDF Generator
+from pdf_generator_multi import ReviewPDFGeneratorMulti
 
 # Flask App Setup mit sicherer Konfiguration
 app = Flask(__name__, static_folder='.')
@@ -1167,6 +1170,49 @@ def start_export():
 def get_export_status():
     """Gibt den aktuellen Export-Status zurück"""
     return jsonify(export_status)
+
+@app.route('/api/generate-review-pdf', methods=['POST'])
+def generate_review_pdf():
+    """Generiert ein Review-Talk PDF"""
+    logger = api_logger
+    logger.info("PDF generation request received")
+
+    try:
+        # Hole Daten aus Request
+        data = request.get_json()
+
+        if not data:
+            logger.error("No data provided in request")
+            return jsonify({'error': 'Keine Daten übermittelt'}), 400
+
+        logger.info(f"Generating PDF for group: {data.get('group')}, Review-Nr: {data.get('reviewNr')}")
+
+        # Erstelle PDF Generator
+        generator = ReviewPDFGeneratorMulti()
+
+        # Generiere PDF
+        pdf_path = generator.generate_pdf(data)
+
+        if not pdf_path or not os.path.exists(pdf_path):
+            logger.error("PDF generation failed - no file created")
+            return jsonify({'error': 'PDF-Generierung fehlgeschlagen'}), 500
+
+        logger.info(f"PDF generated successfully: {pdf_path}")
+
+        # Sende PDF als Download
+        return send_file(
+            pdf_path,
+            as_attachment=True,
+            download_name=f"Review_Talk_{data.get('group', 'Unknown')}_Review{data.get('reviewNr', '1')}.pdf",
+            mimetype='application/pdf'
+        )
+
+    except FileNotFoundError as e:
+        logger.error(f"Template file not found: {e}")
+        return jsonify({'error': f'Vorlage nicht gefunden: {str(e)}'}), 404
+    except Exception as e:
+        logger.error(f"Error generating PDF: {e}", exc_info=True)
+        return jsonify({'error': f'Fehler bei der PDF-Generierung: {str(e)}'}), 500
 
 if __name__ == '__main__':
     flask_config = config_manager.get_flask_config()
