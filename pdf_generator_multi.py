@@ -8,12 +8,17 @@ Erstellt ein PDF mit mehreren Seiten (eine pro Gruppe)
 
 import os
 import tempfile
+import subprocess
+import shutil
 from datetime import datetime
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_BREAK
 from docx2pdf import convert
-from pypdf import PdfMerger
+try:
+    from pypdf import PdfWriter  # no longer used if merging disabled
+except Exception:
+    PdfWriter = None
 from config.logger_config import get_logger
 import json
 import pythoncom
@@ -76,8 +81,8 @@ class ReviewPDFGeneratorMulti:
             raise
 
     def _generate_multi_group_pdf(self, data, output_path=None):
-        """Generiert pro Gruppe ein eigenes PDF und erstellt am Ende ein gemeinsames PDF"""
-        self.logger.info("Generating multi-group PDFs and a combined PDF")
+        """Generiert pro Gruppe ein eigenes PDF und gibt die Liste der Pfade zurück (kein Merge)."""
+        self.logger.info("Generating multi-group PDFs (no merge)")
 
         all_groups = data.get('allGroups', {})
         disabled_groups = data.get('disabledGroups', [])
@@ -96,10 +101,8 @@ class ReviewPDFGeneratorMulti:
         # Ausgabe-Verzeichnis bestimmen
         if output_path:
             output_dir = os.path.dirname(output_path) or tempfile.gettempdir()
-            combined_pdf_path = output_path
         else:
             output_dir = tempfile.gettempdir()
-            combined_pdf_path = os.path.join(output_dir, f"review_talk_{data.get('reviewNr')}_ALL.pdf")
 
         # Hilfsfunktion für Dateinamen
         def safe_name(name: str) -> str:
@@ -122,26 +125,50 @@ class ReviewPDFGeneratorMulti:
                 group_doc.save(tmp_docx)
                 self.logger.info(f"Saved DOCX for group '{group_name}' to {tmp_docx}")
 
-                convert(tmp_docx, group_pdf)
+                self._convert_docx_to_pdf(tmp_docx, group_pdf)
                 self.logger.info(f"Converted PDF for group '{group_name}' to {group_pdf}")
 
                 per_group_pdfs.append(group_pdf)
         finally:
             pythoncom.CoUninitialize()
 
-        # PDFs zusammenführen
-        if per_group_pdfs:
-            self.logger.info(f"Merging {len(per_group_pdfs)} PDFs into {combined_pdf_path}")
-            merger = PdfMerger()
-            try:
-                for pdf_path in per_group_pdfs:
-                    merger.append(pdf_path)
-                merger.write(combined_pdf_path)
-            finally:
-                merger.close()
+        # Kein Merge: Liste der einzelnen PDFs zurückgeben
+        self.logger.info(f"Generated {len(per_group_pdfs)} group PDFs in {output_dir}")
+        return per_group_pdfs
 
-        self.logger.info(f"Combined PDF generated: {combined_pdf_path}")
-        return combined_pdf_path
+    def _convert_docx_to_pdf(self, docx_path: str, pdf_path: str):
+        """Konvertiert DOCX zu PDF mit docx2pdf; Fallback: LibreOffice (soffice)."""
+        # Primär: docx2pdf (benötigt Microsoft Word)
+        try:
+            convert(docx_path, pdf_path)
+            return
+        except Exception as e:
+            self.logger.warning(f"docx2pdf failed ({e}); trying LibreOffice fallback...")
+
+        # Fallback: LibreOffice, wenn installiert
+        soffice = shutil.which('soffice') or shutil.which('soffice.exe')
+        if not soffice:
+            raise RuntimeError("Neither Word (docx2pdf) nor LibreOffice (soffice) available for DOCX to PDF conversion.")
+
+        outdir = os.path.dirname(pdf_path) or tempfile.gettempdir()
+        cmd = [
+            soffice,
+            "--headless",
+            "--convert-to", "pdf",
+            "--outdir", outdir,
+            docx_path
+        ]
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # LibreOffice legt die PDF im outdir mit gleichem Basenamen ab
+            base = os.path.splitext(os.path.basename(docx_path))[0] + ".pdf"
+            produced = os.path.join(outdir, base)
+            if produced != pdf_path:
+                if os.path.exists(pdf_path):
+                    os.remove(pdf_path)
+                os.replace(produced, pdf_path)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"LibreOffice conversion failed: {e}")
 
     def _create_group_document(self, data, group_name, group_data):
         """
