@@ -83,11 +83,11 @@
                         </svg>
                         <span class="tab-text">Pflichtaufgaben</span>
                     </button>
-                    <button class="nav-btn inactive" id="tabZentral" onclick="showTab('zentral')">
+                    <button class="nav-btn inactive" id="tabExam" onclick="showTab('exam')">
                         <svg class="icon" width="18" height="18" aria-hidden="true">
-                            <use href="#icon-zentral"></use>
+                            <use href="#icon-exam"></use>
                         </svg>
-                        <span class="tab-text">Zentrale Leistungsnachweise</span>
+                        <span class="tab-text">Leistungsnachweise</span>
                     </button>
                 </div>
 
@@ -99,6 +99,13 @@
                 <div class="file-age-warning" id="fileAgeWarning" style="display: none; margin-left: 10px; padding: 6px 12px; background: #ffc107; color: #000; border-radius: 4px; font-size: 13px; font-weight: 500;">
                     ⚠️ Daten sind <span id="fileAgeDays"></span> Tag(e) alt
                 </div>
+
+                <button id="pdfReviewBtn" class="nav-btn" onclick="openPdfReviewModal()" title="Review-Talk PDF erstellen">
+                    <svg class="icon" width="18" height="18" aria-hidden="true">
+                        <use href="#icon-pdf"></use>
+                    </svg>
+                    <span class="tab-text">Review-Talk PDF</span>
+                </button>
 
                 <button id="refreshBtn" class="nav-btn" onclick="startExportAndReload()">
                     <svg class="icon" width="18" height="18" aria-hidden="true">
@@ -349,19 +356,19 @@
             </div>
         </div>
 
-        <!-- Zentrale Leistungsnachweise Tab -->
-        <div id="zentralTab" style="display:none;">
-            <div class="filter-section" id="zentralFilterSection" style="display: none;">
+        <!-- Leistungsnachweise Tab -->
+        <div id="examTab" style="display:none;">
+            <div class="filter-section" id="examFilterSection" style="display: none;">
                 <h3 class="filter-header">
                     <svg width="18" height="18" aria-hidden="true">
                         <use href="#icon-filter"></use>
                     </svg>
-                    Filter & Optionen - Zentrale Leistungsnachweise
+                    Filter & Optionen - Leistungsnachweise
                 </h3>
                 <div class="filter-controls">
                     <div class="filter-group">
                         <label>Status:</label>
-                        <select id="zentralStatusFilter" onchange="applyZentralFilters()">
+                        <select id="examStatusFilter" onchange="applyExamFilters()">
                             <option value="all">Alle anzeigen</option>
                             <option value="completed">Nur erledigte</option>
                             <option value="pending">Nur zu erledigende</option>
@@ -369,7 +376,7 @@
                     </div>
                     <div class="filter-group">
                         <label>Typ:</label>
-                        <select id="zentralTypeFilter" onchange="applyZentralFilters()">
+                        <select id="examTypeFilter" onchange="applyExamFilters()">
                             <option value="all">Alle Typen</option>
                             <option value="assignment">Nur Aufgaben</option>
                             <option value="quiz">Nur Quizzes</option>
@@ -380,12 +387,12 @@
 
             <div class="config-section">
                 <h4>
-                    <svg class="h2-icon zentral" aria-hidden="true" width="18" height="18" focusable="false">
-                        <use href="#icon-zentral"></use>
+                    <svg class="h2-icon exam" aria-hidden="true" width="18" height="18" focusable="false">
+                        <use href="#icon-exam"></use>
                     </svg>
-                    Zentrale Leistungsnachweise-Übersicht
+                    Leistungsnachweise-Übersicht
                 </h4>
-                <div id="zentralData"></div>
+                <div id="examData"></div>
             </div>
         </div>
     </div>
@@ -425,7 +432,7 @@
                 stroke-linejoin="round" />
         </symbol>
 
-        <symbol id="icon-zentral" viewBox="0 0 24 24">
+        <symbol id="icon-exam" viewBox="0 0 24 24">
             <rect x="3" y="4" width="14" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
             <path d="M8 11l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
                 stroke-linejoin="round" />
@@ -456,7 +463,65 @@
             <line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             <circle cx="12" cy="15" r="2" fill="currentColor"/>
         </symbol>
+
+        <symbol id="icon-pdf" viewBox="0 0 24 24">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M10 13h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M10 17h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </symbol>
     </svg>
+
+    <!-- PDF Review Modal -->
+    <div id="pdfReviewModal" class="pdf-modal">
+        <div class="pdf-modal-content">
+            <div class="pdf-modal-header">
+                <h2>Review-Talk PDF erstellen</h2>
+                <button class="pdf-modal-close" onclick="closePdfReviewModal()">&times;</button>
+            </div>
+            <div class="pdf-modal-body">
+                <form id="pdfReviewForm" onsubmit="event.preventDefault(); generatePdfReview();">
+                    <div class="pdf-form-group">
+                        <label>Review-Nr:</label>
+                        <div class="pdf-review-nr-buttons">
+                            <button type="button" class="pdf-review-nr-btn active" data-review="1" onclick="selectReviewNr(1)">1</button>
+                            <button type="button" class="pdf-review-nr-btn" data-review="2" onclick="selectReviewNr(2)">2</button>
+                            <button type="button" class="pdf-review-nr-btn" data-review="3" onclick="selectReviewNr(3)">3</button>
+                            <button type="button" class="pdf-review-nr-btn" data-review="4" onclick="selectReviewNr(4)">4</button>
+                        </div>
+                    </div>
+
+                    <div class="pdf-form-group">
+                        <label for="reviewDate">Review-Termin:</label>
+                        <input type="date" id="reviewDate" class="pdf-input" required>
+                    </div>
+
+                    <div class="pdf-form-group">
+                        <label for="pdfWeekSlider">Referenzwoche:</label>
+                        <div class="pdf-week-slider-container">
+                            <span class="pdf-slider-value">1</span>
+                            <input type="range" id="pdfWeekSlider" min="1" max="9" value="9" class="pdf-week-slider"
+                                   oninput="document.getElementById('pdfCurrentWeekDisplay').textContent = this.value">
+                            <span class="pdf-slider-value" id="pdfWeekSliderMax">9</span>
+                            <span class="pdf-current-week-display">Woche <span id="pdfCurrentWeekDisplay">9</span></span>
+                        </div>
+                    </div>
+
+                    <div class="pdf-form-group">
+                        <label>Personen:</label>
+                        <div class="pdf-persons-list" id="pdfPersonsList">
+                            <!-- Personen werden hier dynamisch eingefügt -->
+                        </div>
+                    </div>
+
+                    <div class="pdf-modal-footer">
+                        <button type="button" class="pdf-btn pdf-btn-secondary" onclick="closePdfReviewModal()">Abbrechen</button>
+                        <button type="submit" class="pdf-btn pdf-btn-primary" id="generatePdfBtn">PDF erstellen</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
 
     <!-- Export Progress Panel (Floating, nicht-blockierend) -->
     <div id="exportProgressPanel" style="display: none; position: fixed; bottom: 20px; right: 20px; background: white; border: 2px solid #007bff; border-radius: 8px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; min-width: 350px; max-width: 400px;">
@@ -497,6 +562,7 @@
     </div>
 
     <script src="dashboard.js"></script>
+    <script src="pdf_functions.js"></script>
 </body>
 
 </html>
