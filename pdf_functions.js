@@ -190,8 +190,11 @@ async function generatePdfReview() {
     try {
         generateBtn.disabled = true;
         generateBtn.classList.add("loading");
-        generateBtn.innerHTML = "<span class='btn-spinner'></span>";
+
         console.log(`Generating PDF Review: Review-Nr=${reviewNr}, Date=${reviewDate}, Week=${pdfWeek}, Absent=${absentPersons}, Disabled Groups=${disabledGroups}`);
+
+        generateBtn.innerHTML = "<span class='btn-spinner'></span>";
+
         const pdfData = {
             reviewNr: reviewNr,
             reviewDate: reviewDate,
@@ -205,9 +208,10 @@ async function generatePdfReview() {
             groupData: dashboardData && dashboardData.groups ? dashboardData.groups[currentGroup] : null,
             structuredTables: dashboardData && dashboardData.structured_tables ? dashboardData.structured_tables[currentGroup] : null
         };
-        console.log("PDF Data being sent:", pdfData);
+
+        // Bei "Alle Gruppen": füge allGroups und allStructuredTables hinzu
         if (currentGroup === "all" && dashboardData && dashboardData.groups) {
-            console.log("All groups selected - including all groups in PDF");
+            console.log("All groups selected - backend will merge all PDFs into one");
             let filteredGroups = {};
             let filteredStructuredTables = {};
             Object.keys(dashboardData.groups).forEach(groupName => {
@@ -225,6 +229,9 @@ async function generatePdfReview() {
             pdfData.allStructuredTables = filteredStructuredTables;
             pdfData.isAllGroups = true;
         }
+
+        console.log("PDF Data being sent:", pdfData);
+
         const response = await fetch("/api/generate-review-pdf", {
             method: "POST",
             headers: {
@@ -232,27 +239,29 @@ async function generatePdfReview() {
             },
             body: JSON.stringify(pdfData)
         });
+
         if (!response.ok) {
             const errorData = await response.json();
             throw new Error(errorData.error || "PDF-Generierung fehlgeschlagen");
         }
+
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        // Wenn alle Gruppen gewählt, erwarten wir eine ZIP-Datei
-        const isAllGroups = (currentGroup === "all");
-        const suggestedName = isAllGroups
-            ? `Review_Talk_${currentGrouping}_Review${reviewNr}.zip`
+        const filename = currentGroup === "all"
+            ? `Review_Talk_${currentGrouping}_Review${reviewNr}.pdf`
             : `Review_Talk_${currentGroup}_Review${reviewNr}.pdf`;
-        a.download = suggestedName;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
+
         console.log("PDF Review generated successfully");
         closePdfReviewModal();
         alert("PDF wurde erfolgreich erstellt!");
+
     } catch (error) {
         console.error(`Error generating PDF: ${error.message}`);
         alert(`Fehler beim Erstellen der PDF: ${error.message}`);

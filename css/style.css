@@ -1887,7 +1887,7 @@ h3 {
 }
 
 .pdf-input {
-    width: 100%;
+    /* width: 100%; */
     padding: var(--spacing-sm) var(--spacing-md);
     border: 2px solid var(--border-color);
     border-radius: var(--radius-md);

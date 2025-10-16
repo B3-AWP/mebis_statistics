@@ -1192,43 +1192,8 @@ def generate_review_pdf():
         # Erstelle PDF Generator
         generator = ReviewPDFGeneratorMulti()
 
-        # Generiere PDF(s)
-        pdf_result = generator.generate_pdf(data)
-
-        # Wenn mehrere PDFs erzeugt wurden (Liste), dann als ZIP zurückgeben
-        if isinstance(pdf_result, list):
-            valid_paths = [p for p in pdf_result if isinstance(p, str) and os.path.exists(p)]
-            if not valid_paths:
-                logger.error("PDF generation returned empty list or files missing")
-                return jsonify({'error': 'PDF-Generierung fehlgeschlagen'}), 500
-
-            # ZIP im temporären Verzeichnis erstellen
-            tmp_dir = tempfile.gettempdir()
-            grouping = data.get('grouping', 'all') or 'all'
-            review_nr = data.get('reviewNr', '1')
-            zip_name = f"Review_Talk_{grouping}_Review{review_nr}.zip"
-            zip_path = os.path.join(tmp_dir, zip_name)
-
-            # Falls bereits vorhanden, überschreiben
-            try:
-                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    for p in valid_paths:
-                        arcname = os.path.basename(p)
-                        zipf.write(p, arcname)
-                logger.info(f"Zipped {len(valid_paths)} PDFs into {zip_path}")
-            except Exception as e:
-                logger.error(f"Failed to create ZIP: {e}")
-                return jsonify({'error': 'ZIP-Erstellung fehlgeschlagen'}), 500
-
-            return send_file(
-                zip_path,
-                as_attachment=True,
-                download_name=zip_name,
-                mimetype='application/zip'
-            )
-
-        # Einzelnes PDF
-        pdf_path = pdf_result
+        # Generiere PDF(s) - Generator gibt jetzt immer einen einzelnen PDF-Pfad zurück (merged bei Multi-Group)
+        pdf_path = generator.generate_pdf(data)
         if not pdf_path or not isinstance(pdf_path, str) or not os.path.exists(pdf_path):
             logger.error("PDF generation failed - no file created")
             return jsonify({'error': 'PDF-Generierung fehlgeschlagen'}), 500

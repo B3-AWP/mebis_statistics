@@ -79,8 +79,8 @@ class ReviewPDFGeneratorMulti:
             raise
 
     def _generate_multi_group_pdf(self, data, output_path=None):
-        """Generiert pro Gruppe ein eigenes PDF und gibt die Liste der Pfade zurück (kein Merge)."""
-        self.logger.info("Generating multi-group PDFs (no merge)")
+        """Generiert pro Gruppe ein eigenes PDF und merged sie zu einem großen PDF."""
+        self.logger.info("Generating multi-group PDFs with merge")
 
         all_groups = data.get('allGroups', {})
         disabled_groups = data.get('disabledGroups', [])
@@ -116,23 +116,75 @@ class ReviewPDFGeneratorMulti:
                 self.logger.info(f"Creating PDF for group: {group_name}")
                 group_doc = self._create_group_document(data, group_name, all_groups[group_name])
 
-                # Speichern als DOCX (temporär) und als PDF (permanent)
+                # Speichern als DOCX (temporär) und als PDF (temporär)
                 tmp_docx = os.path.join(tempfile.gettempdir(), f"review_talk_{data.get('reviewNr')}_{safe_name(group_name)}.docx")
-                group_pdf = os.path.join(output_dir, f"review_talk_{data.get('reviewNr')}_{safe_name(group_name)}.pdf")
+                tmp_pdf = os.path.join(tempfile.gettempdir(), f"review_talk_{data.get('reviewNr')}_{safe_name(group_name)}.pdf")
 
                 group_doc.save(tmp_docx)
                 self.logger.info(f"Saved DOCX for group '{group_name}' to {tmp_docx}")
 
-                self._convert_docx_to_pdf(tmp_docx, group_pdf)
-                self.logger.info(f"Converted PDF for group '{group_name}' to {group_pdf}")
+                self._convert_docx_to_pdf(tmp_docx, tmp_pdf)
+                self.logger.info(f"Converted PDF for group '{group_name}' to {tmp_pdf}")
 
-                per_group_pdfs.append(group_pdf)
+                per_group_pdfs.append(tmp_pdf)
         finally:
             pythoncom.CoUninitialize()
 
-        # Kein Merge: Liste der einzelnen PDFs zurückgeben
-        self.logger.info(f"Generated {len(per_group_pdfs)} group PDFs in {output_dir}")
-        return per_group_pdfs
+        # Merge alle PDFs zu einem großen PDF
+        if len(per_group_pdfs) > 1:
+            self.logger.info(f"Merging {len(per_group_pdfs)} PDFs into one")
+
+            if not PdfWriter:
+                self.logger.error("pypdf not available, cannot merge PDFs")
+                # Fallback: gebe Liste zurück
+                return per_group_pdfs
+
+            merged_pdf_path = os.path.join(output_dir, f"Review_Talk_{data.get('grouping', 'all')}_Review{data.get('reviewNr')}.pdf")
+
+            try:
+                merger = PdfWriter()
+
+                for pdf_path in per_group_pdfs:
+                    self.logger.info(f"Adding {pdf_path} to merger")
+                    merger.append(pdf_path)
+
+                # Schreibe merged PDF
+                with open(merged_pdf_path, 'wb') as output_file:
+                    merger.write(output_file)
+
+                merger.close()
+                self.logger.info(f"Successfully merged PDF saved to {merged_pdf_path}")
+
+                # Lösche temporäre einzelne PDFs
+                for pdf_path in per_group_pdfs:
+                    try:
+                        if os.path.exists(pdf_path):
+                            os.remove(pdf_path)
+                            self.logger.info(f"Deleted temporary PDF: {pdf_path}")
+                    except Exception as e:
+                        self.logger.warning(f"Could not delete temporary PDF {pdf_path}: {e}")
+
+                return merged_pdf_path
+
+            except Exception as e:
+                self.logger.error(f"Error merging PDFs: {e}", exc_info=True)
+                # Fallback: gebe Liste zurück
+                return per_group_pdfs
+
+        elif len(per_group_pdfs) == 1:
+            # Nur ein PDF, gebe es direkt zurück
+            single_pdf = per_group_pdfs[0]
+            # Verschiebe zu finalem Pfad
+            final_path = os.path.join(output_dir, f"Review_Talk_{data.get('grouping', 'all')}_Review{data.get('reviewNr')}.pdf")
+            if single_pdf != final_path:
+                import shutil
+                shutil.move(single_pdf, final_path)
+                self.logger.info(f"Moved single PDF to {final_path}")
+            return final_path
+
+        else:
+            self.logger.warning("No PDFs generated")
+            return None
 
     def _cleanup_word_processes(self):
         """Beendet hängende Word-Prozesse (nur wenn nötig)."""
