@@ -8,20 +8,18 @@ Erstellt ein PDF mit mehreren Seiten (eine pro Gruppe)
 
 import os
 import tempfile
-import subprocess
-import shutil
 from datetime import datetime
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_BREAK
 from docx2pdf import convert
+import pythoncom
 try:
     from pypdf import PdfWriter  # no longer used if merging disabled
 except Exception:
     PdfWriter = None
 from config.logger_config import get_logger
 import json
-import pythoncom
 import re
 
 # Logger Setup
@@ -136,39 +134,54 @@ class ReviewPDFGeneratorMulti:
         self.logger.info(f"Generated {len(per_group_pdfs)} group PDFs in {output_dir}")
         return per_group_pdfs
 
-    def _convert_docx_to_pdf(self, docx_path: str, pdf_path: str):
-        """Konvertiert DOCX zu PDF mit docx2pdf; Fallback: LibreOffice (soffice)."""
-        # Primär: docx2pdf (benötigt Microsoft Word)
+    def _cleanup_word_processes(self):
+        """Beendet hängende Word-Prozesse (nur wenn nötig)."""
         try:
-            convert(docx_path, pdf_path)
-            return
+            import subprocess
+            # Prüfe ob Word-Prozesse hängen
+            result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq WINWORD.EXE'],
+                                  capture_output=True, text=True, timeout=5)
+            if 'WINWORD.EXE' in result.stdout:
+                self.logger.warning("Found hanging WINWORD.EXE processes, cleaning up...")
+                subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'],
+                             capture_output=True, timeout=5)
+                import time
+                time.sleep(1)
         except Exception as e:
-            self.logger.warning(f"docx2pdf failed ({e}); trying LibreOffice fallback...")
+            self.logger.warning(f"Could not cleanup Word processes: {e}")
 
-        # Fallback: LibreOffice, wenn installiert
-        soffice = shutil.which('soffice') or shutil.which('soffice.exe')
-        if not soffice:
-            raise RuntimeError("Neither Word (docx2pdf) nor LibreOffice (soffice) available for DOCX to PDF conversion.")
+    def _convert_docx_to_pdf(self, docx_path: str, pdf_path: str):
+        """Konvertiert DOCX zu PDF mit docx2pdf/Word COM."""
+        max_retries = 3
+        retry_delay = 2
 
-        outdir = os.path.dirname(pdf_path) or tempfile.gettempdir()
-        cmd = [
-            soffice,
-            "--headless",
-            "--convert-to", "pdf",
-            "--outdir", outdir,
-            docx_path
-        ]
-        try:
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            # LibreOffice legt die PDF im outdir mit gleichem Basenamen ab
-            base = os.path.splitext(os.path.basename(docx_path))[0] + ".pdf"
-            produced = os.path.join(outdir, base)
-            if produced != pdf_path:
-                if os.path.exists(pdf_path):
-                    os.remove(pdf_path)
-                os.replace(produced, pdf_path)
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"LibreOffice conversion failed: {e}")
+        for attempt in range(max_retries):
+            try:
+                self.logger.info(f"Converting DOCX to PDF (attempt {attempt + 1}/{max_retries}): {docx_path}")
+
+                # Bei Wiederholungsversuchen: säubere Word-Prozesse
+                if attempt > 0:
+                    self._cleanup_word_processes()
+
+                convert(docx_path, pdf_path)
+
+                # Prüfe ob PDF erfolgreich erstellt wurde
+                if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
+                    self.logger.info(f"PDF conversion successful: {pdf_path}")
+                    return
+                else:
+                    raise Exception("PDF file not created or empty")
+
+            except Exception as e:
+                self.logger.warning(f"Conversion attempt {attempt + 1} failed: {e}")
+
+                if attempt < max_retries - 1:
+                    self.logger.info(f"Retrying in {retry_delay} seconds...")
+                    import time
+                    time.sleep(retry_delay)
+                else:
+                    self.logger.error(f"PDF conversion failed after {max_retries} attempts")
+                    raise Exception(f"PDF-Konvertierung fehlgeschlagen nach {max_retries} Versuchen: {str(e)}")
 
     def _create_group_document(self, data, group_name, group_data):
         """
@@ -212,39 +225,60 @@ class ReviewPDFGeneratorMulti:
         """Generiert ein PDF für eine einzelne Gruppe"""
         self.logger.info("Generating single-group PDF")
 
-        # Erstelle Dokument für die Gruppe
-        doc = self._create_group_document(data, data.get('group'), data.get('groupData'))
+        # Für Single-Group: structuredTables ist direkt in data
+        # Erstelle ein vereinheitlichtes Data-Dict
+        group_name = data.get('group')
+        group_data = data.get('groupData')
+
+        # Erstelle group_specific_data direkt hier
+        group_specific_data = {
+            'reviewNr': data.get('reviewNr'),
+            'reviewDate': data.get('reviewDate'),
+            'exportDate': data.get('exportDate', ''),
+            'grouping': data.get('grouping'),
+            'group': group_name,
+            'groupData': group_data,
+            'absentPersons': data.get('absentPersons', []),
+            'week': data.get('week', 9),
+            'maxWeeks': data.get('maxWeeks', 9),
+            'structuredTables': data.get('structuredTables')  # Direkt aus data nehmen!
+        }
+
+        self.logger.info(f"Single-group PDF: structuredTables present: {group_specific_data['structuredTables'] is not None}")
+
+        # Lade neues Template
+        doc = Document(self.template_path)
+
+        # Fülle das Dokument
+        self._replace_placeholders_in_doc(doc, group_specific_data)
+        self._fill_person_table_in_doc(doc, group_specific_data)
 
         # Speichere und konvertiere
         return self._save_and_convert(doc, data, output_path)
 
     def _save_and_convert(self, doc, data, output_path=None):
-        """Speichert das Dokument und konvertiert es zu PDF"""
-        # Initialisiere COM für diesen Thread
+        """Speichert das Dokument und konvertiert es zu PDF (Word/docx2pdf)."""
+        # Temporäre DOCX-Datei erstellen
+        temp_dir = tempfile.gettempdir()
+        temp_docx = os.path.join(temp_dir, f"review_talk_{data.get('reviewNr')}.docx")
+        doc.save(temp_docx)
+
+        self.logger.info(f"Word document saved to: {temp_docx}")
+
+        # PDF-Ausgabepfad
+        if output_path is None:
+            output_path = os.path.join(temp_dir, f"review_talk_{data.get('reviewNr')}.pdf")
+
+        # Konvertiere zu PDF via Word/docx2pdf mit COM-Init
+        self.logger.info(f"Converting to PDF: {output_path}")
         pythoncom.CoInitialize()
-
         try:
-            # Temporäre DOCX-Datei erstellen
-            temp_dir = tempfile.gettempdir()
-            temp_docx = os.path.join(temp_dir, f"review_talk_{data.get('reviewNr')}.docx")
-            doc.save(temp_docx)
-
-            self.logger.info(f"Word document saved to: {temp_docx}")
-
-            # PDF-Ausgabepfad
-            if output_path is None:
-                output_path = os.path.join(temp_dir, f"review_talk_{data.get('reviewNr')}.pdf")
-
-            # Konvertiere zu PDF
-            self.logger.info(f"Converting to PDF: {output_path}")
-            convert(temp_docx, output_path)
-
-            self.logger.info(f"PDF generated successfully: {output_path}")
-            return output_path
-
+            self._convert_docx_to_pdf(temp_docx, output_path)
         finally:
-            # COM cleanup
             pythoncom.CoUninitialize()
+
+        self.logger.info(f"PDF generated successfully: {output_path}")
+        return output_path
 
     def _extract_export_date_from_filename(self, export_date_path):
         """
@@ -416,6 +450,7 @@ class ReviewPDFGeneratorMulti:
             float: Fortschritt in Prozent
         """
         if not structured_tables:
+            self.logger.warning(f"No structured_tables provided for user '{user_name}'")
             return 0.0
 
         # Hole Checklisten-Tabelle
@@ -423,19 +458,23 @@ class ReviewPDFGeneratorMulti:
         rows = checklists_data.get('rows', [])
 
         if not rows:
-            self.logger.warning("No checklist rows found")
+            self.logger.warning(f"No checklist rows found for user '{user_name}'")
             return 0.0
 
         # Finde User-Index in den Headers
         headers = checklists_data.get('headers', [])
+        self.logger.info(f"Checklist headers: {headers}")
+
         if 'Checkliste' in headers:
             headers = headers[1:]  # Überspringe erste Spalte ('Checkliste')
+            self.logger.info(f"Headers after removing 'Checkliste': {headers}")
 
         if user_name not in headers:
-            self.logger.warning(f"User '{user_name}' not found in headers")
+            self.logger.warning(f"User '{user_name}' not found in headers: {headers}")
             return 0.0
 
         user_index = headers.index(user_name)
+        self.logger.info(f"User '{user_name}' found at index {user_index}")
 
         # Berechne Fortschritt nur für Pflicht-Checklisten
         total_mandatory_checklists = sum(1 for row in rows if row.get('is_mandatory', False))

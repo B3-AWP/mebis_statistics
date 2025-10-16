@@ -100,12 +100,7 @@
                     ⚠️ Daten sind <span id="fileAgeDays"></span> Tag(e) alt
                 </div>
 
-                <button id="pdfReviewBtn" class="nav-btn" onclick="openPdfReviewModal()" title="Review-Talk PDF erstellen">
-                    <svg class="icon" width="18" height="18" aria-hidden="true">
-                        <use href="#icon-pdf"></use>
-                    </svg>
-                    <span class="tab-text">Review-Talk PDF</span>
-                </button>
+               
 
                 <button id="refreshBtn" class="nav-btn" onclick="startExportAndReload()">
                     <svg class="icon" width="18" height="18" aria-hidden="true">
@@ -139,6 +134,13 @@
                                 <use href="#icon-current-week"></use>
                             </svg>
                             <span>Aktuelle Woche</span>
+                        </button>
+
+                        <button id="pdfReviewBtn" class="nav-btn" onclick="openPdfReviewModal()" title="Review-Talk PDF erstellen">
+                            <svg class="icon" width="18" height="18" aria-hidden="true">
+                                <use href="#icon-pdf"></use>
+                            </svg>
+                            <span class="tab-text">Review-Talk PDF</span>
                         </button>
                     </div>
                 </div>
@@ -501,7 +503,7 @@
                         <div class="pdf-week-slider-container">
                             <span class="pdf-slider-value">1</span>
                             <input type="range" id="pdfWeekSlider" min="1" max="9" value="9" class="pdf-week-slider"
-                                   oninput="document.getElementById('pdfCurrentWeekDisplay').textContent = this.value">
+                                   oninput="updatePdfSliderProgress(this)">
                             <span class="pdf-slider-value" id="pdfWeekSliderMax">9</span>
                             <span class="pdf-current-week-display">Woche <span id="pdfCurrentWeekDisplay">9</span></span>
                         </div>

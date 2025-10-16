@@ -4,3 +4,5 @@ flask-cors==4.0.0
 python-dotenv==1.0.0
 configparser
 pypdf>=3.9.0
+requests>=2.30.0
+docx2pdf>=0.1.8

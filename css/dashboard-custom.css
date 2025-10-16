@@ -10,6 +10,14 @@
     padding: 8px 6px !important;
     white-space: nowrap;
     text-align: center;
+    background: var(--primary-dark);
+    color: var(--light-color) !important;
+    transition: all 0.2s ease;
+}
+
+.dashboard-table th:hover {
+    background: var(--light-color);
+    color: var(--primary-dark) !important;
 }
 
 .dashboard-table td {
@@ -24,33 +32,55 @@
     min-width: 200px;
 }
 
-/* Gruppierte Header-Styling */
+/* Gruppierte Header-Styling - Einheitlich */
 .group-header-pflicht {
-    background: linear-gradient(135deg, #667eea, #007bff) !important;
-    color: white !important;
+    background: var(--primary-dark) !important;
+    color: var(--light-color) !important;
     font-weight: bold;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+    transition: all 0.2s ease;
+}
+
+.group-header-pflicht:hover {
+    background: var(--light-color) !important;
+    color: var(--primary-dark) !important;
 }
 
 .group-header-gesamt {
-    background: linear-gradient(135deg, #764ba2, #6f42c1) !important;
-    color: white !important;
+    background: var(--primary-dark) !important;
+    color: var(--light-color) !important;
     font-weight: bold;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+    transition: all 0.2s ease;
+}
+
+.group-header-gesamt:hover {
+    background: var(--light-color) !important;
+    color: var(--primary-dark) !important;
 }
 
 .sub-header-pflicht {
-    background: #007bff !important;
-    color: white !important;
+    background: var(--primary-dark) !important;
+    color: var(--light-color) !important;
     font-size: 0.75rem;
     font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.sub-header-pflicht:hover {
+    background: var(--light-color) !important;
+    color: var(--primary-dark) !important;
 }
 
 .sub-header-gesamt {
-    background: #6f42c1 !important;
-    color: white !important;
+    background: var(--primary-dark) !important;
+    color: var(--light-color) !important;
     font-size: 0.75rem;
     font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.sub-header-gesamt:hover {
+    background: var(--light-color) !important;
+    color: var(--primary-dark) !important;
 }
 
 /* Responsive Verbesserungen */
@@ -87,9 +117,15 @@
 }
 
 .overview-table th {
-    background: linear-gradient(135deg, #4f46e5, #6366f1) !important;
-    color: white !important;
+    background: var(--primary-dark) !important;
+    color: var(--light-color) !important;
     padding: 10px 8px !important;
+    transition: all 0.2s ease;
+}
+
+.overview-table th:hover {
+    background: var(--light-color) !important;
+    color: var(--primary-dark) !important;
 }
 
 .overview-table td {
@@ -109,8 +145,8 @@
 }
 
 .comparison-table th {
-    background: linear-gradient(135deg, #059669, #10b981) !important;
-    color: white !important;
+    background: var(--primary-dark) !important;
+    color: var(--light-color) !important;
     padding: 8px 4px !important;
     text-align: center !important;
     font-size: 0.75rem;
@@ -121,6 +157,12 @@
     word-wrap: break-word;
     min-width: 60px;
     max-width: 80px;
+    transition: all 0.2s ease;
+}
+
+.comparison-table th:hover {
+    background: var(--light-color) !important;
+    color: var(--primary-dark) !important;
 }
 
 .comparison-table td {
@@ -214,11 +256,12 @@
     user-select: none;
     position: relative;
     padding-right: 20px !important;
-    transition: background-color 0.2s ease;
+    transition: all 0.2s ease;
 }
 
 .sortable-header:hover {
-    background-color: rgba(255, 255, 255, 0.1) !important;
+    background: var(--light-color) !important;
+    color: var(--primary-dark) !important;
 }
 
 .sortable-header::after {

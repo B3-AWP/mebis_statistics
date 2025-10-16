@@ -898,7 +898,7 @@ function generateGroupComparisonTable() {
         return;
     }
 
-    let html = '<div style="overflow-x: auto;"><table id="groupComparisonTable" class="info-table dashboard-table overview-table">';
+    let html = '<table id="groupComparisonTable" class="info-table dashboard-table overview-table">';
     html += '<thead><tr class="sticky-header">';
     html += '<th class="group-name-cell">Gruppe</th>';
     html += '<th>Personen</th>';
@@ -939,21 +939,24 @@ function generateGroupComparisonTable() {
 
         html += '<tr>';
         html += `<td class="group-name-cell"><strong>${stats.groupName}</strong></td>`;
-        html += `<td style="text-align: center;">${stats.userCount}</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${Math.min(stats.avgCompletedChecklists * 10, 100)}%; --progress-color: #28a745;">${stats.avgCompletedChecklists.toFixed(1)}</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${displayRequiredProgress}%; --progress-color: #007bff;">${displayRequiredProgress.toFixed(1)}%</td>`;
-        html += `<td style="text-align: center; font-weight: bold;">${gradeText}</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${stats.avgAllProgress}%; --progress-color: #6f42c1;">${stats.avgAllProgress.toFixed(1)}%</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${Math.min(stats.avgCompletedPflichtaufgaben * 10, 100)}%; --progress-color: #fd7e14;">${stats.avgCompletedPflichtaufgaben.toFixed(1)}</td>`;
-        html += `<td style="text-align: center; font-weight: bold; color: ${pflichtGradeColor};" title="Durchschnitt von ${groupPflichtGrade ? groupPflichtGrade.count : 0} Personen mit bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
+        html += `<td class="text-center">${stats.userCount}</td>`;
+        html += `<td class="progress-cell progress-color-success" style="--progress-width: ${Math.min(stats.avgCompletedChecklists * 10, 100)}%;">${stats.avgCompletedChecklists.toFixed(1)}</td>`;
+        html += `<td class="progress-cell progress-color-info" style="--progress-width: ${displayRequiredProgress}%;">${displayRequiredProgress.toFixed(1)}%</td>`;
+        html += `<td class="text-center text-bold">${gradeText}</td>`;
+        html += `<td class="progress-cell progress-color-secondary" style="--progress-width: ${stats.avgAllProgress}%;">${stats.avgAllProgress.toFixed(1)}%</td>`;
+        html += `<td class="progress-cell progress-color-warning" style="--progress-width: ${Math.min(stats.avgCompletedPflichtaufgaben * 10, 100)}%;">${stats.avgCompletedPflichtaufgaben.toFixed(1)}</td>`;
+        html += `<td class="text-center text-bold" style="color: ${pflichtGradeColor};" title="Durchschnitt von ${groupPflichtGrade ? groupPflichtGrade.count : 0} Personen mit bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
         html += '</tr>';
     });
 
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
     makeTableSortable('groupComparisonTable');
+    
+    // Scroll-Wrapper anwenden
+    setTimeout(() => wrapTableWithScrollContainer('groupProgressTable'), 50);
 }
 
 // Berechnet die tatsächlichen Fortschrittsprozentsätze basierend nur auf Checklisten bis zur ausgewählten Woche
@@ -1103,7 +1106,7 @@ function generateGroupProgressTable(users) {
         return;
     }
 
-    let html = '<div style="overflow-x: auto;"><table id="individualProgressTable" class="info-table dashboard-table overview-table">';
+    let html = '<table id="individualProgressTable" class="info-table dashboard-table overview-table">';
     html += '<thead><tr class="sticky-header">';
     html += '<th class="person-name">Person</th>';
     html += '<th>Checklisten<br>100%</th>';
@@ -1140,22 +1143,25 @@ function generateGroupProgressTable(users) {
 
         html += '<tr>';
         html += `<td class="person-name"><strong>${user.name}</strong></td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${Math.min(user.checklists.required_100_count * 10, 100)}%; --progress-color: #28a745;">${user.checklists.required_100_count}</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${displayPflichtProgress}%; --progress-color: #007bff;">${displayPflichtProgress.toFixed(1)}%</td>`;
-        html += `<td style="text-align: center; font-weight: bold;">${gradeText}</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${displayGesamtProgress}%; --progress-color: #6f42c1;">${displayGesamtProgress.toFixed(1)}%</td>`;
-        html += `<td class="progress-cell" style="--progress-width: ${user.assignments.percent_submitted}%; --progress-color: #fd7e14;">${user.assignments.submitted_count}</td>`;
-        html += `<td style="text-align: center; font-weight: bold; color: ${pflichtGradeColor};" title="Durchschnitt aus ${pflichtGradeResult ? pflichtGradeResult.count : 0} bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
+        html += `<td class="progress-cell progress-color-success" style="--progress-width: ${Math.min(user.checklists.required_100_count * 10, 100)}%;">${user.checklists.required_100_count}</td>`;
+        html += `<td class="progress-cell progress-color-info" style="--progress-width: ${displayPflichtProgress}%;">${displayPflichtProgress.toFixed(1)}%</td>`;
+        html += `<td class="text-center text-bold">${gradeText}</td>`;
+        html += `<td class="progress-cell progress-color-secondary" style="--progress-width: ${displayGesamtProgress}%;">${displayGesamtProgress.toFixed(1)}%</td>`;
+        html += `<td class="progress-cell progress-color-warning" style="--progress-width: ${user.assignments.percent_submitted}%;">${user.assignments.submitted_count}</td>`;
+        html += `<td class="text-center text-bold" style="color: ${pflichtGradeColor};" title="Durchschnitt aus ${pflichtGradeResult ? pflichtGradeResult.count : 0} bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
         html += '</tr>';
     });
 
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
     makeTableSortable('individualProgressTable');
 }
 
+    
+    // Scroll-Wrapper anwenden
+    setTimeout(() => wrapTableWithScrollContainer('groupProgressTable'), 50);
 // Progress Ring aktualisieren
 function updateProgressRing(ringId, percentage) {
     const ring = document.getElementById(ringId);
@@ -1388,7 +1394,7 @@ function generateChecklistTable() {
 
     const userCount = tableData.headers.length - 1; // Anzahl der Benutzer
 
-    let html = '<div style="overflow-x: auto;"><table id="checklistTable" class="info-table dashboard-table">';
+    let html = '<table id="checklistTable" class="info-table dashboard-table">';
     html += '<thead><tr class="sticky-header">';
 
     // Header: Checkliste + Benutzernamen mit je 2 Spalten (Pflicht + Gesamt)
@@ -1397,13 +1403,13 @@ function generateChecklistTable() {
     // Für jeden Benutzer zwei Spalten: Pflicht + Gesamt
     for (let i = 1; i < tableData.headers.length; i++) {
         const userName = tableData.headers[i];
-        html += `<th colspan="2" style="text-align: center; background: linear-gradient(135deg, #667eea, #764ba2);">${userName}</th>`;
+        html += `<th colspan="2" class="text-center">${userName}</th>`;
     }
     html += '</tr>';
 
     // Zweite Header-Zeile für Pflicht/Gesamt
     html += '<tr class="sticky-header">';
-    html += '<th></th>'; // Leere Zelle für Checkliste-Spalte
+    html += '<th>Typ</th>'; // Leere Zelle für Checkliste-Spalte
     for (let i = 1; i < tableData.headers.length; i++) {
         html += '<th class="sub-header-pflicht">Pflicht</th>';
         html += '<th class="sub-header-gesamt gesamt-column">Gesamt</th>';
@@ -1444,20 +1450,23 @@ function generateChecklistTable() {
                 pflichtDisplay = '-';
                 pflichtProgressWidth = 0;
             }
-            html += `<td class="progress-cell" style="--progress-width: ${pflichtProgressWidth}%; --progress-color: #28a745;">${pflichtDisplay}</td>`;
+            html += `<td class="progress-cell" style="--progress-width: ${pflichtProgressWidth}%; class="progress-color-success">${pflichtDisplay}</td>`;
 
             // Gesamt-Fortschritt (mit gesamt-column Klasse für ein-/ausblenden)
-            html += `<td class="progress-cell gesamt-column" style="--progress-width: ${gesamtPercent}%; --progress-color: #6f42c1;">${allProgressText}</td>`;
+            html += `<td class="progress-cell gesamt-column" style="--progress-width: ${gesamtPercent}%; class="progress-color-secondary">${allProgressText}</td>`;
         });
 
         html += '</tr>';
     });
 
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
     makeTableSortable('checklistTable');
+    
+    // Scroll-Wrapper anwenden
+    setTimeout(() => wrapTableWithScrollContainer('checklistData'), 50);
 }
 
 // Pflichtaufgaben-Tab laden
@@ -1680,7 +1689,7 @@ function generatePflichtTableFromActivities() {
         return;
     }
 
-    let html = '<div style="overflow-x: auto;"><table id="pflichtTable" class="info-table dashboard-table">';
+    let html = '<table id="pflichtTable" class="info-table dashboard-table">';
     html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
 
     // Header für alle Benutzer der Gruppe
@@ -1697,7 +1706,7 @@ function generatePflichtTableFromActivities() {
         const activityIcon = assignment.activity_type === 'quiz' ? '🧭' : '📝';
         const activityType = assignment.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe';
         html += `<a href="${assignment.url}" target="_blank">${activityIcon} ${assignment.title}</a>`;
-        html += `<br><small style="color: #666;">Typ: ${activityType} | Kategorie: ${assignment.category_name || 'Unbekannt'}</small>`;
+        html += `<br><small class="status-text-muted">Typ: ${activityType} | Kategorie: ${assignment.category_name || 'Unbekannt'}</small>`;
         html += `</td>`;
 
         // Status für jeden Benutzer der Gruppe
@@ -1730,10 +1739,10 @@ function generatePflichtTableFromActivities() {
                 cellContent = `<strong>${status.score}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.status === 'Zur Bewertung abgegeben') {
-                cellContent = '<span style="color: #ffc107;">bewertbar</span>';
+                cellContent = '<span class="status-text-warning">bewertbar</span>';
                 bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
-                cellContent = '<span style="color: #dc3545;">Nicht eingereicht</span>';
+                cellContent = '<span class="status-text-danger">Nicht eingereicht</span>';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
@@ -1743,12 +1752,15 @@ function generatePflichtTableFromActivities() {
         html += '</tr>';
     });
 
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
 
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
     makeTableSortable('pflichtTable');
+    
+    // Scroll-Wrapper anwenden
+    setTimeout(() => wrapTableWithScrollContainer('pflichtData'), 50);
 
     // Notenberechnung für Pflichtaufgaben hinzufügen
     addPflichtaufgabenGradeCalculation();
@@ -1806,7 +1818,7 @@ function generatePflichtTableFromStructuredTables() {
         return;
     }
 
-    let html = '<div style="overflow-x: auto;"><table id="pflichtTable" class="info-table dashboard-table">';
+    let html = '<table id="pflichtTable" class="info-table dashboard-table">';
     html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
 
     for (let i = 1; i < tableData.headers.length; i++) {
@@ -1820,7 +1832,7 @@ function generatePflichtTableFromStructuredTables() {
         const typeIcon = row.assignment_type === 'quiz' ? '🧭' : '📝';
         html += `<td style="min-width: 250px;">`;
         html += `<a href="${row.assignment_url}" target="_blank">${typeIcon} ${row.assignment_title}</a>`;
-        html += `<br><small style="color: #666;">Typ: ${row.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
+        html += `<br><small class="status-text-muted">Typ: ${row.assignment_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
         html += `</td>`;
 
         row.user_status.forEach(status => {
@@ -1832,10 +1844,10 @@ function generatePflichtTableFromStructuredTables() {
                 cellContent = `<strong>${status.grade}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status.status === 'Zur Bewertung abgegeben') {
-                cellContent = '<span style="color: #ffc107;">bewertbar</span>';
+                cellContent = '<span class="status-text-warning">bewertbar</span>';
                 bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
-                cellContent = '<span style="color: #dc3545;">Nicht eingereicht</span>';
+                cellContent = '<span class="status-text-danger">Nicht eingereicht</span>';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
@@ -1845,10 +1857,13 @@ function generatePflichtTableFromStructuredTables() {
         html += '</tr>';
     });
 
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     container.innerHTML = html;
 
     makeTableSortable('pflichtTable');
+    
+    // Scroll-Wrapper anwenden
+    setTimeout(() => wrapTableWithScrollContainer('pflichtData'), 50);
 
     // Notenberechnung für Pflichtaufgaben hinzufügen
     addPflichtaufgabenGradeCalculation();
@@ -1945,18 +1960,18 @@ function generateAllGroupsChecklistTable() {
     // Set zu Array konvertieren und parsen
     const checklistsArray = Array.from(allChecklists).map(str => JSON.parse(str));
 
-    let html = '<div style="overflow-x: auto;"><table id="allGroupsChecklistTable" class="info-table dashboard-table">';
+    let html = '<table id="allGroupsChecklistTable" class="info-table dashboard-table">';
     html += '<thead><tr class="sticky-header">';
     html += '<th class="checklist-name-cell">Checkliste</th>';
 
     // Header für alle Benutzer
     allUsers.forEach(user => {
-        html += `<th colspan="2" style="text-align: center; background: linear-gradient(135deg, #667eea, #764ba2);">${user.name}<br><small>${user.group}</small></th>`;
+        html += `<th colspan="2" class="text-center">${user.name}<br><small>${user.group}</small></th>`;
     });
     html += '</tr>';
 
     // Zweite Header-Zeile
-    html += '<tr class="sticky-header"><th></th>';
+    html += '<tr class="sticky-header"><th>Typ</th>';
     allUsers.forEach(() => {
         html += '<th class="sub-header-pflicht">Pflicht</th>';
         html += '<th class="sub-header-gesamt gesamt-column">Gesamt</th>';
@@ -2009,18 +2024,21 @@ function generateAllGroupsChecklistTable() {
                 pflichtDisplay = '-';
                 pflichtProgressWidth = 0;
             }
-            html += `<td class="progress-cell" style="--progress-width: ${pflichtProgressWidth}%; --progress-color: #28a745;">${pflichtDisplay}</td>`;
-            html += `<td class="progress-cell gesamt-column" style="--progress-width: ${gesamtPercent}%; --progress-color: #6f42c1;">${allProgressText}</td>`;
+            html += `<td class="progress-cell" style="--progress-width: ${pflichtProgressWidth}%; class="progress-color-success">${pflichtDisplay}</td>`;
+            html += `<td class="progress-cell gesamt-column" style="--progress-width: ${gesamtPercent}%; class="progress-color-secondary">${allProgressText}</td>`;
         });
 
         html += '</tr>';
     });
 
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
     makeTableSortable('allGroupsChecklistTable');
+    
+    // Scroll-Wrapper anwenden
+    setTimeout(() => wrapTableWithScrollContainer('checklistData'), 50);
 }
 
 function generateAllGroupsPflichtTable() {
@@ -2136,7 +2154,7 @@ function generateAllGroupsPflichtTable() {
     });
     const allUsers = Array.from(allUsersSet).map(str => JSON.parse(str));
 
-    let html = '<div style="overflow-x: auto;"><table id="allGroupsPflichtTable" class="info-table dashboard-table">';
+    let html = '<table id="allGroupsPflichtTable" class="info-table dashboard-table">';
     html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
 
     // Header für alle Benutzer
@@ -2152,7 +2170,7 @@ function generateAllGroupsPflichtTable() {
         const activityIcon = assignment.activity_type === 'quiz' ? '🧭' : '📝';
         const activityType = assignment.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe';
         html += `<a href="${assignment.url}" target="_blank">${activityIcon} ${assignment.title}</a>`;
-        html += `<br><small style="color: #666;">Typ: ${activityType} | Kategorie: ${assignment.category_name || 'Unbekannt'}</small>`;
+        html += `<br><small class="status-text-muted">Typ: ${activityType} | Kategorie: ${assignment.category_name || 'Unbekannt'}</small>`;
         html += `</td>`;
 
         // Status für jeden Benutzer
@@ -2181,11 +2199,11 @@ function generateAllGroupsPflichtTable() {
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.status === 'Zur Bewertung abgegeben') {
                 // Zur Bewertung abgegeben - zeige "bewertbar"
-                cellContent = '<span style="color: #ffc107;">bewertbar</span>';
+                cellContent = '<span class="status-text-warning">bewertbar</span>';
                 bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
                 // Nicht eingereicht
-                cellContent = '<span style="color: #dc3545;">Nicht eingereicht</span>';
+                cellContent = '<span class="status-text-danger">Nicht eingereicht</span>';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
@@ -2195,11 +2213,14 @@ function generateAllGroupsPflichtTable() {
         html += '</tr>';
     });
 
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
     makeTableSortable('allGroupsPflichtTable');
+    
+    // Scroll-Wrapper anwenden
+    setTimeout(() => wrapTableWithScrollContainer('pflichtData'), 50);
 
     // Notenberechnung für Pflichtaufgaben hinzufügen
     addPflichtaufgabenGradeCalculationForAllGroups();
@@ -2714,7 +2735,7 @@ function generateExamTable() {
     });
     const sortedUsers = Array.from(allUsers).sort();
 
-    let html = '<div style="overflow-x: auto;"><table id="examTable" class="info-table dashboard-table">';
+    let html = '<table id="examTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
 
     // Header: Aufgabe + Benutzernamen
@@ -2723,7 +2744,7 @@ function generateExamTable() {
     // Für jeden Benutzer eine Spalte mit Zeilenumbruch bei erstem Leerzeichen
     sortedUsers.forEach(userName => {
         const displayName = userName.replace(' ', '<br>');
-        html += `<th style="min-width: 120px; text-align: center;">${displayName}</th>`;
+        html += `<th class="text-center">${displayName}</th>`;
     });
     html += '</tr></thead>';
 
@@ -2763,8 +2784,7 @@ function generateExamTable() {
                 // Kein Status gefunden für diesen Benutzer
                 console.log(`DEBUG EXAM: No status found for ${activity.activity_type} "${activity.title}" for user ${userName}`);
                 cellContent = '❓ Nicht gefunden';
-                cellClass = 'status-missing';
-                bgColor = '#f8f9fa'; // Grau
+                cellClass = 'status-not-submitted';
             } else if (status.grade && status.grade !== '-') {
                 // WICHTIG: Grade muss VOR Status geprüft werden (z.B. bei Gruppeneinreichungen)
                 // Grade vorhanden - zeige Grade-Wert
@@ -2774,12 +2794,10 @@ function generateExamTable() {
                 }
                 cellContent = `✓ ${status.grade}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.status === 'Nicht eingereicht' || !status.status) {
                 // Nicht eingereicht - zeige "-"
                 cellContent = '❌ -';
-                cellClass = 'status-missing';
-                bgColor = '#f8d7da'; // Rot
+                cellClass = 'status-not-submitted';
             } else if (status.rating && status.rating !== '-') {
                 // Alternative: Rating field for assignments
                 console.log(`DEBUG EXAM: Rating found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.rating}`);
@@ -2788,7 +2806,6 @@ function generateExamTable() {
                 }
                 cellContent = `✓ ${status.rating}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.score && status.score !== '-') {
                 // Alternative: Score field for assignments
                 console.log(`DEBUG EXAM: Score found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.score}`);
@@ -2797,7 +2814,6 @@ function generateExamTable() {
                 }
                 cellContent = `✓ ${status.score}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.points && status.points !== '-' && status.points !== null) {
                 // Alternative: Points field for assignments
                 console.log(`DEBUG EXAM: Points found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.points}`);
@@ -2806,7 +2822,6 @@ function generateExamTable() {
                 }
                 cellContent = `✓ ${status.points}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.result && status.result !== '-' && status.result !== null) {
                 // Alternative: Result field for assignments
                 console.log(`DEBUG EXAM: Result found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.result}`);
@@ -2815,7 +2830,6 @@ function generateExamTable() {
                 }
                 cellContent = `✓ ${status.result}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.mark && status.mark !== '-' && status.mark !== null) {
                 // Alternative: Mark field for assignments
                 console.log(`DEBUG EXAM: Mark found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.mark}`);
@@ -2824,12 +2838,10 @@ function generateExamTable() {
                 }
                 cellContent = `✓ ${status.mark}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
                 // Zur Bewertung abgegeben - zeige "abgegeben"
                 cellContent = '⏳ abgegeben';
-                cellClass = 'status-submitted';
-                bgColor = '#fff3cd'; // Gelb
+                cellClass = 'status-gradable'; // Gelb
             } else {
                 // Andere Status - Debug ALL possible grade fields
                 console.log(`DEBUG EXAM: Other status for ${activity.activity_type} "${activity.title}" for user ${userName}:`, {
@@ -2861,27 +2873,29 @@ function generateExamTable() {
 
                 cellContent = status.status || 'Unbekannt';
                 cellClass = 'status-other';
-                bgColor = '#e2e3e5'; // Grau
             }
 
-            html += `<td class="${cellClass}" style="text-align: center; background-color: ${bgColor};">${cellContent}</td>`;
+            html += `<td class="${cellClass}">${cellContent}</td>`;
         });
 
         html += '</tr>';
     });
 
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
     makeTableSortable('examTable');
+
+    // Scroll-Wrapper anwenden
+    setTimeout(() => wrapTableWithScrollContainer('examData'), 50);
 
     // Filter anwenden falls nötig
     applyExamViewFilters();
 }
 
 // Leistungsnachweise für alle Gruppen (Zeilen = Benutzer, Spalten = Leistungsnachweise)
-function generateAllGroupsexamTable() {
+function generateAllGroupsExamTable() {
     const container = document.getElementById('examData');
     if (!container || !dashboardData || !dashboardData.activities_by_category) return;
 
@@ -2974,11 +2988,11 @@ function generateAllGroupsexamTable() {
         return nameA.localeCompare(nameB);
     });
 
-    let html = '<div style="overflow-x: auto;"><table id="allGroupsexamTable" class="info-table dashboard-table">';
+    let html = '<table id="allGroupsexamTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
 
     // Header: Benutzer + Gruppe + alle Activities
-    html += '<th style="min-width: 180px;">Benutzer</th>';
+    html += '<th style="max-width: 100px">Benutzer</th>';
     html += '<th style="min-width: 120px;">Gruppe</th>';
 
     sortedActivities.forEach(activity => {
@@ -2986,8 +3000,8 @@ function generateAllGroupsexamTable() {
         const shortTitle = activity.title.length > 12 ?
             activity.title.substring(0, 12) + '...' : activity.title;
 
-        html += `<th style="min-width: 100px; text-align: center;" title="${typeIcon} ${activity.title}">`;
-        html += `<a href="${activity.url}" target="_blank">${typeIcon}<br>${shortTitle}</a>`;
+        html += `<th style="text-align: center; " title="${typeIcon} ${activity.title}">`;
+        html += `<a href="${activity.url}" target="_blank" class="link-light">${typeIcon}<br>${shortTitle}</a>`;
         html += `</th>`;
     });
     html += '</tr></thead>';
@@ -3000,10 +3014,10 @@ function generateAllGroupsexamTable() {
 
         // Benutzername mit Zeilenumbruch
         const displayName = user.userName.replace(' ', '<br>');
-        html += `<td style="min-width: 180px; font-weight: 500;">${displayName}</td>`;
+        html += `<td style="font-weight: 500;">${displayName}</td>`;
 
         // Gruppenname
-        html += `<td style="min-width: 120px;">${user.groupName}</td>`;
+        html += `<td >${user.groupName}</td>`;
 
         // Status für jede Activity (gleiche Logik wie einzelne Gruppen)
         sortedActivities.forEach(activity => {
@@ -3023,68 +3037,61 @@ function generateAllGroupsexamTable() {
             if (!status) {
                 // Kein Status gefunden für diesen Benutzer
                 cellContent = '-';
-                cellClass = 'status-missing';
-                bgColor = '#f8f9fa'; // Grau
+                cellClass = 'status-not-submitted';
             } else if (status.status === 'Nicht eingereicht' || !status.status) {
                 cellContent = '❌';
-                cellClass = 'status-missing';
-                bgColor = '#f8d7da'; // Rot
+                cellClass = 'status-not-submitted';
             } else if (status.grade && status.grade !== '-') {
                 console.log(`DEBUG EXAM ALL: Grade found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.grade}`);
                 cellContent = `✓<br>${status.grade}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.rating && status.rating !== '-') {
                 // Alternative: Rating field for assignments
                 console.log(`DEBUG EXAM ALL: Rating found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.rating}`);
                 cellContent = `✓<br>${status.rating}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.score && status.score !== '-') {
                 // Alternative: Score field for assignments
                 console.log(`DEBUG EXAM ALL: Score found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.score}`);
                 cellContent = `✓<br>${status.score}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.points && status.points !== '-' && status.points !== null) {
                 // Alternative: Points field for assignments
                 console.log(`DEBUG EXAM ALL: Points found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.points}`);
                 cellContent = `✓<br>${status.points}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.result && status.result !== '-' && status.result !== null) {
                 // Alternative: Result field for assignments
                 console.log(`DEBUG EXAM ALL: Result found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.result}`);
                 cellContent = `✓<br>${status.result}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.mark && status.mark !== '-' && status.mark !== null) {
                 // Alternative: Mark field for assignments
                 console.log(`DEBUG EXAM ALL: Mark found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.mark}`);
                 cellContent = `✓<br>${status.mark}`;
                 cellClass = 'status-graded';
-                bgColor = '#d4edda'; // Grün
             } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
                 cellContent = '⏳';
-                cellClass = 'status-submitted';
-                bgColor = '#fff3cd'; // Gelb
+                cellClass = 'status-gradable'; // Gelb
             } else {
                 cellContent = '?';
                 cellClass = 'status-other';
-                bgColor = '#e2e3e5'; // Grau
             }
 
-            html += `<td class="${cellClass}" style="text-align: center; background-color: ${bgColor}; font-size: 12px;">${cellContent}</td>`;
+            html += `<td class="${cellClass} text-small">${cellContent}</td>`;
         });
 
         html += '</tr>';
     });
 
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
     makeTableSortable('allGroupsexamTable');
+
+    // Scroll-Wrapper anwenden
+    setTimeout(() => wrapTableWithScrollContainer('examData'), 50);
 
     // Filter anweExam();
 }
@@ -3173,25 +3180,20 @@ function createPflichtaufgabenGradeHeaderRow() {
     const headers = table.querySelectorAll('thead th');
 
     const row = document.createElement('tr');
-    row.className = 'pflicht-grade-row sticky-header';
-    row.style.backgroundColor = '#e8f4fd';
-    row.style.fontWeight = 'bold';
-    row.style.borderTop = '2px solid #007bff';
+    row.className = 'pflicht-grade-row sticky-header bg-light-blue text-bold';
+    row.style.borderTop = '2px solid var(--info-color)';
 
     // Erste Spalte: "Durchschnittsnote"
     const labelCell = document.createElement('th');
     labelCell.textContent = '📊 Durchschnittsnote';
-    labelCell.style.fontWeight = 'bold';
-    labelCell.style.color = '#007bff';
-    labelCell.style.backgroundColor = '#e8f4fd';
+    labelCell.className = 'text-bold';
+    labelCell.style.color = 'var(--info-color)';
     row.appendChild(labelCell);
 
     // Für jeden Benutzer eine Note berechnen (alle Spalten außer der ersten)
     for (let i = 1; i < headers.length; i++) {
         const gradeCell = document.createElement('th');
-        gradeCell.style.textAlign = 'center';
-        gradeCell.style.fontWeight = 'bold';
-        gradeCell.style.backgroundColor = '#e8f4fd';
+        gradeCell.className = 'text-center text-bold';
 
         const gradeResult = calculatePflichtaufgabenGradeForUser(i - 1); // i-1 weil erste Spalte der Aufgabenname ist
 
@@ -3735,25 +3737,20 @@ function createPflichtaufgabenGradeHeaderRowForAllGroups() {
     const headers = table.querySelectorAll('thead th');
 
     const row = document.createElement('tr');
-    row.className = 'pflicht-grade-row sticky-header';
-    row.style.backgroundColor = '#e8f4fd';
-    row.style.fontWeight = 'bold';
-    row.style.borderTop = '2px solid #007bff';
+    row.className = 'pflicht-grade-row sticky-header bg-light-blue text-bold';
+    row.style.borderTop = '2px solid var(--info-color)';
 
     // Erste Spalte: "Durchschnittsnote"
     const labelCell = document.createElement('th');
     labelCell.textContent = '📊 Durchschnittsnote';
-    labelCell.style.fontWeight = 'bold';
-    labelCell.style.color = '#007bff';
-    labelCell.style.backgroundColor = '#e8f4fd';
+    labelCell.className = 'text-bold';
+    labelCell.style.color = 'var(--info-color)';
     row.appendChild(labelCell);
 
     // Für jeden Benutzer eine Note berechnen (alle Spalten außer der ersten)
     for (let i = 1; i < headers.length; i++) {
         const gradeCell = document.createElement('th');
-        gradeCell.style.textAlign = 'center';
-        gradeCell.style.fontWeight = 'bold';
-        gradeCell.style.backgroundColor = '#e8f4fd';
+        gradeCell.className = 'text-center text-bold';
 
         const gradeResult = calculatePflichtaufgabenGradeForUserAllGroups(i - 1); // i-1 weil erste Spalte der Aufgabenname ist
 
@@ -4013,7 +4010,7 @@ function generateSingleGroupPflichtTableFromAllData() {
     }
 
     // HTML generieren (gleiche Logik wie einzelne Gruppe)
-    let html = '<div style="overflow-x: auto;"><table id="pflichtTable" class="info-table dashboard-table">';
+    let html = '<table id="pflichtTable" class="info-table dashboard-table">';
     html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
 
     // Header für alle Benutzer der Gruppe
@@ -4030,7 +4027,7 @@ function generateSingleGroupPflichtTableFromAllData() {
         const activityIcon = activity.activity_type === 'quiz' ? '🧭' : '📝';
         const activityType = activity.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe';
         html += `<a href="${activity.url}" target="_blank">${activityIcon} ${activity.title}</a>`;
-        html += `<br><small style="color: #666;">Typ: ${activityType} | Kategorie: ${activity.category_name || 'Unbekannt'}</small>`;
+        html += `<br><small class="status-text-muted">Typ: ${activityType} | Kategorie: ${activity.category_name || 'Unbekannt'}</small>`;
         html += `</td>`;
 
         // Status für jeden Benutzer der Gruppe
@@ -4062,10 +4059,10 @@ function generateSingleGroupPflichtTableFromAllData() {
                 cellContent = `<strong>${status.score}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.status === 'Zur Bewertung abgegeben') {
-                cellContent = '<span style="color: #ffc107;">bewertbar</span>';
+                cellContent = '<span class="status-text-warning">bewertbar</span>';
                 bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
-                cellContent = '<span style="color: #dc3545;">Nicht eingereicht</span>';
+                cellContent = '<span class="status-text-danger">Nicht eingereicht</span>';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
@@ -4075,7 +4072,7 @@ function generateSingleGroupPflichtTableFromAllData() {
         html += '</tr>';
     });
 
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     container.innerHTML = html;
 
     // Tabelle sortierbar machen
@@ -4083,6 +4080,9 @@ function generateSingleGroupPflichtTableFromAllData() {
 
     // Notenberechnung für Pflichtaufgaben hinzufügen
     addPflichtaufgabenGradeCalculation();
+    
+    // Scroll-Wrapper anwenden
+    setTimeout(() => wrapTableWithScrollContainer('pflichtData'), 50);
 
     // Sortierung anwenden
     const table = document.getElementById('pflichtTable');
@@ -4111,4 +4111,140 @@ function generateSingleGroupPflichtTableFromAllData() {
             sortState['pflichtTable_0'] = 'asc';
         }
     }
+}
+
+// ============================================================================
+// Table Scroll Wrapper - Automatisches Einpacken breiter Tabellen
+// ============================================================================
+
+/**
+ * Packt breite Tabellen in einen Scroll-Wrapper ein und macht Headers sticky
+ * @param {string} containerId - ID des Containers, der die Tabelle enthält
+ */
+function wrapTableWithScrollContainer(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Finde alle Tabellen im Container
+    const tables = container.querySelectorAll("table.info-table, table.dashboard-table");
+
+    tables.forEach(table => {
+        // Prüfe ob Tabelle bereits gewickelt ist
+        if (table.parentElement.classList.contains("table-scroll-wrapper")) {
+            return;
+        }
+
+        // Erstelle Wrapper
+        const wrapper = document.createElement("div");
+        wrapper.className = "table-scroll-wrapper";
+
+        // Füge Scroll-Hinweis hinzu
+        const hint = document.createElement("div");
+        hint.className = "table-scroll-hint";
+        hint.innerHTML = "↔ Horizontal scrollen für alle Spalten";
+
+        // Wickle Tabelle
+        table.parentNode.insertBefore(wrapper, table);
+        wrapper.appendChild(table);
+
+        // Füge Hinweis vor Wrapper ein
+        wrapper.parentNode.insertBefore(hint, wrapper);
+
+        // Erstelle oberen Scrollbalken für leichtere Erreichbarkeit
+        const topScroll = document.createElement("div");
+        topScroll.className = "table-scroll-top";
+        const topScrollContent = document.createElement("div");
+        topScrollContent.className = "table-scroll-top-content";
+        topScroll.appendChild(topScrollContent);
+
+        // Füge oberen Scrollbalken vor Hinweis ein
+        wrapper.parentNode.insertBefore(topScroll, hint);
+
+        // Prüfe ob Tabelle zu breit ist und füge Overflow-Klassen hinzu
+        setTimeout(() => {
+            const hasOverflow = wrapper.scrollWidth > wrapper.clientWidth;
+            if (hasOverflow) {
+                hint.classList.add("show");
+                wrapper.classList.add("has-overflow");
+                // Setze die Breite des oberen Scrollbalkens
+                topScrollContent.style.width = wrapper.scrollWidth + "px";
+                topScroll.style.display = "block";
+            } else {
+                topScroll.style.display = "none";
+            }
+        }, 100);
+
+        // Synchronisiere Scrolling zwischen oberem und unterem Scrollbalken
+        topScroll.addEventListener("scroll", function() {
+            wrapper.scrollLeft = this.scrollLeft;
+        });
+
+        wrapper.addEventListener("scroll", function() {
+            const scrollLeft = this.scrollLeft;
+            const maxScroll = this.scrollWidth - this.clientWidth;
+
+            // Synchronisiere mit oberem Scrollbalken
+            topScroll.scrollLeft = scrollLeft;
+
+            // Ändere Hint-Farbe basierend auf Scroll-Position
+            if (scrollLeft > 10) {
+                hint.style.background = "linear-gradient(135deg, #d4edda, #c3e6cb)";
+                hint.style.color = "#155724";
+            } else {
+                hint.style.background = "linear-gradient(135deg, #e8f0fe, #d2e3fc)";
+                hint.style.color = "#1a73e8";
+            }
+
+            // Entferne Schatten wenn ans Ende gescrollt
+            if (scrollLeft >= maxScroll - 5) {
+                wrapper.classList.add("scrolled-to-end");
+            } else {
+                wrapper.classList.remove("scrolled-to-end");
+            }
+        });
+    });
+}
+
+/**
+ * Wendet Scroll-Wrapper auf alle relevanten Container an
+ */
+function applyTableScrollWrappers() {
+    const containerIds = [
+        "checklistData",
+        "pflichtData",
+        "examData",
+        "groupProgressTable"
+    ];
+
+    containerIds.forEach(id => {
+        wrapTableWithScrollContainer(id);
+    });
+}
+
+// Event-Listener für DOM-Updates (wenn Tabellen neu generiert werden)
+if (typeof MutationObserver !== "undefined") {
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.addedNodes.length > 0) {
+                mutation.addedNodes.forEach((node) => {
+                    if (node.nodeType === 1 && node.tagName === "TABLE") {
+                        const containerId = node.closest("[id]")?.id;
+                        if (containerId && ["checklistData", "pflichtData", "examData", "groupProgressTable"].includes(containerId)) {
+                            setTimeout(() => wrapTableWithScrollContainer(containerId), 50);
+                        }
+                    }
+                });
+            }
+        });
+    });
+
+    // Beobachte relevante Container
+    document.addEventListener("DOMContentLoaded", () => {
+        ["checklistData", "pflichtData", "examData", "groupProgressTable"].forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                observer.observe(element, { childList: true, subtree: true });
+            }
+        });
+    });
 }
