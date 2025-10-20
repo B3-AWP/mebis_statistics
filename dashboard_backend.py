@@ -471,6 +471,7 @@ def get_data():
             if group_users:  # Nur Gruppen mit Benutzern
                 groups_data[group_name] = {
                     'name': group_name,
+                    'value': group.get('value'),  # Add group ID for URL parameters
                     'users': []
                 }
 

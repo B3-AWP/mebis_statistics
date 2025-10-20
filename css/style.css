@@ -2238,6 +2238,17 @@ h3 {
     color: var(--warning-color);
 }
 
+a.status-text-warning {
+    color: var(--warning-color);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+a.status-text-warning:hover {
+    color: #d39e00;
+    text-decoration: underline;
+}
+
 .status-text-danger {
     color: var(--danger-color);
 }
@@ -2299,6 +2310,16 @@ h3 {
     background-color: #fff3cd;
     color: #856404;
     text-align: center;
+}
+
+.status-gradable a {
+    color: #856404;
+    text-decoration: underline;
+}
+
+.status-gradable a:hover {
+    color: #533f03;
+    text-decoration: underline;
 }
 
 .status-not-submitted {

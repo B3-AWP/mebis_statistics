@@ -1403,7 +1403,8 @@ function generateChecklistTable() {
     // Für jeden Benutzer zwei Spalten: Pflicht + Gesamt
     for (let i = 1; i < tableData.headers.length; i++) {
         const userName = tableData.headers[i];
-        html += `<th colspan="2" class="text-center">${userName}</th>`;
+        const displayName = userName.replace(' ', '<br>'); // Line break after first space
+        html += `<th colspan="2" class="text-center">${displayName}</th>`;
     }
     html += '</tr>';
 
@@ -1487,6 +1488,39 @@ function loadExamTab() {
         generateExamTable();
         if (filterSection) filterSection.style.display = 'block';
     }, 500);
+}
+
+// Hilfsfunktion: Extrahiert Sterne aus einer Bewertung und erstellt kompakte Darstellung mit Prozentwert
+function formatStarGrade(grade) {
+    if (!grade || grade === '-') return grade;
+
+    // Prüfe ob die Bewertung Sterne enthält
+    const starMatch = grade.match(/^(\*+)/);
+    if (starMatch) {
+        const stars = starMatch[1]; // Nur die Sterne (z.B. "**")
+
+        // Finde den Prozentwert aus dem gradeMapping
+        let percentage = null;
+        if (gradeMapping && Object.keys(gradeMapping).length > 0) {
+            // Durchsuche das gradeMapping nach dem passenden Eintrag
+            for (const [points, description] of Object.entries(gradeMapping)) {
+                if (description === grade) {
+                    percentage = points;
+                    break;
+                }
+            }
+        }
+
+        // Zeige Sterne mit Prozentwert, falls vorhanden
+        if (percentage !== null) {
+            return `<span title="${grade}">${stars} (${percentage}%)</span>`;
+        } else {
+            return `<span title="${grade}">${stars}</span>`;
+        }
+    }
+
+    // Keine Sterne gefunden, gebe die originale Bewertung zurück
+    return grade;
 }
 
 // Pflichtaufgaben-Tabelle generieren (Zeilen = Aufgaben, Spalten = Personen)
@@ -1643,6 +1677,7 @@ function generatePflichtTableFromActivities() {
 
     // Benutzer der aktuellen Gruppe sammeln
     const groupUsers = dashboardData.groups[currentGroup].users;
+    const groupId = dashboardData.groups[currentGroup].value; // Get group ID for URL parameters
     dashboardLogger.debug('DEBUG', 'Erste 3 Benutzer der Gruppe:', groupUsers.slice(0, 3));
 
     // Prüfe verschiedene mögliche Benutzer-Name-Felder
@@ -1695,7 +1730,8 @@ function generatePflichtTableFromActivities() {
     // Header für alle Benutzer der Gruppe
     groupUsers.forEach(user => {
         const userName = user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
-        html += `<th style="text-align: center; min-width: 120px;">${userName}</th>`;
+        const displayName = userName.replace(' ', '<br>'); // Line break after first space
+        html += `<th style="text-align: center">${displayName}</th>`;
     });
     html += '</tr></thead><tbody>';
 
@@ -1728,21 +1764,30 @@ function generatePflichtTableFromActivities() {
             let bgColor = '';
 
             if (status && status.grade && status.grade !== '-') {
-                cellContent = `<strong>${status.grade}</strong>`;
+                cellContent = `<strong>${formatStarGrade(status.grade)}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.rating && status.rating !== '-') {
                 // Alternative: Rating field for assignments
-                cellContent = `<strong>${status.rating}</strong>`;
+                cellContent = `<strong>${formatStarGrade(status.rating)}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.score && status.score !== '-') {
                 // Alternative: Score field for assignments
                 cellContent = `<strong>${status.score}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.status === 'Zur Bewertung abgegeben') {
-                cellContent = '<span class="status-text-warning">bewertbar</span>';
+                // For assignments (type "Aufgabe"), create hyperlink with group parameter
+                // Only create link for non-quiz activities (i.e., assignments)
+                if (assignment.activity_type !== 'quiz' && groupId) {
+                    const assignmentUrl = assignment.url.includes('?')
+                        ? `${assignment.url}&group=${groupId}`
+                        : `${assignment.url}?group=${groupId}`;
+                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                } else {
+                    cellContent = '<span class="status-text-warning">bewertbar</span>';
+                }
                 bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
-                cellContent = '<span class="status-text-danger">Nicht eingereicht</span>';
+                cellContent = '❌';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
@@ -1818,12 +1863,15 @@ function generatePflichtTableFromStructuredTables() {
         return;
     }
 
+    const groupId = dashboardData.groups[currentGroup]?.value; // Get group ID for URL parameters
+
     let html = '<table id="pflichtTable" class="info-table dashboard-table">';
     html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
 
     for (let i = 1; i < tableData.headers.length; i++) {
         const userName = tableData.headers[i];
-        html += `<th style="text-align: center; min-width: 120px;">${userName}</th>`;
+        const displayName = userName.replace(' ', '<br>'); // Line break after first space
+        html += `<th style="text-align: center; min-width: 120px;">${displayName}</th>`;
     }
     html += '</tr></thead><tbody>';
 
@@ -1841,13 +1889,22 @@ function generatePflichtTableFromStructuredTables() {
             let bgColor = '';
 
             if (status.grade && status.grade != '-') {
-                cellContent = `<strong>${status.grade}</strong>`;
+                cellContent = `<strong>${formatStarGrade(status.grade)}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status.status === 'Zur Bewertung abgegeben') {
-                cellContent = '<span class="status-text-warning">bewertbar</span>';
+                // For assignments (type "Aufgabe"), create hyperlink with group parameter
+                // Only create link for non-quiz activities (i.e., assignments)
+                if (row.assignment_type !== 'quiz' && groupId) {
+                    const assignmentUrl = row.assignment_url.includes('?')
+                        ? `${row.assignment_url}&group=${groupId}`
+                        : `${row.assignment_url}?group=${groupId}`;
+                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                } else {
+                    cellContent = '<span class="status-text-warning">bewertbar</span>';
+                }
                 bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
-                cellContent = '<span class="status-text-danger">Nicht eingereicht</span>';
+                cellContent = '❌';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
@@ -1966,7 +2023,8 @@ function generateAllGroupsChecklistTable() {
 
     // Header für alle Benutzer
     allUsers.forEach(user => {
-        html += `<th colspan="2" class="text-center">${user.name}<br><small>${user.group}</small></th>`;
+        const displayName = user.name.replace(' ', '<br>'); // Line break after first space
+        html += `<th colspan="2" class="text-center">${displayName}<br><small>${user.group}</small></th>`;
     });
     html += '</tr>';
 
@@ -2159,7 +2217,8 @@ function generateAllGroupsPflichtTable() {
 
     // Header für alle Benutzer
     allUsers.forEach(user => {
-        html += `<th style="text-align: center; min-width: 120px;">${user.name}</th>`;
+        const displayName = user.name.replace(' ', '<br>'); // Line break after first space
+        html += `<th style="text-align: center;">${displayName}</th>`;
     });
     html += '</tr></thead><tbody>';
 
@@ -2187,23 +2246,31 @@ function generateAllGroupsPflichtTable() {
 
             if (status && status.grade && status.grade !== '-') {
                 // Grade vorhanden - zeige Grade-Wert
-                cellContent = `<strong>${status.grade}</strong>`;
+                cellContent = `<strong>${formatStarGrade(status.grade)}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.rating && status.rating !== '-') {
                 // Alternative: Rating field for assignments
-                cellContent = `<strong>${status.rating}</strong>`;
+                cellContent = `<strong>${formatStarGrade(status.rating)}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.score && status.score !== '-') {
                 // Alternative: Score field for assignments
                 cellContent = `<strong>${status.score}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.status === 'Zur Bewertung abgegeben') {
-                // Zur Bewertung abgegeben - zeige "bewertbar"
-                cellContent = '<span class="status-text-warning">bewertbar</span>';
+                // Zur Bewertung abgegeben - zeige "bewertbar" als Link für Aufgaben
+                // For "all groups" view, use group=0
+                if (assignment.activity_type !== 'quiz') {
+                    const assignmentUrl = assignment.url.includes('?')
+                        ? `${assignment.url}&group=0`
+                        : `${assignment.url}?group=0`;
+                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                } else {
+                    cellContent = '<span class="status-text-warning">bewertbar</span>';
+                }
                 bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
                 // Nicht eingereicht
-                cellContent = '<span class="status-text-danger">Nicht eingereicht</span>';
+                cellContent = '❌';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
@@ -2702,6 +2769,7 @@ function generateExamTable() {
 
     // Benutzer der ausgewählten Gruppe (gleiche Logik wie Pflichtaufgaben)
     const groupUsers = dashboardData.groups[currentGroup].users || [];
+    const groupId = dashboardData.groups[currentGroup].value; // Get group ID for URL parameters
     const groupUserNames = new Set();
     groupUsers.forEach(user => {
         const userName = user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
@@ -2839,8 +2907,16 @@ function generateExamTable() {
                 cellContent = `✓ ${status.mark}`;
                 cellClass = 'status-graded';
             } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
-                // Zur Bewertung abgegeben - zeige "abgegeben"
-                cellContent = '⏳ abgegeben';
+                // Zur Bewertung abgegeben - zeige "bewertbar" als Link für Aufgaben
+                // Only create link for non-quiz activities (i.e., assignments)
+                if (activity.activity_type !== 'quiz' && groupId) {
+                    const assignmentUrl = activity.url.includes('?')
+                        ? `${activity.url}&group=${groupId}`
+                        : `${activity.url}?group=${groupId}`;
+                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                } else {
+                    cellContent = 'bewertbar';
+                }
                 cellClass = 'status-gradable'; // Gelb
             } else {
                 // Andere Status - Debug ALL possible grade fields
@@ -3071,7 +3147,15 @@ function generateAllGroupsExamTable() {
                 cellContent = `✓<br>${status.mark}`;
                 cellClass = 'status-graded';
             } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
-                cellContent = '⏳';
+                // For "all groups" view, use group=0
+                if (activity.activity_type !== 'quiz') {
+                    const assignmentUrl = activity.url.includes('?')
+                        ? `${activity.url}&group=0`
+                        : `${activity.url}?group=0`;
+                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning" style="font-size: 0.8em;">bewertbar</a>`;
+                } else {
+                    cellContent = '<span style="font-size: 0.8em;">bewertbar</span>';
+                }
                 cellClass = 'status-gradable'; // Gelb
             } else {
                 cellContent = '?';
@@ -3979,6 +4063,7 @@ function generateSingleGroupPflichtTableFromAllData() {
     }
 
     const groupUsers = dashboardData.groups[currentGroup].users;
+    const groupId = dashboardData.groups[currentGroup].value; // Get group ID for URL parameters
     const groupUserNames = new Set();
     groupUsers.forEach(user => {
         const userName = user.user_name || user.name || user.username || user.display_name;
@@ -4016,7 +4101,8 @@ function generateSingleGroupPflichtTableFromAllData() {
     // Header für alle Benutzer der Gruppe
     groupUsers.forEach(user => {
         const userName = user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
-        html += `<th style="text-align: center; min-width: 120px;">${userName}</th>`;
+        const displayName = userName.replace(' ', '<br>'); // Line break after first space
+        html += `<th style="text-align: center;">${displayName}</th>`;
     });
     html += '</tr></thead><tbody>';
 
@@ -4048,21 +4134,30 @@ function generateSingleGroupPflichtTableFromAllData() {
             let bgColor = '';
 
             if (status && status.grade && status.grade !== '-') {
-                cellContent = `<strong>${status.grade}</strong>`;
+                cellContent = `<strong>${formatStarGrade(status.grade)}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.rating && status.rating !== '-') {
                 // Alternative: Rating field for assignments
-                cellContent = `<strong>${status.rating}</strong>`;
+                cellContent = `<strong>${formatStarGrade(status.rating)}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.score && status.score !== '-') {
                 // Alternative: Score field for assignments
                 cellContent = `<strong>${status.score}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.status === 'Zur Bewertung abgegeben') {
-                cellContent = '<span class="status-text-warning">bewertbar</span>';
+                // For assignments (type "Aufgabe"), create hyperlink with group parameter
+                // Only create link for non-quiz activities (i.e., assignments)
+                if (activity.activity_type !== 'quiz' && groupId) {
+                    const assignmentUrl = activity.url.includes('?')
+                        ? `${activity.url}&group=${groupId}`
+                        : `${activity.url}?group=${groupId}`;
+                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                } else {
+                    cellContent = '<span class="status-text-warning">bewertbar</span>';
+                }
                 bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
             } else {
-                cellContent = '<span class="status-text-danger">Nicht eingereicht</span>';
+                cellContent = '❌';
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
