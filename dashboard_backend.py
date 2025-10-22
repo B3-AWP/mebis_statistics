@@ -592,6 +592,7 @@ def get_data():
             'ignored_groups': list(ignored_groups),
             'grade_mapping': grade_mapping,
             'max_schoolweeks': config_manager.get_max_schoolweeks(),
+            'course_id': config_manager.get_course_id(),
             'last_updated': latest_file,
             'environment': environment_settings
         }

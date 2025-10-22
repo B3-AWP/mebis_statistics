@@ -7,6 +7,7 @@ let maxSchoolweeks = 9; // Maximale Schulwochen (aus Backend geladen, ersetzt to
 let checklistViewType = 'pflicht'; // New: track checklist column view setting
 let sortState = {}; // Track sorting state for different tables
 let gradeMapping = {}; // GradeMapping from config.ini
+let courseId = ''; // Mebis Course ID from config
 
 // Tab-Management
 function showTab(tabName) {
@@ -267,6 +268,14 @@ async function loadData() {
             dashboardLogger.info('DATA', `Max schoolweeks loaded: ${maxSchoolweeks}`);
         } else {
             dashboardLogger.warn('DATA', `No max_schoolweeks found, using default: ${maxSchoolweeks}`);
+        }
+
+        // Load course_id from backend
+        if (dashboardData.course_id) {
+            courseId = dashboardData.course_id;
+            dashboardLogger.info('DATA', `Course ID loaded: ${courseId}`);
+        } else {
+            dashboardLogger.warn('DATA', 'No course_id found in backend response');
         }
 
         // Update Slider max value and labels
@@ -2829,6 +2838,16 @@ function generateExamTable() {
         html += `<td style="min-width: 250px; font-weight: 500;">`;
         html += `<a href="${activity.url}" target="_blank">${fullTitle}</a>`;
         html += `<br><small>Typ: ${activity.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe'}</small>`;
+
+        // Add "Bewertung überschreiben" link for assignments
+        if (activity.activity_type !== 'quiz' && activity.id && courseId) {
+            const currentGroupId = (currentGroup !== 'all' && dashboardData.groups[currentGroup]?.value)
+                ? dashboardData.groups[currentGroup].value
+                : '0';
+            const overrideUrl = `https://lernplattform.mebis.bycs.de/grade/report/singleview/index.php?id=${courseId}&item=grade&groupsearchvalue=&group=${currentGroupId}&itemid=${activity.id}`;
+            html += `<br><small><a href="${overrideUrl}" target="_blank" style="color: #007bff;">Bewertung überschreiben</a></small>`;
+        }
+
         html += `</td>`;
 
         // Status für jeden Benutzer (gleiche Logik wie generatePflichtTableFromActivities)
@@ -3078,6 +3097,13 @@ function generateAllGroupsExamTable() {
 
         html += `<th style="text-align: center; " title="${typeIcon} ${activity.title}">`;
         html += `<a href="${activity.url}" target="_blank" class="link-light">${typeIcon}<br>${shortTitle}</a>`;
+
+        // Add "Bewertung überschreiben" link for assignments in header
+        if (activity.activity_type !== 'quiz' && activity.id && courseId) {
+            const overrideUrl = `https://lernplattform.mebis.bycs.de/grade/report/singleview/index.php?id=${courseId}&item=grade&groupsearchvalue=&group=0&itemid=${activity.id}`;
+            html += `<br><a href="${overrideUrl}" target="_blank" class="link-light" style="font-size: 0.7em;">Überschr.</a>`;
+        }
+
         html += `</th>`;
     });
     html += '</tr></thead>';
