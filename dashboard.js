@@ -1324,6 +1324,8 @@ function updateAllTabs() {
     const pflichtTab = document.getElementById('pflichtTab');
     if (pflichtTab && pflichtTab.style.display !== 'none') {
         generatePflichtTable();
+        // View-Filter anwenden
+        applyPflichtViewFilters();
     }
 
     // Leistungsnachweise-Tab aktualisieren falls sichtbar
@@ -1485,6 +1487,8 @@ function loadPflichtTab() {
 
     setTimeout(() => {
         generatePflichtTable();
+        // View-Filter anwenden
+        applyPflichtViewFilters();
         if (filterSection) filterSection.style.display = 'block';
     }, 500);
 }
@@ -1530,6 +1534,51 @@ function formatStarGrade(grade) {
 
     // Keine Sterne gefunden, gebe die originale Bewertung zurück
     return grade;
+}
+
+// Formatiert submission_time für die Anzeige
+function formatSubmissionTime(submissionTime) {
+    if (!submissionTime) {
+        return '';
+    }
+
+    try {
+        // Parse ISO-Format: "2025-10-21T11:33:00"
+        const date = new Date(submissionTime);
+
+        // Formatiere als deutsches Datum: DD.MM.YYYY HH:MM
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+
+        return `${day}.${month}.${year} ${hours}:${minutes}`;
+    } catch (e) {
+        return '';
+    }
+}
+
+// Berechnet die Anzahl der Schultage (Werktage Mo-Fr) zwischen zwei Daten
+function getSchoolDaysDiff(fromDate, toDate) {
+    let count = 0;
+    let currentDate = new Date(fromDate);
+    const endDate = new Date(toDate);
+
+    // Setze auf Mitternacht für Tagesvergleich
+    currentDate.setHours(0, 0, 0, 0);
+    endDate.setHours(0, 0, 0, 0);
+
+    while (currentDate < endDate) {
+        const dayOfWeek = currentDate.getDay();
+        // Zähle nur Montag (1) bis Freitag (5)
+        if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+            count++;
+        }
+        currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    return count;
 }
 
 // Pflichtaufgaben-Tabelle generieren (Zeilen = Aufgaben, Spalten = Personen)
@@ -2283,7 +2332,13 @@ function generateAllGroupsPflichtTable() {
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
-            html += `<td class="${cellClass}" style="${bgColor} text-align: center;">${cellContent}</td>`;
+            // Füge Zeitstempel hinzu, wenn vorhanden
+            const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+            if (submissionTimeFormatted) {
+                cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+            }
+
+            html += `<td class="${cellClass}" style="${bgColor} text-align: center;" data-submission-time="${status?.submission_time || ''}">${cellContent}</td>`;
         });
 
         html += '</tr>';
@@ -2414,11 +2469,13 @@ function applyPflichtFilters() {
 function applyPflichtViewFilters() {
     const statusFilter = document.getElementById('pflichtStatusFilter');
     const typeFilter = document.getElementById('pflichtTypeFilter');
+    const submissionTimeFilter = document.getElementById('pflichtSubmissionTimeFilter');
 
     if (!statusFilter || !typeFilter) return;
 
     const statusValue = statusFilter.value;
     const typeValue = typeFilter.value;
+    const submissionTimeValue = submissionTimeFilter?.value || 'all';
 
     const table = document.getElementById('pflichtTable') || document.getElementById('allGroupsPflichtTable');
     if (!table) return;
@@ -2473,8 +2530,165 @@ function applyPflichtViewFilters() {
             }
         }
 
+        // Submission-Time-Filter: Prüfe ob Zeile mindestens eine passende Zelle hat
+        if (submissionTimeValue !== 'all' && shouldShow) {
+            const statusCells = row.querySelectorAll('td:not(:first-child)');
+            let hasMatchingSubmissionTime = false;
+            const now = new Date();
+
+            statusCells.forEach(cell => {
+                const submissionTime = cell.getAttribute('data-submission-time');
+                let cellMatches = false;
+
+                if (submissionTimeValue === 'notSubmitted') {
+                    if (!submissionTime) cellMatches = true;
+                } else if (submissionTime) {
+                    const submissionDate = new Date(submissionTime);
+                    const schoolDaysDiff = getSchoolDaysDiff(submissionDate, now);
+
+                    switch (submissionTimeValue) {
+                        case 'less1day':
+                            if (schoolDaysDiff < 1) cellMatches = true;
+                            break;
+                        case 'less2days':
+                            if (schoolDaysDiff < 2) cellMatches = true;
+                            break;
+                        case 'less3days':
+                            if (schoolDaysDiff < 3) cellMatches = true;
+                            break;
+                        case 'less4days':
+                            if (schoolDaysDiff < 4) cellMatches = true;
+                            break;
+                        case 'less5days':
+                            if (schoolDaysDiff < 5) cellMatches = true;
+                            break;
+                        case 'less1week':
+                            if (schoolDaysDiff < 5) cellMatches = true;
+                            break;
+                        case 'less2weeks':
+                            if (schoolDaysDiff < 10) cellMatches = true;
+                            break;
+                    }
+                }
+
+                if (cellMatches) hasMatchingSubmissionTime = true;
+            });
+
+            if (!hasMatchingSubmissionTime) shouldShow = false;
+        }
+
         row.style.display = shouldShow ? '' : 'none';
     });
+
+    // Submission-Time-Filter: Zellen markieren und Spalten ausblenden
+    if (submissionTimeValue !== 'all') {
+        const now = new Date();
+
+        // Ermittle welche Spalten mindestens einen Match haben
+        const columnHasMatch = new Set();
+
+        rows.forEach(row => {
+            if (row.style.display === 'none') return; // Überspringe versteckte Zeilen
+
+            const statusCells = row.querySelectorAll('td:not(:first-child)');
+            statusCells.forEach((cell, columnIndex) => {
+                const submissionTime = cell.getAttribute('data-submission-time');
+                let cellMatches = false;
+
+                if (submissionTimeValue === 'notSubmitted') {
+                    if (!submissionTime) cellMatches = true;
+                } else if (submissionTime) {
+                    const submissionDate = new Date(submissionTime);
+                    const schoolDaysDiff = getSchoolDaysDiff(submissionDate, now);
+
+                    switch (submissionTimeValue) {
+                        case 'less1day':
+                            if (schoolDaysDiff < 1) cellMatches = true;
+                            break;
+                        case 'less2days':
+                            if (schoolDaysDiff < 2) cellMatches = true;
+                            break;
+                        case 'less3days':
+                            if (schoolDaysDiff < 3) cellMatches = true;
+                            break;
+                        case 'less4days':
+                            if (schoolDaysDiff < 4) cellMatches = true;
+                            break;
+                        case 'less5days':
+                            if (schoolDaysDiff < 5) cellMatches = true;
+                            break;
+                        case 'less1week':
+                            if (schoolDaysDiff < 5) cellMatches = true;
+                            break;
+                        case 'less2weeks':
+                            if (schoolDaysDiff < 10) cellMatches = true;
+                            break;
+                    }
+                }
+
+                if (cellMatches) {
+                    columnHasMatch.add(columnIndex);
+                    // Stelle Zelle wieder her, wenn sie dem Filter entspricht
+                    if (cell.hasAttribute('data-filtered-content')) {
+                        cell.innerHTML = cell.getAttribute('data-filtered-content');
+                        cell.removeAttribute('data-filtered-content');
+                    }
+                } else {
+                    // Speichere Originalinhalt und zeige ❌
+                    if (!cell.hasAttribute('data-filtered-content')) {
+                        cell.setAttribute('data-filtered-content', cell.innerHTML);
+                        cell.innerHTML = '❌';
+                    }
+                }
+            });
+        });
+
+        // Blende Header-Spalten aus, die keinen Match haben
+        const headers = table.querySelectorAll('thead th');
+        headers.forEach((header, index) => {
+            if (index === 0) return; // Erste Spalte (Aufgabenname) nicht ausblenden
+
+            const columnIndex = index - 1; // -1 weil erste Spalte übersprungen wird
+            if (!columnHasMatch.has(columnIndex)) {
+                header.style.display = 'none';
+            } else {
+                header.style.display = '';
+            }
+        });
+
+        // Blende Zellen in Spalten aus, die keinen Match haben
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            cells.forEach((cell, index) => {
+                if (index === 0) return; // Erste Spalte nicht ausblenden
+
+                const columnIndex = index - 1;
+                if (!columnHasMatch.has(columnIndex)) {
+                    cell.style.display = 'none';
+                } else {
+                    cell.style.display = '';
+                }
+            });
+        });
+    } else {
+        // Wenn "Alle" ausgewählt ist, stelle alle Spalten und Zellen wieder her
+        const headers = table.querySelectorAll('thead th');
+        headers.forEach(header => {
+            header.style.display = '';
+        });
+
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            cells.forEach(cell => {
+                cell.style.display = '';
+                // Stelle Originalinhalt wieder her
+                if (cell.hasAttribute('data-filtered-content')) {
+                    cell.innerHTML = cell.getAttribute('data-filtered-content');
+                    cell.removeAttribute('data-filtered-content');
+                }
+            });
+        });
+    }
 }
 
 // Details für Checklisten anzeigen
@@ -2615,6 +2829,13 @@ function sortTable(tableId, columnIndex, dataType = 'auto') {
 function getCellValue(row, columnIndex, dataType) {
     const cell = row.cells[columnIndex];
     if (!cell) return '';
+
+    // Prüfe auf submission_time Attribut (für Sortierung nach Datum)
+    const submissionTime = cell.getAttribute('data-submission-time');
+    if (submissionTime) {
+        // Verwende den ISO-Zeitstempel für Sortierung (leere Strings kommen ans Ende)
+        return submissionTime || 'zzzz'; // 'zzzz' sorgt dafür, dass leere Werte ans Ende sortiert werden
+    }
 
     let value = cell.textContent.trim();
 
@@ -4187,7 +4408,13 @@ function generateSingleGroupPflichtTableFromAllData() {
                 bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
             }
 
-            html += `<td class="${cellClass}" style="${bgColor} text-align: center;">${cellContent}</td>`;
+            // Füge Zeitstempel hinzu, wenn vorhanden
+            const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+            if (submissionTimeFormatted) {
+                cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+            }
+
+            html += `<td class="${cellClass}" style="${bgColor} text-align: center;" data-submission-time="${status?.submission_time || ''}">${cellContent}</td>`;
         });
 
         html += '</tr>';

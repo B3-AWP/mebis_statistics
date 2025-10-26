@@ -379,7 +379,8 @@ def find_user_assignment_status(user, assignment_id):
             result = {
                 'status': status_info.get('status', 'Nicht eingereicht'),
                 'status2': status_info.get('status2', ''),
-                'grade': rounded_grade
+                'grade': rounded_grade,
+                'submission_time': status_info.get('submission_time', None)
             }
             logger.debug(f"MATCH! {user.get('name')} - Assignment {assignment_id}: {result}")
             return result
@@ -393,7 +394,8 @@ def find_user_assignment_status(user, assignment_id):
             result = {
                 'status': status_info.get('status', 'Nicht eingereicht'),
                 'status2': status_info.get('status2', ''),
-                'grade': rounded_grade
+                'grade': rounded_grade,
+                'submission_time': status_info.get('submission_time', None)
             }
             logger.debug(f"QUIZ MATCH! {user.get('name')} - Quiz {assignment_id}: {result}")
             return result
@@ -402,7 +404,8 @@ def find_user_assignment_status(user, assignment_id):
     result = {
         'status': 'Nicht eingereicht',
         'status2': '',
-        'grade': '-'
+        'grade': '-',
+        'submission_time': None
     }
     logger.debug(f"NOT FOUND! {user.get('name')} - Assignment {assignment_id}: {result}")
     return result
@@ -546,7 +549,8 @@ def get_data():
                                 'user_name': user.get('name', ''),
                                 'user_id': user.get('id', ''),
                                 'status': status.get('status', 'Nicht eingereicht'),
-                                'grade': status.get('grade', '-')
+                                'grade': status.get('grade', '-'),
+                                'submission_time': status.get('submission_time', None)
                             })
 
                 # Add user_status to quizzes
@@ -568,7 +572,8 @@ def get_data():
                                 'user_name': user.get('name', ''),
                                 'user_id': user.get('id', ''),
                                 'status': status.get('status', 'Nicht eingereicht'),
-                                'grade': status.get('grade', '-')
+                                'grade': status.get('grade', '-'),
+                                'submission_time': status.get('submission_time', None)
                             })
             return activities
 

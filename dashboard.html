@@ -344,6 +344,20 @@
                             <option value="all">Alle Kategorien</option>
                         </select>
                     </div>
+                    <div class="filter-group">
+                        <label>Abgabezeitraum:</label>
+                        <select id="pflichtSubmissionTimeFilter" onchange="applyPflichtFilters()">
+                            <option value="all">Alle</option>
+                            <option value="less1day">< 1 Schultag</option>
+                            <option value="less2days">< 2 Schultage</option>
+                            <option value="less3days">< 3 Schultage</option>
+                            <option value="less4days">< 4 Schultage</option>
+                            <option value="less5days">< 5 Schultage</option>
+                            <option value="less1week">< 1 Schulwoche</option>
+                            <option value="less2weeks">< 2 Schulwochen</option>
+                            <option value="notSubmitted">Nicht abgegeben</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 

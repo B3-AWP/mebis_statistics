@@ -106,6 +106,15 @@ class ConfigManager:
             courses['course_ifa12'] = course_id
         return courses
 
+    def get_course_id(self) -> str:
+        """
+        Holt die Mebis Course ID aus der Umgebungsvariable.
+
+        Returns:
+            Course ID als String
+        """
+        return os.getenv('MEBIS_COURSE_ID', '')
+
     def get_ignored_groups(self) -> set:
         """
         Holt Liste der ignorierten Gruppen.
