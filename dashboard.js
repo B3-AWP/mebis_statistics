@@ -3097,8 +3097,8 @@ function generateExamTable() {
                 // WICHTIG: Grade muss VOR Status geprüft werden (z.B. bei Gruppeneinreichungen)
                 // Grade vorhanden - zeige Grade-Wert
                 console.log(`DEBUG EXAM: Grade found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.grade}`);
-                if (activity.title && activity.title.includes('Review-Talk 1')) {
-                    console.log(`🎯 GRADE SUCCESS: Review-Talk 1 grade found for ${userName}: ${status.grade}`);
+                if (activity.title && activity.title.includes('Code-Review 1')) {
+                    console.log(`🎯 GRADE SUCCESS: Code-Review 1 grade found for ${userName}: ${status.grade}`);
                 }
                 cellContent = `✓ ${status.grade}`;
                 cellClass = 'status-graded';
@@ -3109,40 +3109,40 @@ function generateExamTable() {
             } else if (status.rating && status.rating !== '-') {
                 // Alternative: Rating field for assignments
                 console.log(`DEBUG EXAM: Rating found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.rating}`);
-                if (activity.title && activity.title.includes('Review-Talk 1')) {
-                    console.log(`🎯 RATING SUCCESS: Review-Talk 1 rating found for ${userName}: ${status.rating}`);
+                if (activity.title && activity.title.includes('Code-Review 1')) {
+                    console.log(`🎯 RATING SUCCESS: Code-Review 1 rating found for ${userName}: ${status.rating}`);
                 }
                 cellContent = `✓ ${status.rating}`;
                 cellClass = 'status-graded';
             } else if (status.score && status.score !== '-') {
                 // Alternative: Score field for assignments
                 console.log(`DEBUG EXAM: Score found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.score}`);
-                if (activity.title && activity.title.includes('Review-Talk 1')) {
-                    console.log(`🎯 SCORE SUCCESS: Review-Talk 1 score found for ${userName}: ${status.score}`);
+                if (activity.title && activity.title.includes('Code-Review 1')) {
+                    console.log(`🎯 SCORE SUCCESS: Code-Review 1 score found for ${userName}: ${status.score}`);
                 }
                 cellContent = `✓ ${status.score}`;
                 cellClass = 'status-graded';
             } else if (status.points && status.points !== '-' && status.points !== null) {
                 // Alternative: Points field for assignments
                 console.log(`DEBUG EXAM: Points found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.points}`);
-                if (activity.title && activity.title.includes('Review-Talk 1')) {
-                    console.log(`🎯 POINTS SUCCESS: Review-Talk 1 points found for ${userName}: ${status.points}`);
+                if (activity.title && activity.title.includes('Code-Review 1')) {
+                    console.log(`🎯 POINTS SUCCESS: Code-Review 1 points found for ${userName}: ${status.points}`);
                 }
                 cellContent = `✓ ${status.points}`;
                 cellClass = 'status-graded';
             } else if (status.result && status.result !== '-' && status.result !== null) {
                 // Alternative: Result field for assignments
                 console.log(`DEBUG EXAM: Result found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.result}`);
-                if (activity.title && activity.title.includes('Review-Talk 1')) {
-                    console.log(`🎯 RESULT SUCCESS: Review-Talk 1 result found for ${userName}: ${status.result}`);
+                if (activity.title && activity.title.includes('Code-Review 1')) {
+                    console.log(`🎯 RESULT SUCCESS: Code-Review 1 result found for ${userName}: ${status.result}`);
                 }
                 cellContent = `✓ ${status.result}`;
                 cellClass = 'status-graded';
             } else if (status.mark && status.mark !== '-' && status.mark !== null) {
                 // Alternative: Mark field for assignments
                 console.log(`DEBUG EXAM: Mark found for ${activity.activity_type} "${activity.title}" for user ${userName}: ${status.mark}`);
-                if (activity.title && activity.title.includes('Review-Talk 1')) {
-                    console.log(`🎯 MARK SUCCESS: Review-Talk 1 mark found for ${userName}: ${status.mark}`);
+                if (activity.title && activity.title.includes('Code-Review 1')) {
+                    console.log(`🎯 MARK SUCCESS: Code-Review 1 mark found for ${userName}: ${status.mark}`);
                 }
                 cellContent = `✓ ${status.mark}`;
                 cellClass = 'status-graded';
@@ -3171,9 +3171,9 @@ function generateExamTable() {
                     fullStatus: status
                 });
 
-                // Spezielle Debug-Ausgabe für Review-Talk 1
-                if (activity.title && activity.title.includes('Review-Talk 1')) {
-                    console.log(`🔍 SPECIAL DEBUG: Review-Talk 1 found for user ${userName}:`, {
+                // Spezielle Debug-Ausgabe für Code-Review 1
+                if (activity.title && activity.title.includes('Code-Review 1')) {
+                    console.log(`🔍 SPECIAL DEBUG: Code-Review 1 found for user ${userName}:`, {
                         activity_type: activity.activity_type,
                         status_object: status,
                         all_grade_fields: {

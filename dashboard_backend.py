@@ -1182,7 +1182,7 @@ def get_export_status():
 
 @app.route('/api/generate-review-pdf', methods=['POST'])
 def generate_review_pdf():
-    """Generiert ein Review-Talk PDF"""
+    """Generiert ein Code-Review PDF"""
     logger = api_logger
     logger.info("PDF generation request received")
 
@@ -1210,7 +1210,7 @@ def generate_review_pdf():
         return send_file(
             pdf_path,
             as_attachment=True,
-            download_name=f"Review_Talk_{data.get('group', 'Unknown')}_Review{data.get('reviewNr', '1')}.pdf",
+            download_name=f"Code_Review_{data.get('group', 'Unknown')}_Review{data.get('reviewNr', '1')}.pdf",
             mimetype='application/pdf'
         )
 

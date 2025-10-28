@@ -1,6 +1,6 @@
 
 // ============================================================================
-// PDF Review-Talk Modal Functions
+// PDF Code-Review Modal Functions
 // ============================================================================
 
 // Globale Variable für abwesende Personen
@@ -250,8 +250,8 @@ async function generatePdfReview() {
         const a = document.createElement("a");
         a.href = url;
         const filename = currentGroup === "all"
-            ? `Review_Talk_${currentGrouping}_Review${reviewNr}.pdf`
-            : `Review_Talk_${currentGroup}_Review${reviewNr}.pdf`;
+            ? `Code_Review_${currentGrouping}_Review${reviewNr}.pdf`
+            : `Code_Review_${currentGroup}_Review${reviewNr}.pdf`;
         a.download = filename;
         document.body.appendChild(a);
         a.click();

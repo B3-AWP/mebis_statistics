@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-PDF Generator für Review-Talk Dokumente - Multi-Group Version
+PDF Generator für Code-Review Dokumente - Multi-Group Version
 Erstellt ein PDF mit mehreren Seiten (eine pro Gruppe)
 """
 
@@ -27,9 +27,9 @@ pdf_logger = get_logger('pdf_generator')
 
 
 class ReviewPDFGeneratorMulti:
-    """Generator für Review-Talk PDFs mit Multi-Group Support"""
+    """Generator für Code-Review PDFs mit Multi-Group Support"""
 
-    def __init__(self, template_path='Templates/Review_Talk_Vorlage.docx'):
+    def __init__(self, template_path='Templates/Code_Review_Vorlage.docx'):
         """
         Initialisiert den PDF Generator
 
@@ -117,8 +117,8 @@ class ReviewPDFGeneratorMulti:
                 group_doc = self._create_group_document(data, group_name, all_groups[group_name])
 
                 # Speichern als DOCX (temporär) und als PDF (temporär)
-                tmp_docx = os.path.join(tempfile.gettempdir(), f"review_talk_{data.get('reviewNr')}_{safe_name(group_name)}.docx")
-                tmp_pdf = os.path.join(tempfile.gettempdir(), f"review_talk_{data.get('reviewNr')}_{safe_name(group_name)}.pdf")
+                tmp_docx = os.path.join(tempfile.gettempdir(), f"code_review_{data.get('reviewNr')}_{safe_name(group_name)}.docx")
+                tmp_pdf = os.path.join(tempfile.gettempdir(), f"code_review_{data.get('reviewNr')}_{safe_name(group_name)}.pdf")
 
                 group_doc.save(tmp_docx)
                 self.logger.info(f"Saved DOCX for group '{group_name}' to {tmp_docx}")
@@ -139,7 +139,7 @@ class ReviewPDFGeneratorMulti:
                 # Fallback: gebe Liste zurück
                 return per_group_pdfs
 
-            merged_pdf_path = os.path.join(output_dir, f"Review_Talk_{data.get('grouping', 'all')}_Review{data.get('reviewNr')}.pdf")
+            merged_pdf_path = os.path.join(output_dir, f"Code_Review_{data.get('grouping', 'all')}_Review{data.get('reviewNr')}.pdf")
 
             try:
                 merger = PdfWriter()
@@ -175,7 +175,7 @@ class ReviewPDFGeneratorMulti:
             # Nur ein PDF, gebe es direkt zurück
             single_pdf = per_group_pdfs[0]
             # Verschiebe zu finalem Pfad
-            final_path = os.path.join(output_dir, f"Review_Talk_{data.get('grouping', 'all')}_Review{data.get('reviewNr')}.pdf")
+            final_path = os.path.join(output_dir, f"Code_Review_{data.get('grouping', 'all')}_Review{data.get('reviewNr')}.pdf")
             if single_pdf != final_path:
                 import shutil
                 shutil.move(single_pdf, final_path)
@@ -312,14 +312,14 @@ class ReviewPDFGeneratorMulti:
         """Speichert das Dokument und konvertiert es zu PDF (Word/docx2pdf)."""
         # Temporäre DOCX-Datei erstellen
         temp_dir = tempfile.gettempdir()
-        temp_docx = os.path.join(temp_dir, f"review_talk_{data.get('reviewNr')}.docx")
+        temp_docx = os.path.join(temp_dir, f"code_review_{data.get('reviewNr')}.docx")
         doc.save(temp_docx)
 
         self.logger.info(f"Word document saved to: {temp_docx}")
 
         # PDF-Ausgabepfad
         if output_path is None:
-            output_path = os.path.join(temp_dir, f"review_talk_{data.get('reviewNr')}.pdf")
+            output_path = os.path.join(temp_dir, f"code_review_{data.get('reviewNr')}.pdf")
 
         # Konvertiere zu PDF via Word/docx2pdf mit COM-Init
         self.logger.info(f"Converting to PDF: {output_path}")
