@@ -356,7 +356,18 @@
                             <option value="less1week">< 1 Schulwoche</option>
                             <option value="less2weeks">< 2 Schulwochen</option>
                             <option value="notSubmitted">Nicht abgegeben</option>
+                            <option value="custom">Benutzerdefiniert...</option>
                         </select>
+                        <div id="customDateRangeGroup" style="display: none; flex-direction: row; gap: 12px; margin-top: 8px;">
+                            <div style="display: flex; flex-direction: column; gap: 4px;">
+                                <label style="font-size: 13px;">Von:</label>
+                                <input type="date" id="customDateFrom" onchange="applyPflichtFilters()">
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 4px;">
+                                <label style="font-size: 13px;">Bis:</label>
+                                <input type="date" id="customDateTo" onchange="applyPflichtFilters()">
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

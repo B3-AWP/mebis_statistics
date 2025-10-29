@@ -413,10 +413,8 @@ function populateCategoryFilter() {
         const pflichtOption = document.createElement('option');
         pflichtOption.value = 'pflichtaufgaben';
         // Zeige Gesamtzahl mit Aufschlüsselung
-        const detailText = pflichtaufgabenCategory.assignmentCount > 0 && pflichtaufgabenCategory.quizCount > 0
-            ? ` (${pflichtaufgabenCategory.assignmentCount} Aufgaben + ${pflichtaufgabenCategory.quizCount} Quizzes)`
-            : ` (${pflichtaufgabenCategory.count})`;
-        pflichtOption.textContent = `Nur Pflichtaufgaben-Kategorie${detailText}`;
+        
+        pflichtOption.textContent = `Nur Pflichtaufgaben-Kategorie`;
         pflichtOption.selected = true; // Standardmäßig ausgewählt
         categoryFilter.appendChild(pflichtOption);
     }
@@ -2460,6 +2458,39 @@ function applyChecklistViewFilter() {
 
 // Filter für Pflichtaufgaben anwenden
 function applyPflichtFilters() {
+    // Zeige/Verstecke Custom-Date-Range-Inputs
+    const submissionTimeFilter = document.getElementById('pflichtSubmissionTimeFilter');
+    const customDateRangeGroup = document.getElementById('customDateRangeGroup');
+    const customDateFrom = document.getElementById('customDateFrom');
+    const customDateTo = document.getElementById('customDateTo');
+
+    if (submissionTimeFilter && customDateRangeGroup) {
+        if (submissionTimeFilter.value === 'custom') {
+            customDateRangeGroup.style.display = 'flex';
+
+            // Setze Von-Datum auf gestern, wenn leer
+            if (customDateFrom && !customDateFrom.value) {
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const year = yesterday.getFullYear();
+                const month = String(yesterday.getMonth() + 1).padStart(2, '0');
+                const day = String(yesterday.getDate()).padStart(2, '0');
+                customDateFrom.value = `${year}-${month}-${day}`;
+            }
+
+            // Setze Bis-Datum auf heute, wenn leer
+            if (customDateTo && !customDateTo.value) {
+                const today = new Date();
+                const year = today.getFullYear();
+                const month = String(today.getMonth() + 1).padStart(2, '0');
+                const day = String(today.getDate()).padStart(2, '0');
+                customDateTo.value = `${year}-${month}-${day}`;
+            }
+        } else {
+            customDateRangeGroup.style.display = 'none';
+        }
+    }
+
     generatePflichtTable();
     // Status- und Typ-Filter anwenden
     applyPflichtViewFilters();
@@ -2542,6 +2573,24 @@ function applyPflichtViewFilters() {
 
                 if (submissionTimeValue === 'notSubmitted') {
                     if (!submissionTime) cellMatches = true;
+                } else if (submissionTimeValue === 'custom') {
+                    // Benutzerdefinierter Datumsbereich
+                    const customDateFrom = document.getElementById('customDateFrom')?.value;
+                    const customDateTo = document.getElementById('customDateTo')?.value;
+
+                    if (submissionTime && customDateFrom && customDateTo) {
+                        const submissionDate = new Date(submissionTime);
+                        const fromDate = new Date(customDateFrom);
+                        const toDate = new Date(customDateTo);
+
+                        // Setze Uhrzeiten für korrekten Vergleich
+                        fromDate.setHours(0, 0, 0, 0);
+                        toDate.setHours(23, 59, 59, 999);
+
+                        if (submissionDate >= fromDate && submissionDate <= toDate) {
+                            cellMatches = true;
+                        }
+                    }
                 } else if (submissionTime) {
                     const submissionDate = new Date(submissionTime);
                     const schoolDaysDiff = getSchoolDaysDiff(submissionDate, now);
@@ -2597,6 +2646,24 @@ function applyPflichtViewFilters() {
 
                 if (submissionTimeValue === 'notSubmitted') {
                     if (!submissionTime) cellMatches = true;
+                } else if (submissionTimeValue === 'custom') {
+                    // Benutzerdefinierter Datumsbereich
+                    const customDateFrom = document.getElementById('customDateFrom')?.value;
+                    const customDateTo = document.getElementById('customDateTo')?.value;
+
+                    if (submissionTime && customDateFrom && customDateTo) {
+                        const submissionDate = new Date(submissionTime);
+                        const fromDate = new Date(customDateFrom);
+                        const toDate = new Date(customDateTo);
+
+                        // Setze Uhrzeiten für korrekten Vergleich
+                        fromDate.setHours(0, 0, 0, 0);
+                        toDate.setHours(23, 59, 59, 999);
+
+                        if (submissionDate >= fromDate && submissionDate <= toDate) {
+                            cellMatches = true;
+                        }
+                    }
                 } else if (submissionTime) {
                     const submissionDate = new Date(submissionTime);
                     const schoolDaysDiff = getSchoolDaysDiff(submissionDate, now);
