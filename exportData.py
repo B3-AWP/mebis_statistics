@@ -25,14 +25,18 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 def parse_german_datetime(datetime_str):
     """
     Konvertiert deutsche Zeitangaben in ISO-Format
-    Unterstützt beide Formate:
+    Unterstützt mehrere Formate:
     - 'Dienstag, 23. September 2025, 07:46'
     - '24. September 2025 08:12'
+    - '16. September 2025  11:31' (doppeltes Leerzeichen aus Quiz-Reports)
     """
     if not datetime_str or datetime_str in ["Keine Abgabe", "-", ""]:
         return None
 
     try:
+        # Normalisiere mehrfache Leerzeichen zu einem einzigen
+        datetime_str = re.sub(r'\s+', ' ', datetime_str.strip())
+
         # Deutsche Wochentage und Monate mapping
         german_days = {
             'Montag': 'Monday', 'Dienstag': 'Tuesday', 'Mittwoch': 'Wednesday',
@@ -54,7 +58,7 @@ def parse_german_datetime(datetime_str):
         # Versuche verschiedene Formate
         formats = [
             "%A, %d. %B %Y, %H:%M",  # "Tuesday, 23. September 2025, 07:46"
-            "%d. %B %Y %H:%M",        # "24. September 2025 08:12"
+            "%d. %B %Y %H:%M",        # "24. September 2025 08:12" (nach Normalisierung auch für Quiz-Format)
         ]
 
         for fmt in formats:
@@ -628,6 +632,116 @@ def get_quiz_status(driver, quiz_url, waittime):
     print("[WARNUNG] get_quiz_status ist veraltet. Verwende get_grader_report_data()")
     return []
 
+def get_quiz_submission_times(driver, quiz_url, waittime):
+    """
+    Extrahiert die submission_time für alle User eines Quiz
+
+    Args:
+        driver: Selenium WebDriver
+        quiz_url: URL zum Quiz (z.B. "https://lernplattform.mebis.bycs.de/mod/quiz/view.php?id=72039961")
+        waittime: Wartezeit in Sekunden
+
+    Returns:
+        dict: {user_id: submission_time_iso_string}
+              Nur User mit mindestens einem Versuch sind enthalten
+    """
+    submission_times = {}
+
+    # Extrahiere Quiz-ID aus der URL
+    quiz_id_match = re.search(r'id=(\d+)', quiz_url)
+    if not quiz_id_match:
+        print(f"[FEHLER] Konnte Quiz-ID aus URL nicht extrahieren: {quiz_url}")
+        return submission_times
+
+    quiz_id = quiz_id_match.group(1)
+
+    # Baue die Report-URL mit Sortierung (absteigend nach Beendet-Zeit)
+    report_url = f"https://lernplattform.mebis.bycs.de/mod/quiz/report.php?id={quiz_id}&mode=overview&attempts=enrolled_with&onlygraded&group=0&onlyregraded=0&slotmarks=1&tsort=timefinish&tdir=3"
+
+    try:
+        driver.get(report_url)
+        time.sleep(2)  # Kurze Wartezeit für Seitenaufbau
+    except Exception as e:
+        print(f"[FEHLER] Konnte Quiz-Report-Seite nicht laden (Quiz {quiz_id}): {e}")
+        return submission_times
+
+    try:
+        # Warte auf die Tabelle mit den Versuchen
+        table_element = WebDriverWait(driver, waittime).until(
+            EC.presence_of_element_located((By.ID, "attempts"))
+        )
+    except TimeoutException:
+        # Keine Versuche vorhanden - das ist normal
+        return submission_times
+    except Exception as e:
+        print(f"[FEHLER] Fehler beim Warten auf Tabelle für Quiz {quiz_id}: {e}")
+        return submission_times
+
+    try:
+        # Finde alle Zeilen in der Tabelle (tbody tr)
+        tbody = table_element.find_element(By.TAG_NAME, "tbody")
+        rows = tbody.find_elements(By.CSS_SELECTOR, "tr")
+
+        # Durchlaufe alle Zeilen
+        for row in rows:
+            try:
+                # Extrahiere User-ID aus Spalte c1 oder c2 (manchmal ist c1 die Checkbox)
+                # Versuche zuerst c2, dann c1
+                user_link = None
+                try:
+                    user_link = row.find_element(By.CSS_SELECTOR, "td.cell.c2 a[href*='user/view.php?id=']")
+                except:
+                    try:
+                        user_link = row.find_element(By.CSS_SELECTOR, "td.cell.c1 a[href*='user/view.php?id=']")
+                    except:
+                        pass
+
+                if not user_link:
+                    continue
+
+                user_href = user_link.get_attribute("href")
+                user_id_match = re.search(r'id=(\d+)', user_href)
+
+                if not user_id_match:
+                    continue
+
+                user_id = user_id_match.group(1)
+
+                # Wenn dieser User bereits erfasst wurde, überspringe (wir wollen nur den neuesten)
+                if user_id in submission_times:
+                    continue
+
+                # Extrahiere submission_time aus Spalte c7 (achte Spalte) - "Beendet"
+                submission_time_cell = None
+                submission_time_raw = None
+
+                try:
+                    submission_time_cell = row.find_element(By.CSS_SELECTOR, "td.cell.c7")
+                    submission_time_raw = submission_time_cell.text.strip()
+                except:
+                    continue
+
+                if not submission_time_raw or submission_time_raw == "":
+                    continue
+
+                # Konvertiere in ISO-Format
+                submission_time = parse_german_datetime(submission_time_raw)
+
+                # Speichere nur, wenn erfolgreich geparst
+                if submission_time:
+                    submission_times[user_id] = submission_time
+
+            except Exception as e:
+                # Zeile konnte nicht verarbeitet werden, überspringe
+                continue
+
+    except Exception as e:
+        print(f"[FEHLER] Fehler beim Extrahieren der Quiz-Submission-Times für Quiz {quiz_id}: {e}")
+        import traceback
+        print(f"[FEHLER] Traceback: {traceback.format_exc()}")
+
+    return submission_times
+
 def get_sesskey(driver, waittime=10, max_retries=3):
     """
     Extrahiert den sesskey mit Wartezeit und Retry-Logik
@@ -791,13 +905,13 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
         return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
 def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_url, course_id, index, total):
-    """Process a single quiz in parallel"""
+    """Process a single quiz in parallel - extracts submission times"""
     try:
         driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
 
         if driver is None:
             print(f"[FEHLER] [{index+1}/{total}] Kein WebDriver verfügbar für Quiz {quiz.get('id', 'unknown')}")
-            return quiz.get('id', 'unknown'), []
+            return quiz.get('id', 'unknown'), {}
 
         quiz_id = quiz["id"]
         quiz_url = quiz["url"]
@@ -807,10 +921,10 @@ def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_u
         print(f"PROGRESS|quizzes|{index+1}|{total}")
         sys.stdout.flush()
         start_time = time.time()
-        status = get_quiz_status(driver, quiz_url, waittime)
+        submission_times = get_quiz_submission_times(driver, quiz_url, waittime)
         duration = time.time() - start_time
-        print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege)")
-        return quiz_id, status
+        print(f"  Abgeschlossen in {duration:.1f}s ({len(submission_times)} Eintraege)")
+        return quiz_id, submission_times
     except Exception as e:
         import traceback
         try:
@@ -820,7 +934,7 @@ def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_u
             print(f"[FEHLER] Fehler bei Quiz {quiz.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
             print(f"[FEHLER] Traceback enthaelt Unicode-Zeichen")
         sys.stdout.flush()
-        return quiz.get('id', 'unknown'), []
+        return quiz.get('id', 'unknown'), {}
     
 
 def get_all_activity_categories(driver, course_id):
@@ -1065,8 +1179,28 @@ def main():
                 checklist_id, progress = future.result()
                 checklist_progress[checklist_id] = progress
 
+    print("Analysiere Quiz Submission Times (parallel)")
+    print(f"PROGRESS|quizzes|0|{len(activities['quizzes'])}")
+    sys.stdout.flush()
+    quiz_submission_times = {}
 
-    print("Quiz-Daten werden nun aus Grader-Report extrahiert (siehe unten bei Gruppen-Verarbeitung)")
+    # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Quizzes
+    max_workers = min(2, len(activities["quizzes"]))
+
+    if activities["quizzes"]:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Erstelle Future-Tasks für alle Quizzes
+            future_to_quiz = {
+                executor.submit(process_quiz_parallel, quiz, isheadless, waittime, username, password, base_url, course_id, idx, len(activities["quizzes"])): quiz
+                for idx, quiz in enumerate(activities["quizzes"])
+            }
+
+            # Sammle die Ergebnisse
+            for future in as_completed(future_to_quiz):
+                quiz_id, submission_times = future.result()
+                quiz_submission_times[quiz_id] = submission_times
+
+    print("Quiz-Bewertungen werden aus Grader-Report extrahiert (siehe unten bei Gruppen-Verarbeitung)")
     sys.stdout.flush()
 
     # Zentralisierte Speicherung der Aktivitäten
@@ -1148,6 +1282,11 @@ def main():
                         status = "Zur Bewertung abgegeben"
                         status2 = "Bewertet"
 
+                    # Hole submission_time aus den parallel erfassten Daten
+                    submission_time = None
+                    if quiz_id in quiz_submission_times and user["id"] in quiz_submission_times[quiz_id]:
+                        submission_time = quiz_submission_times[quiz_id][user["id"]]
+
                     user["activities"]["quizzes"].append({
                         "id": quiz_id,
                         "status": {
@@ -1155,7 +1294,7 @@ def main():
                             "status": status,
                             "status2": status2,
                             "submission": "Quiz abgeschlossen" if status2 == "Bewertet" else "Nicht abgeschlossen",
-                            "submission_time": None,
+                            "submission_time": submission_time,
                             "grade_options": [],
                             "grade": grade
                         },

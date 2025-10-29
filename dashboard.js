@@ -3167,7 +3167,11 @@ function generateExamTable() {
                 if (activity.title && activity.title.includes('Code-Review 1')) {
                     console.log(`🎯 GRADE SUCCESS: Code-Review 1 grade found for ${userName}: ${status.grade}`);
                 }
-                cellContent = `✓ ${status.grade}`;
+                cellContent = `${status.grade}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.status === 'Nicht eingereicht' || !status.status) {
                 // Nicht eingereicht - zeige "-"
@@ -3179,7 +3183,11 @@ function generateExamTable() {
                 if (activity.title && activity.title.includes('Code-Review 1')) {
                     console.log(`🎯 RATING SUCCESS: Code-Review 1 rating found for ${userName}: ${status.rating}`);
                 }
-                cellContent = `✓ ${status.rating}`;
+                cellContent = `${status.rating}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.score && status.score !== '-') {
                 // Alternative: Score field for assignments
@@ -3187,7 +3195,11 @@ function generateExamTable() {
                 if (activity.title && activity.title.includes('Code-Review 1')) {
                     console.log(`🎯 SCORE SUCCESS: Code-Review 1 score found for ${userName}: ${status.score}`);
                 }
-                cellContent = `✓ ${status.score}`;
+                cellContent = `${status.score}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.points && status.points !== '-' && status.points !== null) {
                 // Alternative: Points field for assignments
@@ -3195,7 +3207,11 @@ function generateExamTable() {
                 if (activity.title && activity.title.includes('Code-Review 1')) {
                     console.log(`🎯 POINTS SUCCESS: Code-Review 1 points found for ${userName}: ${status.points}`);
                 }
-                cellContent = `✓ ${status.points}`;
+                cellContent = `${status.points}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.result && status.result !== '-' && status.result !== null) {
                 // Alternative: Result field for assignments
@@ -3203,7 +3219,11 @@ function generateExamTable() {
                 if (activity.title && activity.title.includes('Code-Review 1')) {
                     console.log(`🎯 RESULT SUCCESS: Code-Review 1 result found for ${userName}: ${status.result}`);
                 }
-                cellContent = `✓ ${status.result}`;
+                cellContent = `${status.result}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.mark && status.mark !== '-' && status.mark !== null) {
                 // Alternative: Mark field for assignments
@@ -3211,7 +3231,11 @@ function generateExamTable() {
                 if (activity.title && activity.title.includes('Code-Review 1')) {
                     console.log(`🎯 MARK SUCCESS: Code-Review 1 mark found for ${userName}: ${status.mark}`);
                 }
-                cellContent = `✓ ${status.mark}`;
+                cellContent = `${status.mark}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
                 // Zur Bewertung abgegeben - zeige "bewertbar" als Link für Aufgaben
@@ -3433,32 +3457,56 @@ function generateAllGroupsExamTable() {
                 cellClass = 'status-not-submitted';
             } else if (status.grade && status.grade !== '-') {
                 console.log(`DEBUG EXAM ALL: Grade found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.grade}`);
-                cellContent = `✓<br>${status.grade}`;
+                cellContent = `${status.grade}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.rating && status.rating !== '-') {
                 // Alternative: Rating field for assignments
                 console.log(`DEBUG EXAM ALL: Rating found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.rating}`);
-                cellContent = `✓<br>${status.rating}`;
+                cellContent = `${status.rating}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.score && status.score !== '-') {
                 // Alternative: Score field for assignments
                 console.log(`DEBUG EXAM ALL: Score found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.score}`);
-                cellContent = `✓<br>${status.score}`;
+                cellContent = `${status.score}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.points && status.points !== '-' && status.points !== null) {
                 // Alternative: Points field for assignments
                 console.log(`DEBUG EXAM ALL: Points found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.points}`);
-                cellContent = `✓<br>${status.points}`;
+                cellContent = `${status.points}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.result && status.result !== '-' && status.result !== null) {
                 // Alternative: Result field for assignments
                 console.log(`DEBUG EXAM ALL: Result found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.result}`);
-                cellContent = `✓<br>${status.result}`;
+                cellContent = `${status.result}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.mark && status.mark !== '-' && status.mark !== null) {
                 // Alternative: Mark field for assignments
                 console.log(`DEBUG EXAM ALL: Mark found for ${activity.activity_type} "${activity.title}" for user ${user.userName}: ${status.mark}`);
-                cellContent = `✓<br>${status.mark}`;
+                cellContent = `${status.mark}`;
+                const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
+                if (submissionTimeFormatted) {
+                    cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
+                }
                 cellClass = 'status-graded';
             } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
                 // For "all groups" view, use group=0
