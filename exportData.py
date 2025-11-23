@@ -387,6 +387,47 @@ def extract_progress(driver):
 
     return progress_data
 
+def get_assignment_groups(driver, assignment_url, waittime):
+    """
+    Extrahiert die Gruppierungsinformationen für ein Assignment
+
+    Returns:
+        str: "all" wenn für alle Gruppen, oder der Gruppenname wenn nur für eine spezifische Gruppe
+    """
+    try:
+        # Navigiere zur Assignment-Seite
+        driver.get(assignment_url)
+        time.sleep(1)  # Kurze Wartezeit für Seitenaufbau
+
+        # Suche nach dem Form mit id="selectgroup"
+        try:
+            form_element = driver.find_element(By.ID, "selectgroup")
+
+            # Finde das Label innerhalb des Forms
+            label_element = form_element.find_element(By.TAG_NAME, "label")
+            label_text = label_element.text.strip()
+
+            # Analysiere den Label-Text
+            # Prüfe ob es einen Gruppennamen in Klammern gibt
+            group_match = re.search(r'Getrennte Gruppen \(([^)]+)\)', label_text)
+            if group_match:
+                # Spezifische Gruppe gefunden
+                return group_match.group(1)
+            elif "Getrennte Gruppen" in label_text:
+                # "Getrennte Gruppen" ohne spezifischen Namen = alle Gruppen
+                return "all"
+            else:
+                # Unerwarteter Label-Text
+                return "all"
+
+        except Exception as e:
+            # Form nicht gefunden oder Fehler beim Parsen = keine Gruppenbeschränkung
+            return "all"
+
+    except Exception as e:
+        print(f"[FEHLER] Fehler beim Extrahieren der Gruppierungsinformationen: {e}")
+        return "all"
+
 def get_assignment_status(driver, assignment_url, waittime):
     # Navigiere zur Bewertungsseite des Assignments mit allen nötigen Parametern
     # status: alle Benutzer anzeigen, auch die ohne Abgaben
@@ -835,7 +876,7 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
 
         if driver is None:
             print(f"[FEHLER] [{index+1}/{total}] Kein WebDriver verfügbar für Assignment {assignment.get('id', 'unknown')}")
-            return assignment.get('id', 'unknown'), []
+            return assignment.get('id', 'unknown'), [], "all"
 
         assignment_id = assignment["id"]
         assignment_url = assignment["url"]
@@ -845,10 +886,16 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
         print(f"PROGRESS|assignments|{index+1}|{total}")
         sys.stdout.flush()
         start_time = time.time()
+
+        # Extrahiere Gruppierungsinformationen
+        groups = get_assignment_groups(driver, assignment_url, waittime)
+
+        # Extrahiere Status
         status = get_assignment_status(driver, assignment_url, waittime)
+
         duration = time.time() - start_time
-        print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege)")
-        return assignment_id, status
+        print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege, groups: {groups})")
+        return assignment_id, status, groups
     except Exception as e:
         import traceback
         try:
@@ -858,7 +905,7 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
             print(f"[FEHLER] Fehler bei Assignment {assignment.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
             print(f"[FEHLER] Traceback enthaelt Unicode-Zeichen")
         sys.stdout.flush()
-        return assignment.get('id', 'unknown'), []
+        return assignment.get('id', 'unknown'), [], "all"
 
 def process_checklist_parallel(checklist, isheadless, username, password, base_url, course_id, index, total, waittime=10):
     """Process a single checklist in parallel"""
@@ -1138,6 +1185,7 @@ def main():
     print(f"PROGRESS|assignments|0|{len(activities['assignments'])}")
     sys.stdout.flush()
     assignments_status = {}
+    assignments_groups = {}
 
     # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Assignments
     max_workers = min(2, len(activities["assignments"]))  # Maximal 2 parallel für Stabilität
@@ -1152,8 +1200,21 @@ def main():
 
             # Sammle die Ergebnisse
             for future in as_completed(future_to_assignment):
-                assignment_id, status = future.result()
+                assignment_id, status, groups = future.result()
                 assignments_status[assignment_id] = status
+                assignments_groups[assignment_id] = groups
+
+    # Füge die "groups"-Informationen zu den Assignment-Objekten in activities_by_category hinzu
+    print("Aktualisiere Gruppierungsinformationen in activities_by_category...")
+    sys.stdout.flush()
+    for category in activities_by_category:
+        if "assignments" in category:
+            for assignment in category["assignments"]:
+                assignment_id = assignment["id"]
+                if assignment_id in assignments_groups:
+                    assignment["groups"] = assignments_groups[assignment_id]
+                else:
+                    assignment["groups"] = "all"  # Standard-Fallback
 
     # Note: user_status is handled by dashboard_backend.py using existing user.activities data
     # No need to duplicate data structure here
