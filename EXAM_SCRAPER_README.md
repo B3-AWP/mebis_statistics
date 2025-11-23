@@ -177,7 +177,8 @@ python exam_pdf_generator.py
 ═══════════════════════════════════════════════════════════
 LEISTUNGSNACHWEIS: Frontend (Softwareergonomie, HTML und CSS)
 ═══════════════════════════════════════════════════════════
-Name: Ann-Kathrin Rauch                    Gruppe: IFA12C
+Name: kai Rauch                    
+Gruppe: IFA12C
 Begonnen: 26.09.2025, 11:22               Dauer: 19 Min 16 Sek
 Punkte: 42,00 / 57,00                     Note: 73,68 / 100,00
 
