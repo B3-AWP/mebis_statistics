@@ -258,7 +258,7 @@ MODE_WAITTIME=5
   "students": [
     {
       "user_id": "3375510",
-      "user_name": "Ann-Kathrin Rauch",
+      "user_name": "kai Bauch",
       "group_id": "479509",
       "group_name": "IFA12C",
       "attempt_id": "9764734",
