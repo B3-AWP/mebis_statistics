@@ -232,9 +232,9 @@ python exam_pdf_generator.py
 ═══════════════════════════════════════════════════════════
 LEISTUNGSNACHWEIS: Frontend (Softwareergonomie, HTML und CSS)
 ═══════════════════════════════════════════════════════════
-Name: Max Mustermann                   Gruppe: IFA12B - Team 1
-Begonnen: Freitag, 17. Okt. 2025      Dauer: 22 Minuten 16 Sek
-Punkte: 47,50/57,00                   Note: 83,33 von 100,00
+Name: Ann-Kathrin Rauch                    Gruppe: IFA12C
+Begonnen: 26.09.2025, 11:22               Dauer: 19 Min 16 Sek
+Punkte: 42,00 / 57,00                     Note: 73,68 / 100,00
 
 Feedback: Du hast eine 2 erreicht. Das ist eine
 fantastische Leistung...
@@ -328,7 +328,9 @@ MODE_WAITTIME=5
   "students": [
     {
       "user_id": "3375510",
-      "user_name": "Max Mustermann",
+      "user_name": "Ann-Kathrin Rauch",
+      "group_id": "479509",
+      "group_name": "IFA12C",
       "attempt_id": "9764734",
       "metadata": {
         "started": "Freitag, 17. Oktober 2025, 09:45",
