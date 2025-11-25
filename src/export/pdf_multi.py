@@ -29,13 +29,25 @@ pdf_logger = get_logger('pdf_generator')
 class ReviewPDFGeneratorMulti:
     """Generator für Code-Review PDFs mit Multi-Group Support"""
 
-    def __init__(self, template_path='Templates/Code_Review_Vorlage.docx'):
+    def __init__(self, template_path=None):
         """
         Initialisiert den PDF Generator
 
         Args:
-            template_path: Pfad zur Word-Vorlage
+            template_path: Pfad zur Word-Vorlage (relativ oder absolut)
         """
+        # Default template path relativ zu diesem File
+        if template_path is None:
+            template_path = os.path.join(
+                os.path.dirname(__file__),
+                '..',
+                'dashboard',
+                'templates',
+                'Templates',
+                'Code_Review_Vorlage.docx'
+            )
+            template_path = os.path.abspath(template_path)
+
         self.template_path = template_path
         self.logger = pdf_logger
 

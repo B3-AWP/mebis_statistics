@@ -1039,7 +1039,7 @@ export_status = {
 }
 
 def run_export_script():
-    """Führt exportData.py als Hintergrundprozess aus"""
+    """Führt src/export/exporter.py als Hintergrundprozess aus"""
     global export_status
     logger = api_logger
 
@@ -1058,14 +1058,15 @@ def run_export_script():
 
         logger.info("Status initialized, starting export script...")
 
-        # Führe exportData.py aus
+        # Führe exporter.py aus (verschoben nach src/export/)
         import sys
-        script_path = os.path.join(os.path.dirname(__file__), 'exportData.py')
+        script_path = os.path.join(os.path.dirname(__file__), '..', 'export', 'exporter.py')
+        script_path = os.path.abspath(script_path)  # Konvertiere zu absolutem Pfad
         logger.info(f"Script path: {script_path}")
         logger.info(f"Python executable: {sys.executable}")
 
         if not os.path.exists(script_path):
-            raise FileNotFoundError(f"exportData.py not found at {script_path}")
+            raise FileNotFoundError(f"exporter.py not found at {script_path}")
 
         logger.info("Creating subprocess...")
         process = subprocess.Popen(
