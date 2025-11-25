@@ -16,6 +16,9 @@ import time
 import threading
 from pathlib import Path
 
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Sichere Konfiguration und Logging
 from config.config_manager import config_manager
 from config.logger_config import get_logger

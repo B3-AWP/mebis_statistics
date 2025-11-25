@@ -1,5 +1,12 @@
 import os
 import sys
+
+# Add project root to path for imports
+# This allows the file to be run directly from src/export/ or via wrapper scripts
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
