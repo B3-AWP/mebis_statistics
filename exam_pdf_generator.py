@@ -243,8 +243,9 @@ class ExamPDFGenerator:
         """
         elements = []
 
-        # Titel
-        title = Paragraph(f"<b>LEISTUNGSNACHWEIS: {quiz_info['quiz_name']}</b>", self.styles['QuizTitle'])
+        # Titel (LNW statt LEISTUNGSNACHWEIS, Leerzeichen durch _ ersetzen)
+        quiz_name_formatted = quiz_info['quiz_name'].replace(' ', '_')
+        title = Paragraph(f"<b>LNW: {quiz_name_formatted}</b>", self.styles['QuizTitle'])
         elements.append(title)
 
         # Trennlinie
@@ -259,10 +260,14 @@ class ExamPDFGenerator:
         # Metadaten-Tabelle (2 Spalten)
         metadata = student.get('metadata', {})
 
+        # Extrahiere nur den Präfix aus dem Gruppennamen
+        group_name_full = student.get('group_name', 'N/A')
+        group_prefix = self._extract_group_prefix(group_name_full) if group_name_full != 'N/A' else 'N/A'
+
         meta_data = [
-            ['Name:', student.get('user_name', 'N/A'), 'Gruppe:', student.get('group_name', 'N/A')],
+            ['Name:', student.get('user_name', 'N/A'), 'Gruppe:', group_prefix],
             ['Begonnen:', metadata.get('started', 'N/A'), 'Dauer:', metadata.get('duration', 'N/A')],
-            ['Punkte:', metadata.get('points', 'N/A'), 'Note:', metadata.get('grade', 'N/A')]
+            ['Punkte:', metadata.get('points', 'N/A'), 'Prozent:', metadata.get('grade', 'N/A')]
         ]
 
         meta_table = Table(meta_data, colWidths=[25 * mm, 65 * mm, 25 * mm, 65 * mm])
@@ -367,6 +372,32 @@ class ExamPDFGenerator:
         import re
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text
+
+    @staticmethod
+    def _extract_group_prefix(group_name: str) -> str:
+        """
+        Extrahiert den Präfix aus dem Gruppennamen
+
+        Args:
+            group_name: Vollständiger Gruppenname (z.B. "IFA12A - Team 3")
+
+        Returns:
+            str: Nur der Präfix (z.B. "IFA12A")
+
+        Beispiele:
+            "IFA12A - Team 3" -> "IFA12A"
+            "IFA12A" -> "IFA12A"
+            "IFA12B-Team1" -> "IFA12B-Team1" (kein " - " mit Leerzeichen)
+        """
+        if not group_name:
+            return ''
+
+        # Suche nach " - " (Leerzeichen-Minus-Leerzeichen)
+        if ' - ' in group_name:
+            return group_name.split(' - ')[0].strip()
+
+        # Falls kein Präfix gefunden, gib vollständigen Namen zurück
+        return group_name.strip()
 
     def _render_question(self, question: Dict, base_path: str) -> List:
         """
@@ -962,12 +993,15 @@ class ExamPDFGenerator:
                     self.logger.warning(f"Could not parse date '{date_str}': {e}")
                     date_prefix = ""
 
-            # Dateiname: YYYYMMDD_QuizName_Gruppe_Username.pdf (bereinigt)
+            # Dateiname: YYYYMMDD_QuizName_Präfix_Username.pdf (bereinigt)
+            # Extrahiere nur den Präfix aus dem Gruppennamen (z.B. "IFA12A - Team 3" -> "IFA12A")
+            group_prefix = self._extract_group_prefix(group_name)
+
             # Entferne ungültige Zeichen aus Dateinamen
             safe_quiz_name = "".join(c for c in quiz_name if c.isalnum() or c in (' ', '-', '_')).strip()
-            safe_group_name = "".join(c for c in group_name if c.isalnum() or c in (' ', '-', '_')).strip()
+            safe_group_prefix = "".join(c for c in group_prefix if c.isalnum() or c in (' ', '-', '_')).strip()
             safe_user_name = "".join(c for c in user_name if c.isalnum() or c in (' ', '-', '_')).strip()
-            output_filename = f"{date_prefix}{safe_quiz_name}_{safe_group_name}_{safe_user_name}.pdf"
+            output_filename = f"{date_prefix}{safe_quiz_name}_{safe_group_prefix}_{safe_user_name}.pdf"
             output_path = os.path.join(output_dir, output_filename)
 
             self.logger.info(f"Generating PDF for {user_name}...")
@@ -1067,9 +1101,26 @@ def main():
         if 'data.json' in files:
             data_file = os.path.join(root, 'data.json')
 
+            # Lese group_name aus data.json, um Präfix zu extrahieren
+            try:
+                with open(data_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    group_name = data.get('quiz_info', {}).get('group_name', '')
+                    group_prefix = ExamPDFGenerator._extract_group_prefix(group_name)
+            except Exception as e:
+                pdf_logger.error(f"Error reading group from {data_file}: {e}")
+                group_prefix = ''
+
             # Bestimme relativen Pfad für Output
+            # Neue Struktur: LNW/{Präfix}/{QuizName}/
             rel_path = os.path.relpath(root, data_dir)
-            quiz_output_dir = os.path.join(output_dir, os.path.dirname(rel_path))
+            quiz_name = os.path.dirname(rel_path)  # z.B. "Frontend"
+
+            if group_prefix:
+                quiz_output_dir = os.path.join(output_dir, group_prefix, quiz_name)
+            else:
+                # Fallback: alte Struktur falls kein Präfix
+                quiz_output_dir = os.path.join(output_dir, quiz_name)
 
             try:
                 generator.generate_individual_pdfs(data_file, quiz_output_dir, only_incorrect=only_incorrect)

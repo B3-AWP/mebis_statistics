@@ -35,6 +35,32 @@ from config.logger_config import get_logger
 scraper_logger = get_logger('exam_scraper')
 
 
+def extract_group_prefix(group_name: str) -> str:
+    """
+    Extrahiert den Präfix aus dem Gruppennamen
+
+    Args:
+        group_name: Vollständiger Gruppenname (z.B. "IFA12A - Team 3")
+
+    Returns:
+        str: Nur der Präfix (z.B. "IFA12A")
+
+    Beispiele:
+        "IFA12A - Team 3" -> "IFA12A"
+        "IFA12A" -> "IFA12A"
+        "IFA12B-Team1" -> "IFA12B-Team1" (kein " - " mit Leerzeichen)
+    """
+    if not group_name:
+        return ''
+
+    # Suche nach " - " (Leerzeichen-Minus-Leerzeichen)
+    if ' - ' in group_name:
+        return group_name.split(' - ')[0].strip()
+
+    # Falls kein Präfix gefunden, gib vollständigen Namen zurück
+    return group_name.strip()
+
+
 def parse_selection_input(input_str: str, max_num: int) -> List[int]:
     """
     Parst User-Input für Auswahl (z.B. "1,3,5" oder "1-3" oder "all")
@@ -96,49 +122,103 @@ def select_items_interactive(items: List[Dict], item_name: str = "Item") -> List
         print(f"Keine {item_name}s gefunden.")
         return []
 
-    print(f"\n{'='*70}")
-    print(f"Verfügbare {item_name}s ({len(items)}):")
-    print(f"{'='*70}")
+    # Prüfe ob es Gruppen sind - wenn ja, nach Präfix gruppieren
+    is_groups = all('group_name' in item for item in items)
 
-    for idx, item in enumerate(items, 1):
-        # Bestimme den Namen (kann quiz_name, group_name oder name sein)
-        name = item.get('quiz_name') or item.get('group_name') or item.get('name', 'Unbekannt')
-        item_id = item.get('quiz_id') or item.get('group_id') or item.get('id', 'N/A')
+    if is_groups:
+        # Gruppiere nach Präfix
+        from collections import defaultdict
+        prefix_groups = defaultdict(list)
 
-        # Zusätzliche Info (z.B. Deadline bei Quizzes)
-        extra_info = ''
-        if 'deadline' in item and item['deadline']:
-            extra_info = f" (Deadline: {item['deadline']})"
+        for item in items:
+            group_name = item.get('group_name', '')
+            prefix = extract_group_prefix(group_name)
+            prefix_groups[prefix].append(item)
 
-        print(f"{idx:3}. {name[:50]:<50} [ID: {item_id}]{extra_info}")
+        # Erstelle Display-Liste: [(prefix, [items])]
+        display_items = sorted(prefix_groups.items())
 
-    print(f"{'='*70}")
+        print(f"\n{'='*70}")
+        print(f"Verfügbare {item_name}s ({len(display_items)} Präfixe, {len(items)} Teams):")
+        print(f"{'='*70}")
+
+        for idx, (prefix, group_items) in enumerate(display_items, 1):
+            # Sammle alle IDs
+            ids = [item.get('group_id', 'N/A') for item in group_items]
+            ids_str = ', '.join(ids)
+
+            print(f"{idx:3}. {prefix[:50]:<50} (IDs: {ids_str})")
+
+        print(f"{'='*70}")
+        print(f"\nHinweis: Auswahl eines Präfix wählt automatisch alle zugehörigen Teams aus.")
+
+    else:
+        # Normale Anzeige (für Quizzes)
+        print(f"\n{'='*70}")
+        print(f"Verfügbare {item_name}n ({len(items)}):")
+        print(f"{'='*70}")
+
+        for idx, item in enumerate(items, 1):
+            name = item.get('quiz_name') or item.get('name', 'Unbekannt')
+            item_id = item.get('quiz_id') or item.get('id', 'N/A')
+
+            # Zusätzliche Info (z.B. Deadline bei Quizzes)
+            extra_info = ''
+            if 'deadline' in item and item['deadline']:
+                extra_info = f" (Deadline: {item['deadline']})"
+
+            print(f"{idx:3}. {name[:50]:<50} [ID: {item_id}]{extra_info}")
+
+        print(f"{'='*70}")
+
     print(f"\nAuswahl-Optionen:")
-    print(f"  - 'all' oder 'alle': Alle {item_name}s auswählen")
+    print(f"  - 'all' oder 'alle': Alle {item_name}n auswählen")
     print(f"  - Einzelne Nummern: '1,3,5' (wählt Nr. 1, 3 und 5)")
     print(f"  - Bereiche: '1-3' (wählt Nr. 1, 2 und 3)")
     print(f"  - Kombiniert: '1,3-5,7' (wählt Nr. 1, 3, 4, 5 und 7)")
     print(f"  - 'q' oder 'quit': Abbrechen")
 
     while True:
-        user_input = input(f"\nWelche {item_name}s möchten Sie scrapen? ").strip()
+        user_input = input(f"\nWelche {item_name}n möchten Sie scrapen? ").strip()
 
         if user_input.lower() in ['q', 'quit', 'exit']:
             print("Abbruch durch User.")
             return []
 
-        selected_indices = parse_selection_input(user_input, len(items))
+        if is_groups:
+            # Parse Auswahl basierend auf Präfix-Anzahl
+            selected_indices = parse_selection_input(user_input, len(display_items))
 
-        if not selected_indices:
-            print(f"Keine gültige Auswahl. Bitte versuchen Sie es erneut.")
-            continue
+            if not selected_indices:
+                print(f"Keine gültige Auswahl. Bitte versuchen Sie es erneut.")
+                continue
 
-        # Zeige Auswahl
-        selected_items = [items[i] for i in selected_indices]
-        print(f"\nAusgewählte {item_name}s ({len(selected_items)}):")
-        for item in selected_items:
-            name = item.get('quiz_name') or item.get('group_name') or item.get('name', 'Unbekannt')
-            print(f"  - {name}")
+            # Sammle alle Items aus den ausgewählten Präfixen
+            selected_items = []
+            selected_prefixes = []
+            for idx in selected_indices:
+                prefix, group_items = display_items[idx]
+                selected_items.extend(group_items)
+                selected_prefixes.append(prefix)
+
+            # Zeige Auswahl
+            print(f"\nAusgewählte {item_name}s ({len(selected_prefixes)} Präfixe, {len(selected_items)} Teams):")
+            for prefix in selected_prefixes:
+                print(f"  - {prefix}")
+
+        else:
+            # Normal (für Quizzes)
+            selected_indices = parse_selection_input(user_input, len(items))
+
+            if not selected_indices:
+                print(f"Keine gültige Auswahl. Bitte versuchen Sie es erneut.")
+                continue
+
+            selected_items = [items[i] for i in selected_indices]
+            print(f"\nAusgewählte {item_name}s ({len(selected_items)}):")
+            for item in selected_items:
+                name = item.get('quiz_name') or item.get('name', 'Unbekannt')
+                print(f"  - {name}")
 
         # Keine Bestätigung mehr - direkt zurückgeben
         return selected_items
@@ -330,7 +410,9 @@ class QuizScraper:
                         'group_name': group_name
                     })
 
-                    self.logger.info(f"Found group: {group_name} (ID: {group_id})")
+                    # Log nur den Präfix (z.B. "IFA12A" statt "IFA12A - Team 3")
+                    group_prefix = extract_group_prefix(group_name)
+                    self.logger.info(f"Found group: {group_prefix} (ID: {group_id})")
 
         except Exception as e:
             self.logger.error(f"Error fetching groups: {e}")
@@ -511,20 +593,23 @@ class QuizScraper:
         group_id = group_info['group_id']
         group_name = group_info['group_name']
 
-        self.logger.info(f"Processing quiz '{quiz_name}' for group '{group_name}'...")
+        # Extrahiere Präfix für Log-Ausgaben (z.B. "IFA12A" statt "IFA12A - Team 3")
+        group_prefix = extract_group_prefix(group_name)
 
-        # Output-Verzeichnis
+        self.logger.info(f"Processing quiz '{quiz_name}' for group '{group_prefix}'...")
+
+        # Output-Verzeichnis (nutzt vollständigen group_name für eindeutige Pfade)
         output_dir = os.path.join(self.data_dir, quiz_name, group_name)
         data_file = os.path.join(output_dir, 'data.json')
 
         # Prüfe ob bereits gescrapt (außer force)
         if os.path.exists(data_file) and not force_rescrape:
-            self.logger.info(f"Data already exists for {quiz_name}/{group_name}, skipping")
+            self.logger.info(f"Data already exists for {quiz_name}/{group_prefix}, skipping")
             return
 
         # Wenn Daten bereits existieren und überschrieben werden
         if os.path.exists(data_file) and force_rescrape:
-            self.logger.info(f"Overwriting existing data for {quiz_name}/{group_name}")
+            self.logger.info(f"Overwriting existing data for {quiz_name}/{group_prefix}")
 
         # Erstelle Output-Verzeichnis
         os.makedirs(output_dir, exist_ok=True)
@@ -533,7 +618,7 @@ class QuizScraper:
         attempts = self.get_attempts_for_group(quiz_id, group_id)
 
         if not attempts:
-            self.logger.warning(f"No attempts found for quiz '{quiz_name}', group '{group_name}'")
+            self.logger.warning(f"No attempts found for quiz '{quiz_name}', group '{group_prefix}'")
             # Erstelle leere Datei als Marker
             empty_data = {
                 'quiz_info': {
