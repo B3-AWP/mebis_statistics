@@ -119,7 +119,7 @@ def start_secure_backend():
     """Startet das Backend"""
     try:
         logger.info("Starting dashboard backend...")
-        from dashboard_backend import app
+        from src.dashboard.backend import app
 
         flask_config = config_manager.get_flask_config()
 
@@ -131,7 +131,7 @@ def start_secure_backend():
 
     except ImportError as e:
         logger.error(f"Import error: {e}")
-        logger.error("Make sure dashboard_backend.py is available.")
+        logger.error("Make sure src/dashboard/backend.py is available.")
         return False
     except Exception as e:
         logger.error(f"Error starting dashboard: {e}")

@@ -22,6 +22,7 @@ from reportlab.platypus import (
 )
 from reportlab.pdfgen import canvas as pdfgen_canvas
 from config.logger_config import get_logger
+from src.common.group_utils import extract_group_prefix
 
 # Logger Setup
 pdf_logger = get_logger('exam_pdf_generator')
@@ -262,7 +263,7 @@ class ExamPDFGenerator:
 
         # Extrahiere nur den Präfix aus dem Gruppennamen
         group_name_full = student.get('group_name', 'N/A')
-        group_prefix = self._extract_group_prefix(group_name_full) if group_name_full != 'N/A' else 'N/A'
+        group_prefix = extract_group_prefix(group_name_full) if group_name_full != 'N/A' else 'N/A'
 
         meta_data = [
             ['Name:', student.get('user_name', 'N/A'), 'Gruppe:', group_prefix],
@@ -372,32 +373,6 @@ class ExamPDFGenerator:
         import re
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text
-
-    @staticmethod
-    def _extract_group_prefix(group_name: str) -> str:
-        """
-        Extrahiert den Präfix aus dem Gruppennamen
-
-        Args:
-            group_name: Vollständiger Gruppenname (z.B. "IFA12A - Team 3")
-
-        Returns:
-            str: Nur der Präfix (z.B. "IFA12A")
-
-        Beispiele:
-            "IFA12A - Team 3" -> "IFA12A"
-            "IFA12A" -> "IFA12A"
-            "IFA12B-Team1" -> "IFA12B-Team1" (kein " - " mit Leerzeichen)
-        """
-        if not group_name:
-            return ''
-
-        # Suche nach " - " (Leerzeichen-Minus-Leerzeichen)
-        if ' - ' in group_name:
-            return group_name.split(' - ')[0].strip()
-
-        # Falls kein Präfix gefunden, gib vollständigen Namen zurück
-        return group_name.strip()
 
     def _render_question(self, question: Dict, base_path: str) -> List:
         """
@@ -995,7 +970,7 @@ class ExamPDFGenerator:
 
             # Dateiname: YYYYMMDD_QuizName_Präfix_Username.pdf (bereinigt)
             # Extrahiere nur den Präfix aus dem Gruppennamen (z.B. "IFA12A - Team 3" -> "IFA12A")
-            group_prefix = self._extract_group_prefix(group_name)
+            group_prefix = extract_group_prefix(group_name)
 
             # Entferne ungültige Zeichen aus Dateinamen
             safe_quiz_name = "".join(c for c in quiz_name if c.isalnum() or c in (' ', '-', '_')).strip()
@@ -1059,9 +1034,9 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description='PDF Generator für Mebis Leistungsnachweise')
-    parser.add_argument('--data-dir', type=str, default='quiz_data',
+    parser.add_argument('--data-dir', type=str, default='data/quiz_data',
                        help='Verzeichnis mit gescrapten Daten')
-    parser.add_argument('--output-dir', type=str, default='LNW',
+    parser.add_argument('--output-dir', type=str, default='data/LNW',
                        help='Ausgabe-Verzeichnis für PDFs')
     parser.add_argument('--only-incorrect', action='store_true',
                        help='Nur falsche/teilweise richtige Fragen ausgeben (Papier sparen)')
@@ -1106,7 +1081,7 @@ def main():
                 with open(data_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     group_name = data.get('quiz_info', {}).get('group_name', '')
-                    group_prefix = ExamPDFGenerator._extract_group_prefix(group_name)
+                    group_prefix = extract_group_prefix(group_name)
             except Exception as e:
                 pdf_logger.error(f"Error reading group from {data_file}: {e}")
                 group_prefix = ''

@@ -170,7 +170,7 @@ class ConfigManager:
         Returns:
             Pfad zum Export-Ordner (relativ oder absolut)
         """
-        return os.getenv('EXPORT_FOLDER', 'export')
+        return os.getenv('EXPORT_FOLDER', 'data/export')
 
     def get_grade_mapping(self) -> Dict[int, str]:
         """

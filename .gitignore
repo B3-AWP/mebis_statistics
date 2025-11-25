@@ -11,9 +11,9 @@ prompt.txt
 auswertung.html
 
 # Export data
-export/*
-LNW/*
-quiz_data/*
+data/export/*
+data/LNW/*
+data/quiz_data/*
 
 # Python
 venv/

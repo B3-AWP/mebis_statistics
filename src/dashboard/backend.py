@@ -23,10 +23,10 @@ from config.config_manager import config_manager
 from config.logger_config import get_logger, backend_logger, api_logger, data_logger
 
 # PDF Generator
-from pdf_generator_multi import ReviewPDFGeneratorMulti
+from src.export.pdf_multi import ReviewPDFGeneratorMulti
 
 # Flask App Setup mit sicherer Konfiguration
-app = Flask(__name__, static_folder='.')
+app = Flask(__name__, static_folder='static')
 CORS(app)
 
 # Flask Konfiguration aus Environment Variables

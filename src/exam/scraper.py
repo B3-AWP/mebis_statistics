@@ -21,44 +21,19 @@ from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 
 # Import aus bestehendem Code
-from exportData import (
+from src.export.exporter import (
     create_webdriver,
     login,
     get_sesskey,
     parse_german_datetime
 )
-from exam_utils import QuizParser, ImageDownloader
+from src.exam.utils import QuizParser, ImageDownloader
+from src.common.group_utils import extract_group_prefix
 from config.config_manager import config_manager
 from config.logger_config import get_logger
 
 # Logger Setup
 scraper_logger = get_logger('exam_scraper')
-
-
-def extract_group_prefix(group_name: str) -> str:
-    """
-    Extrahiert den Präfix aus dem Gruppennamen
-
-    Args:
-        group_name: Vollständiger Gruppenname (z.B. "IFA12A - Team 3")
-
-    Returns:
-        str: Nur der Präfix (z.B. "IFA12A")
-
-    Beispiele:
-        "IFA12A - Team 3" -> "IFA12A"
-        "IFA12A" -> "IFA12A"
-        "IFA12B-Team1" -> "IFA12B-Team1" (kein " - " mit Leerzeichen)
-    """
-    if not group_name:
-        return ''
-
-    # Suche nach " - " (Leerzeichen-Minus-Leerzeichen)
-    if ' - ' in group_name:
-        return group_name.split(' - ')[0].strip()
-
-    # Falls kein Präfix gefunden, gib vollständigen Namen zurück
-    return group_name.strip()
 
 
 def parse_selection_input(input_str: str, max_num: int) -> List[int]:
@@ -249,8 +224,8 @@ class QuizScraper:
         self.course_id = config_manager.get_course_id()
 
         # Output-Verzeichnisse
-        self.data_dir = 'quiz_data'
-        self.output_dir = 'LNW'
+        self.data_dir = 'data/quiz_data'
+        self.output_dir = 'data/LNW'
 
         self.logger.info("QuizScraper initialized")
 
