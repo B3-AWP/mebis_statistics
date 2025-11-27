@@ -15,15 +15,106 @@ Dieses Tool erstellt druckfertige PDFs von Mebis-Quizzes (Leistungsnachweise), d
 
 ## Neue Features (2025)
 
+### ⚡ Performance: Paralleles Scraping (NEU - November 2025)
+- **Multi-Threading**: Mehrere Studenten-Attempts werden parallel gescrapt
+- **3x schnellere Verarbeitung** mit Standard-Einstellung (3 parallele Browser)
+- **Anpassbar**: `--max-workers 5` für mehr Geschwindigkeit (erhöhter RAM-Verbrauch)
+- **Zeitanzeige**: Am Ende wird die Gesamtdauer angezeigt
+- Jeder Thread nutzt eine eigene Browser-Instanz für maximale Isolation
+
+```bash
+# Standard (3 parallele Workers)
+python scripts/scrape_exams.py
+
+# Schneller (5 parallele Workers - mehr RAM)
+python scripts/scrape_exams.py --max-workers 5
+
+# Konservativ (1 Worker - sequenziell)
+python scripts/scrape_exams.py --max-workers 1
+```
+
+**Ausgabe-Beispiel:**
+```
+============================================================
+SCRAPING COMPLETED
+============================================================
+Processed 2 quizzes x 3 groups = 6 combinations
+Total time: 3 minutes 45 seconds (225.3s)
+```
+
+### 📸 Verbesserte Screenshots (NEU - November 2025)
+- **Multianswer-Screenshots**: Automatische Screenshots für alle Lückentext-Fragen
+- **Viewport-Optimierung**: Stellt sicher, dass Elemente vollständig sichtbar sind
+- **Scroll-Intelligenz**: Scrollt automatisch zum Element mit optimaler Positionierung
+- **Fallback-Strategie**: Versucht erst `div.formulation`, dann gesamtes Question-Element
+- **Längerer Timeout**: 5 Sekunden für komplexe Fragen (statt 2s)
+- Screenshots von ddmarker-Fragen mit allen platzierten Markern
+- Eindeutige Dateinamen pro Student (keine Überschreibung)
+
+### 🎯 Intelligente Filterung (NEU - November 2025)
+- **Teilantwort-Filterung**: Bei "nur falsche Fragen" werden auch richtige Lücken in Multianswer ausgeblendet
+- **Beispiel**: Frage mit 4 Lücken, 2 falsch → Zeigt nur die 2 falschen Lücken
+- Spart noch mehr Papier und erhöht Übersichtlichkeit
+- Funktioniert für Blanks (Lückentext) und Sub-Questions (Checkboxen)
+
+### 📝 Verbesserte Kommentar-Darstellung (NEU - November 2025)
+- **HTML-Parsing**: Nutzt `comment_html` für bessere Formatierung
+- **Strukturierte Listen**: Kommentare mit `<li>` werden als Bullet-Points dargestellt
+- **Keine unnötigen Zeilenumbrüche**: Zwischen HTML-Tags werden Leerzeichen statt `\n` verwendet
+- **HTML-Entity-Dekodierung**: `&lt;` und `&gt;` werden korrekt als `<` und `>` angezeigt
+
+**Vorher:**
+```
+❌
+<head>
+-Tags fehlen
+-
+<title>
+steht in
+<html>
+```
+
+**Jetzt:**
+```
+• ❌ <head>-Tags fehlen komplett - <title> steht direkt in <html>, muss aber in <head> stehen
+• ❌ <title>Meine Seite> - fehlendes öffnendes < beim schließenden Tag
+```
+
+### 🗂️ Gruppen-basierte Organisation (NEU - November 2025)
+- **Struktur geändert**: Jetzt `quiz_data/{group_prefix}/{quiz_name}/` statt `{quiz_name}/{prefix}/`
+- **Vorteil**: Alle Quizzes einer Gruppe sind in einem Ordner
+- **Mehrere Teams**: Alle Teams eines Präfixes in einem Ordner
+- **Beispiel**:
+  ```
+  quiz_data/
+  └── IFA12A/                    # Gruppenpräfix
+      ├── Frontend/              # Quiz 1
+      │   ├── data_479509.json   (IFA12A - Team 1)
+      │   └── data_479512.json   (IFA12A - Team 2)
+      └── PHP Grundlagen/        # Quiz 2
+          ├── data_479509.json
+          └── data_479512.json
+  ```
+
+### 📅 Datumsfilter (NEU - November 2025)
+- **Interaktiver Dialog**: Fragt nach Startdatum beim Scraping
+- **Format**: TT.MM.YYYY (z.B. "28.01.2025")
+- **CLI-Parameter**: `--since-date 28.01.2025`
+- **Leere Eingabe**: Alle Versuche werden gescrapt
+- **Performance-Vorteil**: Filtert vor dem Scraping → weniger Review-Seiten zu laden
+
+```bash
+# Nur Versuche seit 28.01.2025 scrapen
+python scripts/scrape_exams.py --since-date 28.01.2025
+
+# Interaktiv: Dialog fragt nach Datum
+python scripts/scrape_exams.py
+```
+
 ### ✨ Individuelle PDFs mit Datum
 - Jeder Schüler erhält ein eigenes PDF
 - Dateiname: `YYYYMMDD_QuizName_Gruppe_Name.pdf`
 - Beispiel: `20251017_Frontend_IFA12B-Team1_MaxMustermann.pdf`
-
-### 📸 Screenshots für Drag-and-Drop
-- Automatische Screenshots von ddmarker-Fragen mit allen platzierten Markern
-- Eindeutige Dateinamen pro Student (keine Überschreibung)
-- Fallback auf Textdarstellung falls Screenshot fehlschlägt
 
 ### 🎨 Farbliche Gestaltung
 - **Dunkelgrün (#006400)**: Richtige Antworten
@@ -33,6 +124,7 @@ Dieses Tool erstellt druckfertige PDFs von Mebis-Quizzes (Leistungsnachweise), d
 ### 💾 Papier-Spar-Modus
 - Optionaler Filter: Nur fehlerhafte/teilweise richtige Fragen ausgeben
 - Intelligente Punkteauswertung (nicht status-basiert)
+- Intelligente Teilantwort-Filterung bei Multianswer
 - Interaktiver Dialog beim Starten
 
 ### 📐 Layout-Optimierungen
@@ -66,22 +158,31 @@ Dieses Tool erstellt druckfertige PDFs von Mebis-Quizzes (Leistungsnachweise), d
 
 ```
 mebis_statistics/
-├── exam_scraper.py         # CLI: Scraping
-├── exam_pdf_generator.py   # CLI: PDF-Generierung
-├── exam_utils.py           # Helper-Klassen
-├── quiz_data/              # Gescrapte Daten
-│   └── {quiz_name}/
-│       └── {group_name}/
-│           ├── data.json
-│           └── images/
-│               ├── q1_attempt123_ddmarker_screenshot.png
-│               ├── q1_attempt456_ddmarker_screenshot.png
+├── scripts/
+│   ├── scrape_exams.py         # CLI Entry Point: Scraping
+│   ├── generate_pdfs.py        # CLI Entry Point: PDF-Generierung
+│   └── *.bat                   # Windows Shortcuts
+├── src/exam/
+│   ├── scraper.py              # Scraping-Logik
+│   ├── pdf_generator.py        # PDF-Generator
+│   └── utils.py                # Helper-Klassen
+├── data/
+│   ├── quiz_data/              # Gescrapte Daten (gruppe → quiz)
+│   │   └── {group_prefix}/         # z.B. "IFA12A"
+│   │       └── {quiz_name}/        # z.B. "Frontend (Leistungsnachweis)"
+│   │           ├── data_{group_id}.json    # z.B. data_479509.json
+│   │           └── images/
+│   │               ├── q1_attempt123_ddmarker_screenshot.png
+│   │               ├── q2_attempt123_multianswer_screenshot.png
+│   │               └── ...
+│   └── LNW/                    # Fertige PDFs
+│       └── {group_prefix}/         # z.B. "IFA12A"
+│           └── {quiz_name}/
+│               ├── 20251017_QuizName_IFA12A_Student1.pdf
+│               ├── 20251017_QuizName_IFA12A_Student2.pdf
 │               └── ...
-└── LNW/                    # Fertige PDFs
-    └── {quiz_name}/
-        ├── 20251017_QuizName_Gruppe_Student1.pdf
-        ├── 20251017_QuizName_Gruppe_Student2.pdf
-        └── ...
+└── config/
+    └── .env                    # Konfiguration
 ```
 
 ## Installation
@@ -104,22 +205,28 @@ Dependencies:
 
 ```bash
 # Interaktiver Modus (empfohlen)
-python exam_scraper.py
+python scripts/scrape_exams.py
 
-# Alle Leistungsnachweise scrapen (ohne Bestätigung)
-python exam_scraper.py
+# Mit 5 parallelen Workern (schneller, mehr RAM)
+python scripts/scrape_exams.py --max-workers 5
 
 # Nur ein spezifisches Quiz
-python exam_scraper.py --quiz-id 71532121
+python scripts/scrape_exams.py --quiz-id 71532121
 
 # Nur eine spezifische Gruppe
-python exam_scraper.py --group 479509
+python scripts/scrape_exams.py --group 479509
+
+# Nur Versuche seit bestimmtem Datum (spart Zeit)
+python scripts/scrape_exams.py --since-date 28.01.2025
 
 # Vorhandene Daten NICHT überschreiben
-python exam_scraper.py --skip-existing
+python scripts/scrape_exams.py --skip-existing
 
 # Browser sichtbar machen (für Debugging)
-python exam_scraper.py --headless False
+python scripts/scrape_exams.py --headless False
+
+# Kombination mehrerer Optionen
+python scripts/scrape_exams.py --max-workers 3 --since-date 01.11.2025 --headless False
 ```
 
 **Interaktiver Modus:**
@@ -141,6 +248,13 @@ Verfügbare Gruppen:
   3. Alle Gruppen
 
 Wähle Gruppen (z.B. 1,2 oder 1-2 oder 3 für alle): 3
+
+============================================================
+DATUMSFILTER (OPTIONAL)
+============================================================
+Nur Versuche seit Datum (TT.MM.YYYY) [alle]: 28.01.2025
+✓ Filtere Versuche seit 28.01.2025
+============================================================
 
 [Scraping startet direkt ohne weitere Bestätigung]
 ```

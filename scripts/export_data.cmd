@@ -1,3 +1,3 @@
 @echo off
-python ./exportData.py
+python ./export_data.py
 pause

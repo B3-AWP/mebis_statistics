@@ -1379,6 +1379,12 @@ def main():
 
     # Hole Export-Ordner aus Konfiguration
     export_folder = config_manager.get_export_folder()
+
+    # Make export_folder absolute if it's relative
+    if not os.path.isabs(export_folder):
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        export_folder = os.path.join(project_root, export_folder)
+
     local_filename = os.path.join(export_folder, json_filename)
 
     try:

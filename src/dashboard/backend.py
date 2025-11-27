@@ -33,8 +33,11 @@ from config.logger_config import get_logger, backend_logger, api_logger, data_lo
 from src.export.pdf_multi import ReviewPDFGeneratorMulti
 
 # Flask App Setup mit sicherer Konfiguration
-app = Flask(__name__, static_folder='static')
-CORS(app)
+# Use absolute path for static folder
+_static_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+app = Flask(__name__, static_folder=_static_folder)
+# CORS mit expliziten Optionen für POST-Anfragen
+CORS(app, resources={r"/api/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"]}}, supports_credentials=True)
 
 # Flask Konfiguration aus Environment Variables
 flask_config = config_manager.get_flask_config()
@@ -59,6 +62,11 @@ def find_latest_file(directory=None):
     # Hole Export-Ordner aus Konfiguration wenn nicht angegeben
     if directory is None:
         directory = config_manager.get_export_folder()
+
+    # Make directory absolute if it's relative
+    if not os.path.isabs(directory):
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        directory = os.path.join(project_root, directory)
 
     try:
         pattern = os.path.join(directory, 'output_*.json')
@@ -421,12 +429,12 @@ def find_user_assignment_status(user, assignment_id):
 @app.route('/')
 def index():
     """Serviert die Dashboard HTML-Datei"""
-    return send_from_directory('.', 'dashboard.html')
+    return send_from_directory(app.static_folder, 'dashboard.html')
 
 @app.route('/<path:filename>')
 def static_files(filename):
     """Serviert statische Dateien"""
-    return send_from_directory('.', filename)
+    return send_from_directory(app.static_folder, filename)
 
 @app.route('/api/data')
 def get_data():

@@ -238,6 +238,73 @@ class ExamPDFGenerator:
             textColor=colors.HexColor('#8B0000')  # Dunkelrot
         ))
 
+    def _create_grading_scale(self, metadata: Dict) -> List:
+        """
+        Erstellt kompakte Notenschlüssel-Anzeige basierend auf maximalen Punkten
+
+        Args:
+            metadata: Metadaten des Quiz-Versuchs
+
+        Returns:
+            List: Flowables für den Notenschlüssel
+        """
+        elements = []
+
+        # Extrahiere maximale Punkte aus "47,50/57,00" Format
+        points_str = metadata.get('points', '')
+
+        # Prüfe ob points_str valid ist
+        if not points_str:
+            return elements
+
+        try:
+            # Parse "erreichte/maximale" Format
+            if '/' in points_str:
+                max_points_str = points_str.split('/')[1].strip()
+                max_points = float(max_points_str.replace(',', '.'))
+
+                # Notengrenzen (fixe Prozentsätze)
+                grade_thresholds = {
+                    1: 0.92,  # 92%
+                    2: 0.81,  # 81%
+                    3: 0.67,  # 67%
+                    4: 0.50,  # 50%
+                    5: 0.23   # 23%
+                }
+
+                # Berechne Punktgrenzen und runde auf 0,5
+                def round_to_half(value):
+                    """Rundet auf nächste 0,5er Stelle"""
+                    return round(value * 2) / 2
+
+                grade_points = {}
+                for grade, percentage in grade_thresholds.items():
+                    points = max_points * percentage
+                    grade_points[grade] = round_to_half(points)
+
+                # Formatiere Ausgabe kompakt
+                # Format: "Note 1 ab X P. | Note 2 ab X P. | ..."
+                scale_parts = []
+                for grade in sorted(grade_points.keys()):
+                    points = grade_points[grade]
+                    # Formatiere mit Komma als Dezimaltrennzeichen
+                    points_formatted = f"{points:.1f}".replace('.', ',')
+                    scale_parts.append(f"Note {grade} ab {points_formatted} P.")
+
+                scale_text = " | ".join(scale_parts)
+                scale_para = Paragraph(
+                    f"<b>Notenschlüssel:</b> {scale_text}",
+                    self.styles['Metadata']
+                )
+                elements.append(scale_para)
+                elements.append(Spacer(1, 2 * mm))
+
+        except (ValueError, IndexError) as e:
+            # Bei Fehler einfach keinen Notenschlüssel anzeigen
+            self.logger.debug(f"Could not parse points for grading scale: {e}")
+
+        return elements
+
     def _create_header(self, quiz_info: Dict, student: Dict) -> List:
         """
         Erstellt den Kopfbereich für einen Schüler
@@ -304,6 +371,9 @@ class ExamPDFGenerator:
             elements.append(feedback_para)
             elements.append(Spacer(1, 2 * mm))
 
+        # Notenschlüssel
+        elements.extend(self._create_grading_scale(metadata))
+
         # Trennlinie
         separator_table = Table([['']], colWidths=[self.pagesize[0] - self.margin_left - self.margin_right])
         separator_table.setStyle(TableStyle([
@@ -367,6 +437,12 @@ class ExamPDFGenerator:
         if not text:
             return ''
         text = str(text)
+
+        # Dekodiere erst existierende HTML-Entities
+        import html
+        text = html.unescape(text)
+
+        # Dann escape für ReportLab (aber behalte bereits escaped & )
         text = text.replace('&', '&amp;')
         text = text.replace('<', '&lt;')
         text = text.replace('>', '&gt;')
@@ -380,6 +456,47 @@ class ExamPDFGenerator:
         import re
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text
+
+    def _extract_comment_from_html(self, comment_html: str) -> str:
+        """
+        Extrahiert strukturierten Text aus comment_html
+
+        Args:
+            comment_html: HTML-String des Kommentars
+
+        Returns:
+            str: Bereinigter Kommentar-Text
+        """
+        if not comment_html:
+            return ''
+
+        from bs4 import BeautifulSoup
+
+        try:
+            soup = BeautifulSoup(comment_html, 'html.parser')
+
+            # Finde alle Listen-Elemente
+            list_items = soup.find_all('li')
+            if list_items:
+                # Extrahiere Text aus jedem <li>, behalte Zeilenumbrüche innerhalb
+                comment_parts = []
+                for li in list_items:
+                    # Extrahiere Text und behalte Zeilenumbrüche (separator='\n')
+                    li_text = li.get_text(separator='\n', strip=True)
+                    if li_text:
+                        comment_parts.append(f"• {li_text}")
+                return '\n'.join(comment_parts)
+
+            # Fallback: Normaler Text-Extrakt mit Zeilenumbrüchen als Separator
+            text = soup.get_text(separator='\n', strip=True)
+            # Entferne "Kommentar:" Label
+            import re
+            text = re.sub(r'^Kommentare?\s*:?\s*', '', text, flags=re.IGNORECASE)
+            return text.strip()
+
+        except Exception as e:
+            self.logger.warning(f"Failed to parse comment HTML: {e}")
+            return ''
 
     def _render_question(self, question: Dict, base_path: str) -> List:
         """
@@ -475,7 +592,10 @@ class ExamPDFGenerator:
         # Fragetext
         q_text = question.get('question_text', '')
         if q_text:
-            q_para = Paragraph(self._escape_html(q_text), self.styles['QuestionText'])
+            normalized_q_text = self._normalize_linebreaks(q_text)
+            escaped_q_text = self._escape_html(normalized_q_text)
+            q_text_with_breaks = escaped_q_text.replace('\n', '<br/>')
+            q_para = Paragraph(q_text_with_breaks, self.styles['QuestionText'])
             elements.append(q_para)
             elements.append(Spacer(1, 2 * mm))
 
@@ -483,7 +603,7 @@ class ExamPDFGenerator:
         if q_type in ['ddmarker', 'ddmarker-readonly']:
             elements.extend(self._render_ddmarker(question, base_path))
         elif q_type == 'multianswer':
-            elements.extend(self._render_multianswer(question))
+            elements.extend(self._render_multianswer(question, base_path))
         elif q_type == 'match':
             elements.extend(self._render_match(question))
         elif q_type in ['multichoice', 'truefalse']:
@@ -506,12 +626,22 @@ class ExamPDFGenerator:
 
         # Kommentar (Lehrer-Kommentar) - nur wenn nicht leer oder "e"
         comment = question.get('comment')
-        if comment and comment.strip() and comment.strip().lower() != 'e':
-            # Normalisiere Leerzeilen, dann Zeilenumbrüche erhalten
-            normalized_comment = self._normalize_linebreaks(comment)
+        comment_html = question.get('comment_html')
+
+        # Versuche zuerst HTML-Version für bessere Formatierung
+        if comment_html:
+            comment_text = self._extract_comment_from_html(comment_html)
+        elif comment:
+            comment_text = comment
+        else:
+            comment_text = None
+
+        if comment_text and comment_text.strip() and comment_text.strip().lower() != 'e':
+            # Normalisiere Leerzeilen
+            normalized_comment = self._normalize_linebreaks(comment_text)
             escaped_comment = self._escape_html(normalized_comment)
             comment_with_breaks = escaped_comment.replace('\n', '<br/>')
-            comment_para = Paragraph(f"<b>Kommentar:</b> {comment_with_breaks}", self.styles['Comment'])
+            comment_para = Paragraph(f"<b>Kommentar:</b><br/>{comment_with_breaks}", self.styles['Comment'])
             elements.append(comment_para)
 
         # Abstand zur nächsten Frage
@@ -608,7 +738,12 @@ class ExamPDFGenerator:
                     else:
                         marker = ''
 
-                choice_text = f"{symbol} {self._escape_html(choice['text'])}{marker}"
+                # Line breaks in choice text
+                normalized_choice_text = self._normalize_linebreaks(choice['text'])
+                escaped_choice_text = self._escape_html(normalized_choice_text)
+                choice_text_with_breaks = escaped_choice_text.replace('\n', '<br/>')
+
+                choice_text = f"{symbol} {choice_text_with_breaks}{marker}"
                 elements.append(Paragraph(choice_text, self.styles['Answer']))
 
         return elements
@@ -629,60 +764,141 @@ class ExamPDFGenerator:
 
         return elements
 
-    def _render_multianswer(self, question: Dict) -> List:
+    def _render_multianswer(self, question: Dict, base_path: str = '') -> List:
         """Rendert Multianswer (Embedded Answers/Cloze) Frage"""
         elements = []
+
+        # Screenshot anzeigen falls vorhanden
+        screenshot_info = question.get('screenshot')
+        if screenshot_info and screenshot_info.get('local_path'):
+            local_path_str = screenshot_info['local_path']
+            # Prüfe ob absoluter oder relativer Pfad
+            if os.path.isabs(local_path_str):
+                screenshot_path = local_path_str
+            else:
+                screenshot_path = os.path.join(base_path, local_path_str)
+
+            if os.path.exists(screenshot_path):
+                try:
+                    # Bildgröße ermitteln
+                    pil_img = PILImage.open(screenshot_path)
+                    img_width, img_height = pil_img.size
+
+                    # Auf 50% der ursprünglichen Größe skalieren (wie bei ddmarker)
+                    # ReportLab arbeitet in Points (72 DPI), PIL in Pixels (üblicherweise 96 DPI)
+                    # Konvertierung: Pixel * 72/96 = Points
+                    width_points = (img_width * 72 / 96) * 0.5
+                    height_points = (img_height * 72 / 96) * 0.5
+
+                    img = Image(screenshot_path, width=width_points, height=height_points)
+                    elements.append(img)
+                    elements.append(Spacer(1, 3 * mm))
+                    self.logger.debug(f"Screenshot included for multianswer question {question.get('question_number')}")
+                except Exception as e:
+                    self.logger.error(f"Failed to load screenshot: {e}")
+                    elements.append(Paragraph(
+                        f"<i>[Screenshot konnte nicht geladen werden: {os.path.basename(screenshot_path)}]</i>",
+                        self.styles['Answer']
+                    ))
+            else:
+                self.logger.warning(f"Screenshot not found: {screenshot_path}")
 
         # Neues Format: Inline-Lücken (blanks)
         blanks = question.get('blanks', [])
         if blanks:
-            elements.append(Paragraph("<b>Ihre Antworten:</b>", self.styles['Answer']))
-            for blank in blanks:
-                answer = blank.get('answer', '')
-                is_correct = blank.get('correct', False)
-                is_incorrect = blank.get('incorrect', False)
-                correct_answer = blank.get('correct_answer')
-                points = blank.get('points')
+            # Filtere Blanks wenn only_incorrect aktiviert
+            if self.only_incorrect:
+                # Zeige nur falsche Lücken
+                filtered_blanks = [b for b in blanks if b.get('incorrect', False)]
+            else:
+                # Zeige alle Lücken
+                filtered_blanks = blanks
 
-                # Status-Marker mit Farben
-                if is_correct:
-                    marker = ' <font color="#006400"><i>(✓ richtig)</i></font>'
-                elif is_incorrect:
-                    marker = ' <font color="#8B0000"><i>(✗ falsch)</i></font>'
-                else:
-                    marker = ''
+            # Nur anzeigen wenn es Lücken zu zeigen gibt
+            if filtered_blanks:
+                elements.append(Paragraph("<b>Ihre Antworten:</b>", self.styles['Answer']))
+                for blank in filtered_blanks:
+                    answer = blank.get('answer', '')
+                    is_correct = blank.get('correct', False)
+                    is_incorrect = blank.get('incorrect', False)
+                    correct_answer = blank.get('correct_answer')
+                    points = blank.get('points')
 
-                # Punkte-Format kürzen und direkt an Antwort anhängen
-                import re
-                if points and 'Erreichte Punkte' in points:
-                    match = re.search(r'([\d,]+)\s+von\s+([\d,]+)', points)
-                    if match:
-                        points_short = f"({match.group(1)} von {match.group(2)} Punkten)"
+                    # Status-Marker mit Farben
+                    if is_correct:
+                        marker = ' <font color="#006400"><i>(✓ richtig)</i></font>'
+                    elif is_incorrect:
+                        marker = ' <font color="#8B0000"><i>(✗ falsch)</i></font>'
                     else:
+                        marker = ''
+
+                    # Punkte-Format kürzen und direkt an Antwort anhängen
+                    import re
+                    if points and 'Erreichte Punkte' in points:
+                        match = re.search(r'([\d,]+)\s+von\s+([\d,]+)', points)
+                        if match:
+                            points_short = f"({match.group(1)} von {match.group(2)} Punkten)"
+                        else:
+                            points_short = f"({points})"
+                    elif points:
                         points_short = f"({points})"
-                elif points:
-                    points_short = f"({points})"
-                else:
-                    points_short = ''
+                    else:
+                        points_short = ''
 
-                blank_text = f"Lücke {blank['number']}: <b>{self._escape_html(answer)}</b>{marker} <i>{points_short}</i>"
-                elements.append(Paragraph(blank_text, self.styles['Answer']))
+                    # Line breaks in blank answer
+                    normalized_answer = self._normalize_linebreaks(answer)
+                    escaped_answer = self._escape_html(normalized_answer)
+                    answer_with_breaks = escaped_answer.replace('\n', '<br/>')
 
-                # Korrekte Antwort anzeigen wenn falsch
-                if correct_answer and is_incorrect:
-                    elements.append(Paragraph(
-                        f"  <i>Richtige Antwort: {self._escape_html(correct_answer)}</i>",
-                        self.styles['Answer']
-                    ))
+                    blank_text = f"Lücke {blank['number']}: <b>{answer_with_breaks}</b>{marker} <i>{points_short}</i>"
+                    elements.append(Paragraph(blank_text, self.styles['Answer']))
+
+                    # Korrekte Antwort anzeigen wenn falsch
+                    if correct_answer and is_incorrect:
+                        # Line breaks in correct answer
+                        normalized_correct = self._normalize_linebreaks(correct_answer)
+                        escaped_correct = self._escape_html(normalized_correct)
+                        correct_with_breaks = escaped_correct.replace('\n', '<br/>')
+                        elements.append(Paragraph(
+                            f"  <i>Richtige Antwort: {correct_with_breaks}</i>",
+                            self.styles['Answer']
+                        ))
 
             return elements
 
         # Altes Format: Sub-Fragen mit Checkboxen
         sub_questions = question.get('sub_questions', [])
         if sub_questions:
-            elements.append(Paragraph("<b>Teilfragen:</b>", self.styles['Answer']))
+            # Filtere Sub-Questions wenn only_incorrect aktiviert
+            if self.only_incorrect:
+                # Prüfe jede Sub-Question ob sie Fehler enthält
+                filtered_sub_questions = []
+                for sub_q in sub_questions:
+                    # Eine Sub-Question ist fehlerhaft wenn:
+                    # - Es falsche Antworten gibt (incorrect=True)
+                    # - Oder richtige Antworten nicht ausgewählt wurden
+                    has_errors = False
+                    choices = sub_q.get('choices', [])
+                    for choice in choices:
+                        is_selected = choice.get('selected', False)
+                        is_correct_choice = choice.get('correct', False)
+                        is_incorrect = choice.get('incorrect', False)
 
-            for idx, sub_q in enumerate(sub_questions, 1):
+                        # Fehler wenn falsche Antwort ausgewählt ODER richtige nicht ausgewählt
+                        if is_incorrect or (is_correct_choice and not is_selected):
+                            has_errors = True
+                            break
+
+                    if has_errors:
+                        filtered_sub_questions.append(sub_q)
+            else:
+                filtered_sub_questions = sub_questions
+
+            # Nur anzeigen wenn es Sub-Questions zu zeigen gibt
+            if filtered_sub_questions:
+                elements.append(Paragraph("<b>Teilfragen:</b>", self.styles['Answer']))
+
+            for idx, sub_q in enumerate(filtered_sub_questions, 1):
                 # Sub-Frage-Überschrift mit Punkten direkt dahinter
                 sub_q_text = sub_q.get('question_text', '')
                 points = sub_q.get('points')
@@ -701,8 +917,13 @@ class ExamPDFGenerator:
                     else:
                         points_short = ''
 
+                    # Line breaks in sub-question text
+                    normalized_sub_q_text = self._normalize_linebreaks(sub_q_text)
+                    escaped_sub_q_text = self._escape_html(normalized_sub_q_text)
+                    sub_q_text_with_breaks = escaped_sub_q_text.replace('\n', '<br/>')
+
                     elements.append(Paragraph(
-                        f"<b>{idx}. {self._escape_html(sub_q_text)}</b> <i>{points_short}</i>",
+                        f"<b>{idx}. {sub_q_text_with_breaks}</b> <i>{points_short}</i>",
                         self.styles['Answer']
                     ))
 
@@ -770,7 +991,16 @@ class ExamPDFGenerator:
                 else:
                     marker = ''
 
-                match_text = f"• {self._escape_html(question_text)} → <b>{self._escape_html(selected)}</b>{marker}"
+                # Line breaks in match question and selected answer
+                normalized_match_q = self._normalize_linebreaks(question_text)
+                escaped_match_q = self._escape_html(normalized_match_q)
+                match_q_with_breaks = escaped_match_q.replace('\n', '<br/>')
+
+                normalized_selected = self._normalize_linebreaks(selected)
+                escaped_selected = self._escape_html(normalized_selected)
+                selected_with_breaks = escaped_selected.replace('\n', '<br/>')
+
+                match_text = f"• {match_q_with_breaks} → <b>{selected_with_breaks}</b>{marker}"
                 elements.append(Paragraph(match_text, self.styles['Answer']))
 
         return elements
@@ -781,9 +1011,12 @@ class ExamPDFGenerator:
 
         content = question.get('content', '')
         if content:
-            # Information ohne Status-Icon, nur Content
+            # Information ohne Status-Icon, nur Content mit Line breaks
+            normalized_content = self._normalize_linebreaks(content)
+            escaped_content = self._escape_html(normalized_content)
+            content_with_breaks = escaped_content.replace('\n', '<br/>')
             elements.append(Paragraph(
-                f"<i>{self._escape_html(content)}</i>",
+                f"<i>{content_with_breaks}</i>",
                 self.styles['QuestionText']
             ))
 
@@ -876,16 +1109,20 @@ class ExamPDFGenerator:
         # Sektionen und Fragen
         sections = student.get('sections', [])
         for section in sections:
-            # Sektionsüberschrift
             section_name = section.get('section_name', 'Unbenannt')
-            section_header = Paragraph(f"<b>{section_name.upper()}</b>", self.styles['SectionHeader'])
-            story.append(section_header)
-            story.append(Spacer(1, 3 * mm))
 
-            # Fragen
+            # Sammle alle Fragen dieser Section
+            section_elements = []
             questions = section.get('questions', [])
             for question in questions:
-                story.extend(self._render_question(question, base_path))
+                section_elements.extend(self._render_question(question, base_path))
+
+            # Nur Section-Überschrift hinzufügen wenn Fragen vorhanden
+            if section_elements:
+                section_header = Paragraph(f"<b>{section_name.upper()}</b>", self.styles['SectionHeader'])
+                story.append(section_header)
+                story.append(Spacer(1, 3 * mm))
+                story.extend(section_elements)
 
         # Erstelle Custom Canvas mit Seitenzählung
         def create_canvas(filename, **kwargs):
@@ -1011,13 +1248,19 @@ class ExamPDFGenerator:
             sections = student.get('sections', [])
             for section in sections:
                 section_name = section.get('section_name', 'Unbenannt')
-                section_header = Paragraph(f"<b>{section_name.upper()}</b>", self.styles['SectionHeader'])
-                story.append(section_header)
-                story.append(Spacer(1, 3 * mm))
 
+                # Sammle alle Fragen dieser Section
+                section_elements = []
                 questions = section.get('questions', [])
                 for question in questions:
-                    story.extend(self._render_question(question, base_path))
+                    section_elements.extend(self._render_question(question, base_path))
+
+                # Nur Section-Überschrift hinzufügen wenn Fragen vorhanden
+                if section_elements:
+                    section_header = Paragraph(f"<b>{section_name.upper()}</b>", self.styles['SectionHeader'])
+                    story.append(section_header)
+                    story.append(Spacer(1, 3 * mm))
+                    story.extend(section_elements)
 
             # Erstelle Custom Canvas mit Seitenzählung
             def create_canvas(filename, **kwargs):
@@ -1040,10 +1283,15 @@ def main():
     """CLI Entry Point"""
     import argparse
 
+    # Compute default paths relative to project root
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    default_data_dir = os.path.join(project_root, 'data', 'quiz_data')
+    default_output_dir = os.path.join(project_root, 'data', 'LNW')
+
     parser = argparse.ArgumentParser(description='PDF Generator für Mebis Leistungsnachweise')
-    parser.add_argument('--data-dir', type=str, default='data/quiz_data',
+    parser.add_argument('--data-dir', type=str, default=default_data_dir,
                        help='Verzeichnis mit gescrapten Daten')
-    parser.add_argument('--output-dir', type=str, default='data/LNW',
+    parser.add_argument('--output-dir', type=str, default=default_output_dir,
                        help='Ausgabe-Verzeichnis für PDFs')
     parser.add_argument('--only-incorrect', action='store_true',
                        help='Nur falsche/teilweise richtige Fragen ausgeben (Papier sparen)')
@@ -1078,12 +1326,15 @@ def main():
 
     generator = ExamPDFGenerator()
 
-    # Durchsuche data_dir nach data.json Dateien
+    # Durchsuche data_dir nach data*.json Dateien (data.json oder data_*.json)
     for root, dirs, files in os.walk(data_dir):
-        if 'data.json' in files:
-            data_file = os.path.join(root, 'data.json')
+        # Finde alle data*.json Dateien im aktuellen Verzeichnis
+        data_files = [f for f in files if f.startswith('data') and f.endswith('.json')]
 
-            # Lese group_name aus data.json, um Präfix zu extrahieren
+        for data_filename in data_files:
+            data_file = os.path.join(root, data_filename)
+
+            # Lese group_name aus data*.json, um Präfix zu extrahieren
             try:
                 with open(data_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -1094,15 +1345,26 @@ def main():
                 group_prefix = ''
 
             # Bestimme relativen Pfad für Output
-            # Neue Struktur: LNW/{Präfix}/{QuizName}/
+            # Neue Input-Struktur: quiz_data/{Präfix}/{QuizName}/data.json
+            # Output-Struktur: LNW/{Präfix}/{QuizName}/
             rel_path = os.path.relpath(root, data_dir)
-            quiz_name = os.path.dirname(rel_path)  # z.B. "Frontend"
 
-            if group_prefix:
-                quiz_output_dir = os.path.join(output_dir, group_prefix, quiz_name)
+            # Extrahiere Präfix und QuizName aus Pfad
+            # rel_path ist z.B. "IFA12A/Frontend" oder nur "Frontend" (alte Struktur)
+            path_parts = rel_path.split(os.sep)
+
+            if len(path_parts) >= 2:
+                # Neue Struktur: {Präfix}/{QuizName}
+                group_prefix_from_path = path_parts[0]
+                quiz_name = path_parts[1]
+                quiz_output_dir = os.path.join(output_dir, group_prefix_from_path, quiz_name)
             else:
-                # Fallback: alte Struktur falls kein Präfix
-                quiz_output_dir = os.path.join(output_dir, quiz_name)
+                # Fallback: alte Struktur (nur QuizName) oder root
+                quiz_name = path_parts[0] if path_parts[0] != '.' else 'Unknown'
+                if group_prefix:
+                    quiz_output_dir = os.path.join(output_dir, group_prefix, quiz_name)
+                else:
+                    quiz_output_dir = os.path.join(output_dir, quiz_name)
 
             try:
                 generator.generate_individual_pdfs(data_file, quiz_output_dir, only_incorrect=only_incorrect)

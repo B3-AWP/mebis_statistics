@@ -147,13 +147,20 @@ async function startExportAndReload() {
 
         // Starte Export
         const response = await fetch('/api/export/start', {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
         });
+
+        if (!response.ok) {
+            throw new Error(`Server-Fehler: ${response.status} ${response.statusText}`);
+        }
 
         const result = await response.json();
 
         if (!result.success) {
-            throw new Error(result.message || 'Export konnte nicht gestartet werden');
+            throw new Error(result.message || result.error || 'Export konnte nicht gestartet werden');
         }
 
         // Polling: Überwache Export-Status
@@ -232,10 +239,28 @@ async function startExportAndReload() {
         console.error('Export-Fehler:', error);
         panel.style.border = '2px solid #dc3545';
         progressBar.style.background = '#dc3545';
-        progressMessage.textContent = 'Fehler: ' + error.message;
-        estimatedTime.textContent = 'Fehler beim Starten';
+
+        // Bessere Fehlermeldungen
+        let errorMessage = 'Fehler: ' + error.message;
+        if (error.message.includes('NetworkError') || error.message.includes('fetch')) {
+            errorMessage = 'Netzwerkfehler: Ist der Server erreichbar?';
+            estimatedTime.textContent = 'Verbindung fehlgeschlagen';
+        } else if (error.message.includes('Server-Fehler')) {
+            estimatedTime.textContent = 'Server-Fehler';
+        } else {
+            estimatedTime.textContent = 'Fehler beim Starten';
+        }
+
+        progressMessage.textContent = errorMessage;
         refreshBtn.disabled = false;
         refreshBtn.classList.remove('loading');
+
+        // Zeige detaillierte Fehlerinfo in Console
+        console.error('Detaillierter Fehler:', {
+            message: error.message,
+            stack: error.stack,
+            name: error.name
+        });
     }
 }
 async function loadData() {

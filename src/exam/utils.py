@@ -186,7 +186,7 @@ class ImageDownloader:
 
         return images
 
-    def take_element_screenshot(self, element_selector: str, output_path: str, soup_element=None) -> bool:
+    def take_element_screenshot(self, element_selector: str, output_path: str, soup_element=None, timeout: int = 2) -> bool:
         """
         Macht einen Screenshot eines HTML-Elements (Fallback wenn Bild-Download fehlschlägt)
 
@@ -194,6 +194,7 @@ class ImageDownloader:
             element_selector: CSS-Selector für das Element (z.B. 'div.ddarea')
             output_path: Lokaler Pfad zum Speichern
             soup_element: BeautifulSoup Element (optional, für ID-basierte Selektion)
+            timeout: Maximale Wartezeit in Sekunden (Standard: 2)
 
         Returns:
             bool: True wenn erfolgreich, False sonst
@@ -206,26 +207,96 @@ class ImageDownloader:
             # Output-Verzeichnis erstellen
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-            # Element finden
+            # Element finden mit WebDriverWait
             from selenium.webdriver.common.by import By
-            if soup_element and soup_element.get('id'):
-                # Verwende ID wenn verfügbar (präziser)
-                element_id = soup_element.get('id')
-                web_element = self.driver.find_element(By.ID, element_id)
-            else:
-                # Fallback: CSS Selector
-                web_element = self.driver.find_element(By.CSS_SELECTOR, element_selector)
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 
-            # Scrolle zum Element, um sicherzustellen, dass es sichtbar ist
-            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", web_element)
+            web_element = None
 
-            # Kurze Wartezeit, damit Marker und andere JS-Elemente vollständig gerendert sind
-            time.sleep(0.5)
+            # Versuche verschiedene Strategien, um das Element zu finden
+            try:
+                if soup_element and soup_element.get('id'):
+                    # Strategie 1: Verwende ID wenn verfügbar (am zuverlässigsten)
+                    element_id = soup_element.get('id')
+                    self.logger.debug(f"Waiting for element with ID: {element_id}")
+                    web_element = WebDriverWait(self.driver, timeout).until(
+                        EC.presence_of_element_located((By.ID, element_id))
+                    )
+                else:
+                    # Strategie 2: CSS Selector mit kürzerem Timeout
+                    self.logger.debug(f"Waiting for element with selector: {element_selector}")
+                    web_element = WebDriverWait(self.driver, timeout).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, element_selector))
+                    )
+            except TimeoutException:
+                # Strategie 3: Versuche simplifizierten Selektor
+                self.logger.warning(f"Timeout waiting for {element_selector}, trying simplified selector...")
+                # Extrahiere Question-ID aus Selektor (z.B. "#question-123 div.formulation" -> "question-123")
+                if '#question-' in element_selector:
+                    question_id = element_selector.split()[0].replace('#', '')
+                    try:
+                        # Versuche nur das Question-Element zu finden
+                        web_element = self.driver.find_element(By.ID, question_id)
+                        # Dann finde die formulation darin
+                        web_element = web_element.find_element(By.CSS_SELECTOR, 'div.formulation')
+                    except:
+                        pass
 
-            # Screenshot machen
-            web_element.screenshot(output_path)
-            self.logger.info(f"Successfully created screenshot: {os.path.basename(output_path)}")
-            return True
+                # Letzter Fallback: Direkter find ohne Warten
+                if not web_element:
+                    try:
+                        web_element = self.driver.find_element(By.CSS_SELECTOR, element_selector)
+                    except:
+                        pass
+
+            if not web_element:
+                self.logger.warning(f"Could not find element: {element_selector}")
+                return False
+
+            # Scrolle zum Element und stelle sicher, dass es vollständig sichtbar ist
+            try:
+                # Scrolle zum Element (block: 'start' stellt sicher, dass das ganze Element sichtbar ist)
+                self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'start'});", web_element)
+
+                # Scrolle ein bisschen nach oben, damit das Element nicht am oberen Rand klebt
+                self.driver.execute_script("window.scrollBy(0, -100);")
+
+                # Warte auf vollständiges Rendering
+                time.sleep(0.5)
+
+                # Prüfe ob das Element vollständig im Viewport ist
+                is_in_view = self.driver.execute_script("""
+                    var elem = arguments[0];
+                    var rect = elem.getBoundingClientRect();
+                    return (
+                        rect.top >= 0 &&
+                        rect.left >= 0 &&
+                        rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+                        rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+                    );
+                """, web_element)
+
+                if not is_in_view:
+                    # Element ist zu groß für Viewport - scrolle zum Anfang des Elements
+                    self.logger.debug(f"Element extends beyond viewport, adjusting scroll...")
+                    self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'start'});", web_element)
+                    time.sleep(0.3)
+
+            except Exception as scroll_error:
+                self.logger.warning(f"Scroll adjustment failed: {scroll_error}")
+
+            # Screenshot machen mit Timeout-Handling
+            try:
+                web_element.screenshot(output_path)
+                self.logger.info(f"Successfully created screenshot: {os.path.basename(output_path)}")
+                return True
+            except WebDriverException as e:
+                if 'timeout' in str(e).lower():
+                    self.logger.warning(f"Screenshot timeout for {element_selector}, skipping...")
+                    return False
+                raise
 
         except Exception as e:
             self.logger.error(f"Failed to create screenshot for {element_selector}: {e}")
@@ -697,7 +768,7 @@ class QuizParser:
 
         return data
 
-    def parse_multianswer_question(self, question_elem, base_data: Dict, output_dir: str) -> Dict:
+    def parse_multianswer_question(self, question_elem, base_data: Dict, output_dir: str, attempt_id: Optional[str] = None) -> Dict:
         """
         Parst Multianswer (Embedded Answers/Cloze) Fragen
 
@@ -705,6 +776,7 @@ class QuizParser:
             question_elem: BeautifulSoup Element
             base_data: Generische Fragedaten
             output_dir: Verzeichnis für Bilder
+            attempt_id: Versuchs-ID für eindeutige Dateinamen
 
         Returns:
             Dict mit erweiterten Fragedaten
@@ -771,6 +843,47 @@ class QuizParser:
 
                     data['question_text'] = full_text
                     data['blanks'] = blanks
+
+                # Screenshot der multianswer-Frage erstellen
+                if attempt_id:
+                    screenshot_filename = f"q{data['question_number']}_attempt{attempt_id}_multianswer_screenshot.png"
+                else:
+                    screenshot_filename = f"q{data['question_number']}_multianswer_screenshot.png"
+
+                screenshot_path = os.path.join(output_dir, 'images', screenshot_filename)
+
+                self.logger.info(f"Creating screenshot for multianswer question {data['question_number']} (attempt {attempt_id})...")
+                # Verwende das gesamte Question-Element für vollständigen Screenshot
+                # Erst versuchen mit der Formulation, dann mit dem gesamten Question-Container als Fallback
+                unique_selector = f"#question-{data['question_id']} div.formulation"
+                screenshot_success = self.image_downloader.take_element_screenshot(
+                    unique_selector,
+                    screenshot_path,
+                    soup_element=None,
+                    timeout=5  # Längerer Timeout für komplexe Multianswer-Fragen
+                )
+
+                # Fallback: Wenn Formulation fehlschlägt, versuche das gesamte Question-Element
+                if not screenshot_success:
+                    self.logger.warning(f"Formulation screenshot failed, trying entire question element...")
+                    fallback_selector = f"#question-{data['question_id']}"
+                    screenshot_success = self.image_downloader.take_element_screenshot(
+                        fallback_selector,
+                        screenshot_path,
+                        soup_element=None,
+                        timeout=5
+                    )
+
+                if screenshot_success:
+                    data['screenshot'] = {
+                        'local_path': os.path.relpath(screenshot_path, output_dir),
+                        'success': True,
+                        'alt': 'Multianswer Question Screenshot',
+                        'title': 'Multianswer Frage mit Lückentext'
+                    }
+                    self.logger.info(f"✓ Screenshot created for question {data['question_number']}")
+                else:
+                    self.logger.warning(f"Failed to create screenshot for question {data['question_number']}")
 
                 return data
 
@@ -862,6 +975,34 @@ class QuizParser:
                     sub_questions.append(sub_q)
 
             data['sub_questions'] = sub_questions
+
+            # Screenshot der multianswer-Frage erstellen (auch für altes Format)
+            if attempt_id:
+                screenshot_filename = f"q{data['question_number']}_attempt{attempt_id}_multianswer_screenshot.png"
+            else:
+                screenshot_filename = f"q{data['question_number']}_multianswer_screenshot.png"
+
+            screenshot_path = os.path.join(output_dir, 'images', screenshot_filename)
+
+            self.logger.info(f"Creating screenshot for multianswer question {data['question_number']} (attempt {attempt_id})...")
+            # Verwende eindeutigen Selektor mit Question-ID
+            unique_selector = f"#question-{data['question_id']} div.formulation"
+            screenshot_success = self.image_downloader.take_element_screenshot(
+                unique_selector,  # Eindeutiger Selektor für diese spezifische Frage
+                screenshot_path,
+                soup_element=None  # Kein soup_element, nur Selektor verwenden
+            )
+
+            if screenshot_success:
+                data['screenshot'] = {
+                    'local_path': os.path.relpath(screenshot_path, output_dir),
+                    'success': True,
+                    'alt': 'Multianswer Question Screenshot',
+                    'title': 'Multianswer Frage'
+                }
+                self.logger.info(f"✓ Screenshot created for question {data['question_number']}")
+            else:
+                self.logger.warning(f"Failed to create screenshot for question {data['question_number']}")
 
         except Exception as e:
             self.logger.error(f"Error parsing multianswer question: {e}")
@@ -989,7 +1130,7 @@ class QuizParser:
         if qtype in ['ddmarker', 'ddmarker-readonly']:
             return self.parse_ddmarker_question(question_elem, base_data, output_dir, attempt_id=attempt_id)
         elif qtype == 'multianswer':
-            return self.parse_multianswer_question(question_elem, base_data, output_dir)
+            return self.parse_multianswer_question(question_elem, base_data, output_dir, attempt_id=attempt_id)
         elif qtype == 'match':
             return self.parse_match_question(question_elem, base_data)
         elif qtype in ['multichoice', 'truefalse']:

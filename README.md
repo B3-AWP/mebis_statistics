@@ -180,12 +180,22 @@ Zum Scrapen von Quizzes und Erstellen von PDFs siehe die detaillierte Dokumentat
 **Schnellstart:**
 
 ```bash
-# Quizzes scrapen
+# Quizzes scrapen (3 parallele Worker, ~3x schneller)
 python scripts/scrape_exams.py
 
-# PDFs generieren
-python scripts/generate_pdfs.py
+# Schneller scrapen mit mehr Workers
+python scripts/scrape_exams.py --max-workers 5
+
+# PDFs generieren (nur falsche Antworten)
+python scripts/generate_pdfs.py --only-incorrect
 ```
+
+**Neue Features (November 2025):**
+- ⚡ **Paralleles Scraping**: 3x schneller durch Multi-Threading (3 parallele Browser)
+- 📸 **Multianswer-Screenshots**: Automatische Screenshots für Lückentext-Fragen
+- 🎯 **Intelligente Filterung**: Bei "nur falsche Fragen" werden auch richtige Teilantworten ausgeblendet
+- 📝 **Verbesserte Kommentare**: HTML-Parsing für strukturierte Darstellung
+- ⏱️ **Zeitanzeige**: Gesamtdauer wird am Ende angezeigt
 
 PDFs werden im Verzeichnis `data/LNW/` nach Gruppenpräfix und Quiz organisiert.
 
@@ -227,14 +237,17 @@ Der Export kann direkt aus dem Dashboard heraus gestartet werden:
 
 ### Ignorierte Gruppen
 
-Bestimmte Gruppen können vom Dashboard ausgeschlossen werden. Diese erscheinen dann nicht in der Dashboard-Anzeige.
+Bestimmte Gruppen können vom Dashboard und Exam-Scraper ausgeschlossen werden.
 
 **Konfiguration in `config/.env`:**
 ```env
 MEBIS_IGNORED_GROUPS=IT_Lehrkraft,Test Team,Demo Gruppe
 ```
 
-Die Filterung erfolgt nur auf Dashboard-Ebene. Die Gruppen werden weiterhin in den Export-Daten erfasst.
+**Filterung:**
+- **Dashboard**: Ignorierte Gruppen erscheinen nicht in der Anzeige
+- **Exam-Scraper**: Ignorierte Gruppen werden nicht zur Auswahl angeboten
+- **Data Export**: Gruppen werden weiterhin in den Export-Daten erfasst (vollständige Daten)
 
 ### Ausgeschlossene Benutzer
 
@@ -283,3 +296,13 @@ Format: JSON mit Punktzahl als Key (String) und Bewertungstext als Value.
 **Problem: ImportError beim Starten**
 - Lösung: Stelle sicher, dass du dich im Projekt-Root befindest (nicht in `scripts/`)
 - Die Scripts verwenden relative Imports und müssen vom Root ausgeführt werden
+
+**Problem: Exam-Scraper ist langsam**
+- Lösung 1: Erhöhe die Anzahl paralleler Workers: `python scripts/scrape_exams.py --max-workers 5`
+- Lösung 2: Standard ist 3 Worker, maximal empfohlen: 5 Worker (erfordert mehr RAM)
+- Lösung 3: Bei wenig RAM: Reduziere auf 1-2 Worker: `--max-workers 1`
+
+**Problem: Screenshots sind abgeschnitten oder fehlen**
+- Lösung 1: Die Screenshot-Funktionalität wurde verbessert (November 2025)
+- Lösung 2: Screenshots nutzen automatisch Viewport-Prüfung und Fallback-Strategien
+- Lösung 3: Bei weiterhin fehlenden Screenshots: Setze `MODE_HEADLESS=False` und prüfe den Browser

@@ -20,6 +20,8 @@ import re
 import requests
 from datetime import datetime
 from typing import Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -40,6 +42,27 @@ from config.logger_config import get_logger
 
 # Logger Setup
 scraper_logger = get_logger('exam_scraper')
+
+
+def parse_user_date(date_str: str) -> Optional[datetime]:
+    """
+    Parsed Benutzereingabe im Format TT.MM.YYYY zu datetime
+
+    Args:
+        date_str: Datum-String im Format "28.01.2025"
+
+    Returns:
+        datetime-Objekt oder None bei Fehler
+    """
+    if not date_str or not date_str.strip():
+        return None
+
+    try:
+        # Parse TT.MM.YYYY Format
+        return datetime.strptime(date_str.strip(), "%d.%m.%Y")
+    except ValueError as e:
+        scraper_logger.error(f"Invalid date format '{date_str}'. Expected DD.MM.YYYY (e.g., 28.01.2025)")
+        return None
 
 
 def parse_selection_input(input_str: str, max_num: int) -> List[int]:
@@ -229,9 +252,10 @@ class QuizScraper:
         self.password = credentials['password']
         self.course_id = config_manager.get_course_id()
 
-        # Output-Verzeichnisse
-        self.data_dir = 'data/quiz_data'
-        self.output_dir = 'data/LNW'
+        # Output-Verzeichnisse (absolute Pfade vom Projekt-Root)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.data_dir = os.path.join(project_root, 'data', 'quiz_data')
+        self.output_dir = os.path.join(project_root, 'data', 'LNW')
 
         self.logger.info("QuizScraper initialized")
 
@@ -357,6 +381,11 @@ class QuizScraper:
         """
         self.logger.info("Fetching groups...")
 
+        # Lade ignorierte Gruppen aus Konfiguration
+        ignored_groups = config_manager.get_ignored_groups()
+        if ignored_groups:
+            self.logger.info(f"Ignoring {len(ignored_groups)} groups from configuration: {', '.join(ignored_groups)}")
+
         # Verwende die gleiche Logik wie exportData.py
         # Navigiere zur Progress-Seite und hole Gruppen-Dropdown
         progress_url = f"{self.base_url}/report/progress/index.php?course={self.course_id}"
@@ -386,6 +415,11 @@ class QuizScraper:
                     if group_id == '0':
                         continue
 
+                    # Überspringe ignorierte Gruppen
+                    if group_name in ignored_groups:
+                        self.logger.debug(f"Skipping ignored group: {group_name}")
+                        continue
+
                     groups.append({
                         'group_id': group_id,
                         'group_name': group_name
@@ -401,18 +435,22 @@ class QuizScraper:
         self.logger.info(f"Found {len(groups)} groups")
         return groups
 
-    def get_attempts_for_group(self, quiz_id: str, group_id: str) -> List[Dict]:
+    def get_attempts_for_group(self, quiz_id: str, group_id: str, since_date: Optional[datetime] = None) -> List[Dict]:
         """
         Holt alle Versuche für ein Quiz und eine Gruppe
 
         Args:
             quiz_id: Quiz-ID
             group_id: Gruppen-ID
+            since_date: Optional - Nur Versuche seit diesem Datum (inklusiv)
 
         Returns:
             List[Dict]: Liste mit Versuchsinformationen (user_id, user_name, attempt_id, finished_time)
         """
-        self.logger.info(f"Fetching attempts for quiz {quiz_id}, group {group_id}...")
+        if since_date:
+            self.logger.info(f"Fetching attempts for quiz {quiz_id}, group {group_id} since {since_date.strftime('%d.%m.%Y')}...")
+        else:
+            self.logger.info(f"Fetching attempts for quiz {quiz_id}, group {group_id}...")
 
         # Report-URL mit Gruppierungsparameter
         report_url = (f"{self.base_url}/mod/quiz/report.php?id={quiz_id}"
@@ -493,6 +531,11 @@ class QuizScraper:
                     finished_time_raw = finished_cell.get_text(strip=True) if finished_cell else None
                     finished_time = parse_german_datetime(finished_time_raw) if finished_time_raw else None
 
+                    # Datumsfilter: Überspringe Versuche vor since_date
+                    if since_date and finished_time:
+                        if finished_time < since_date:
+                            continue
+
                     # Speichere nur den neuesten Versuch pro User
                     # (Annahme: Tabelle ist nach Zeit sortiert, erste Zeile = neuester)
                     if user_id not in user_attempts:
@@ -508,7 +551,11 @@ class QuizScraper:
                     continue
 
             attempts = list(user_attempts.values())
-            self.logger.info(f"Found {len(attempts)} unique student attempts")
+
+            if since_date:
+                self.logger.info(f"Found {len(attempts)} unique student attempts since {since_date.strftime('%d.%m.%Y')}")
+            else:
+                self.logger.info(f"Found {len(attempts)} unique student attempts")
 
         except Exception as e:
             self.logger.error(f"Error fetching attempts: {e}")
@@ -560,14 +607,110 @@ class QuizScraper:
             self.logger.error(f"Error scraping review page: {e}")
             return {'metadata': {}, 'sections': []}
 
-    def scrape_quiz_for_group(self, quiz_info: Dict, group_info: Dict, force_rescrape: bool = True):
+    @staticmethod
+    def _scrape_attempt_worker(attempt: Dict, output_dir: str, base_url: str,
+                                username: str, password: str, course_id: str,
+                                headless: bool, waittime: int, idx: int, total: int) -> Dict:
         """
-        Scrapt ein Quiz für eine spezifische Gruppe
+        Worker-Funktion für paralleles Scraping eines einzelnen Attempts
+        Jeder Worker erstellt seine eigene WebDriver-Instanz
+
+        Args:
+            attempt: Attempt-Daten (user_id, user_name, attempt_id)
+            output_dir: Ausgabeverzeichnis
+            base_url: Mebis Base URL
+            username: Login Username
+            password: Login Passwort
+            course_id: Kurs-ID
+            headless: Headless-Modus
+            waittime: Wartezeit
+            idx: Aktueller Index
+            total: Gesamtanzahl
+
+        Returns:
+            Dict: Student-Daten oder None bei Fehler
+        """
+        driver = None
+        logger = get_logger('exam_scraper_worker')
+
+        try:
+            logger.info(f"[{idx}/{total}] Starting worker for {attempt['user_name']}...")
+
+            # Eigene WebDriver-Instanz erstellen
+            driver = create_webdriver(headless=str(headless))
+
+            # Login
+            progress_url = f"{base_url}/report/progress/index.php?course={course_id}"
+            driver.get(progress_url)
+            time.sleep(2)
+
+            if "login" in driver.current_url:
+                logger.info(f"[{idx}/{total}] Performing login...")
+                login(driver, username, password, waittime)
+                time.sleep(2)
+
+            # Review-Seite scrapen
+            attempt_id = attempt['attempt_id']
+            review_url = f"{base_url}/mod/quiz/review.php?attempt={attempt_id}"
+            driver.get(review_url)
+            time.sleep(2)
+
+            # Warte auf Seiteninhalt
+            WebDriverWait(driver, waittime).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+
+            # HTML-Content holen
+            html_content = driver.page_source
+
+            # Session mit Cookies vom WebDriver erstellen
+            session = requests.Session()
+            for cookie in driver.get_cookies():
+                session.cookies.set(cookie['name'], cookie['value'], domain=cookie.get('domain'))
+
+            # Image Downloader mit Session und WebDriver erstellen
+            img_downloader = ImageDownloader(session=session, driver=driver)
+
+            # Parser verwenden
+            parser = QuizParser(image_downloader=img_downloader)
+            review_data = parser.parse_review_page(html_content, output_dir, attempt_id=attempt_id, review_url=review_url)
+
+            # Bevorzuge User-Name aus Review-Seite Metadaten
+            user_name = review_data['metadata'].get('user_name') or attempt['user_name']
+
+            student_data = {
+                'user_id': attempt['user_id'],
+                'user_name': user_name,
+                'attempt_id': attempt['attempt_id'],
+                'metadata': review_data['metadata'],
+                'sections': review_data['sections']
+            }
+
+            logger.info(f"[{idx}/{total}] Successfully scraped {user_name}")
+            return student_data
+
+        except Exception as e:
+            logger.error(f"[{idx}/{total}] Error in worker for {attempt['user_name']}: {e}")
+            return None
+
+        finally:
+            # WebDriver schließen
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+
+    def scrape_quiz_for_group(self, quiz_info: Dict, group_info: Dict, force_rescrape: bool = True, max_workers: int = 3, since_date: Optional[datetime] = None):
+        """
+        Scrapt ein Quiz für eine spezifische Gruppe mit paralleler Verarbeitung
 
         Args:
             quiz_info: Dict mit Quiz-Informationen
             group_info: Dict mit Gruppen-Informationen
             force_rescrape: Wenn True (Standard), überschreibe vorhandene Daten
+            max_workers: Anzahl paralleler Browser-Threads (Standard: 3)
+            since_date: Optional - Nur Versuche seit diesem Datum scrapen
         """
         quiz_id = quiz_info['quiz_id']
         quiz_name = quiz_info['quiz_name']
@@ -579,9 +722,10 @@ class QuizScraper:
 
         self.logger.info(f"Processing quiz '{quiz_name}' for group '{group_prefix}'...")
 
-        # Output-Verzeichnis (nutzt vollständigen group_name für eindeutige Pfade)
-        output_dir = os.path.join(self.data_dir, quiz_name, group_name)
-        data_file = os.path.join(output_dir, 'data.json')
+        # Output-Verzeichnis: Gruppe → Quiz (geändert von Quiz → Gruppe)
+        output_dir = os.path.join(self.data_dir, group_prefix, quiz_name)
+        # Verwende group_id für eindeutige Dateinamen (falls mehrere Teams pro Präfix)
+        data_file = os.path.join(output_dir, f'data_{group_id}.json')
 
         # Prüfe ob bereits gescrapt (außer force)
         if os.path.exists(data_file) and not force_rescrape:
@@ -595,8 +739,8 @@ class QuizScraper:
         # Erstelle Output-Verzeichnis
         os.makedirs(output_dir, exist_ok=True)
 
-        # Hole Versuche
-        attempts = self.get_attempts_for_group(quiz_id, group_id)
+        # Hole Versuche (mit optionalem Datumsfilter)
+        attempts = self.get_attempts_for_group(quiz_id, group_id, since_date)
 
         if not attempts:
             self.logger.warning(f"No attempts found for quiz '{quiz_name}', group '{group_prefix}'")
@@ -615,34 +759,44 @@ class QuizScraper:
                 json.dump(empty_data, f, ensure_ascii=False, indent=2)
             return
 
-        # Scrape jede Review-Seite
+        # Scrape jede Review-Seite parallel
         students_data = []
 
-        for idx, attempt in enumerate(attempts, 1):
-            self.logger.info(f"[{idx}/{len(attempts)}] Scraping attempt for {attempt['user_name']}...")
+        self.logger.info(f"Starting parallel scraping with {max_workers} workers...")
 
-            try:
-                review_data = self.scrape_review_page(attempt['attempt_id'], output_dir)
+        # ThreadPoolExecutor für paralleles Scraping
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Erstelle Futures für alle Attempts
+            future_to_attempt = {}
+            for idx, attempt in enumerate(attempts, 1):
+                future = executor.submit(
+                    self._scrape_attempt_worker,
+                    attempt=attempt,
+                    output_dir=output_dir,
+                    base_url=self.base_url,
+                    username=self.username,
+                    password=self.password,
+                    course_id=self.course_id,
+                    headless=self.headless,
+                    waittime=self.waittime,
+                    idx=idx,
+                    total=len(attempts)
+                )
+                future_to_attempt[future] = attempt
 
-                # Bevorzuge User-Name aus Review-Seite Metadaten (vollständiger Name)
-                # Fallback: Name aus Attempts-Tabelle
-                user_name = review_data['metadata'].get('user_name') or attempt['user_name']
-
-                student_data = {
-                    'user_id': attempt['user_id'],
-                    'user_name': user_name,
-                    'group_id': group_id,
-                    'group_name': group_name,
-                    'attempt_id': attempt['attempt_id'],
-                    'metadata': review_data['metadata'],
-                    'sections': review_data['sections']
-                }
-
-                students_data.append(student_data)
-
-            except Exception as e:
-                self.logger.error(f"Error scraping attempt for {attempt['user_name']}: {e}")
-                continue
+            # Sammle Ergebnisse wenn sie fertig sind
+            for future in as_completed(future_to_attempt):
+                attempt = future_to_attempt[future]
+                try:
+                    student_data = future.result()
+                    if student_data:
+                        # Füge group_id und group_name hinzu (fehlt in Worker-Funktion)
+                        student_data['group_id'] = group_id
+                        student_data['group_name'] = group_name
+                        students_data.append(student_data)
+                except Exception as e:
+                    self.logger.error(f"Error processing result for {attempt['user_name']}: {e}")
+                    continue
 
         # Speichere Daten
         final_data = {
@@ -661,7 +815,7 @@ class QuizScraper:
 
         self.logger.info(f"Successfully saved data for {len(students_data)} students to {data_file}")
 
-    def run(self, quiz_id: Optional[str] = None, group_id: Optional[str] = None, force_rescrape: bool = True, interactive: bool = True):
+    def run(self, quiz_id: Optional[str] = None, group_id: Optional[str] = None, force_rescrape: bool = True, interactive: bool = True, max_workers: int = 3, since_date: Optional[datetime] = None):
         """
         Hauptmethode zum Ausführen des Scrapers
 
@@ -670,7 +824,11 @@ class QuizScraper:
             group_id: Optional - Nur eine spezifische Gruppe scrapen
             force_rescrape: Wenn True (Standard), überschreibe vorhandene Daten
             interactive: Wenn True, zeige interaktive Auswahl (Standard: True wenn keine CLI-Parameter)
+            max_workers: Anzahl paralleler Browser-Threads (Standard: 3)
+            since_date: Optional - Nur Versuche seit diesem Datum scrapen
         """
+        start_time = time.time()
+
         try:
             # Session starten
             self.start_session()
@@ -724,6 +882,24 @@ class QuizScraper:
                 else:
                     groups = all_groups
 
+            # Datumsfilter (interaktiv oder CLI)
+            if interactive and not since_date:
+                print("\n" + "="*60)
+                print("DATUMSFILTER (OPTIONAL)")
+                print("="*60)
+                date_input = input("Nur Versuche seit Datum (TT.MM.YYYY) [alle]: ").strip()
+
+                if date_input:
+                    since_date = parse_user_date(date_input)
+                    if since_date:
+                        print(f"✓ Filtere Versuche seit {since_date.strftime('%d.%m.%Y')}")
+                    else:
+                        print("✗ Ungültiges Datum - verwende alle Versuche")
+                        since_date = None
+                else:
+                    print("✓ Verwende alle Versuche")
+                print("="*60 + "\n")
+
             # Scrape jede Kombination
             total = len(quizzes) * len(groups)
             current = 0
@@ -735,12 +911,18 @@ class QuizScraper:
                     self.logger.info(f"Progress: {current}/{total}")
                     self.logger.info(f"{'='*60}")
 
-                    self.scrape_quiz_for_group(quiz, group, force_rescrape)
+                    self.scrape_quiz_for_group(quiz, group, force_rescrape, max_workers, since_date)
+
+            # Berechne Gesamtzeit
+            elapsed_time = time.time() - start_time
+            minutes = int(elapsed_time // 60)
+            seconds = int(elapsed_time % 60)
 
             self.logger.info("\n" + "="*60)
             self.logger.info("SCRAPING COMPLETED")
             self.logger.info("="*60)
             self.logger.info(f"Processed {len(quizzes)} quizzes x {len(groups)} groups = {total} combinations")
+            self.logger.info(f"Total time: {minutes} minutes {seconds} seconds ({elapsed_time:.1f}s)")
 
         except Exception as e:
             self.logger.error(f"Fatal error in scraper: {e}", exc_info=True)
@@ -760,6 +942,10 @@ def main():
     parser.add_argument('--skip-existing', action='store_true', help='Überspringe bereits vorhandene Daten (standardmäßig werden Daten überschrieben)')
     parser.add_argument('--headless', type=str, default='True', choices=['True', 'False'],
                        help='Browser im Headless-Modus ausführen')
+    parser.add_argument('--max-workers', type=int, default=3,
+                       help='Anzahl paralleler Browser-Threads (Standard: 3)')
+    parser.add_argument('--since-date', type=str,
+                       help='Nur Versuche seit diesem Datum scrapen (Format: TT.MM.YYYY, z.B. 28.01.2025)')
 
     args = parser.parse_args()
 
@@ -771,12 +957,26 @@ def main():
     scraper_logger.info("Starting Mebis Quiz Scraper...")
     scraper_logger.info(f"Headless: {headless}, Waittime: {waittime}s")
 
+    # Parse since_date wenn angegeben
+    since_date = None
+    if args.since_date:
+        since_date = parse_user_date(args.since_date)
+        if not since_date:
+            scraper_logger.error("Invalid date format. Use DD.MM.YYYY (e.g., 28.01.2025)")
+            return
+
     # Scraper erstellen und ausführen
     scraper = QuizScraper(headless=headless, waittime=waittime)
+    scraper_logger.info(f"Parallel workers: {args.max_workers}")
+    if since_date:
+        scraper_logger.info(f"Date filter: Only attempts since {since_date.strftime('%d.%m.%Y')}")
+
     scraper.run(
         quiz_id=args.quiz_id,
         group_id=args.group,
-        force_rescrape=not args.skip_existing  # Standardmäßig True (überschreiben), außer --skip-existing gesetzt
+        force_rescrape=not args.skip_existing,  # Standardmäßig True (überschreiben), außer --skip-existing gesetzt
+        max_workers=args.max_workers,
+        since_date=since_date
     )
 
 

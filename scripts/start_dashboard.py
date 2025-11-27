@@ -35,8 +35,10 @@ def check_environment():
     """
     logger.info("Checking environment and dependencies...")
 
-    # Prüfe ob .env Datei existiert
-    env_file = Path('config/.env')
+    # Prüfe ob .env Datei existiert (relativ zum Projekt-Root)
+    project_root = Path(__file__).parent.parent
+    env_file = project_root / 'config' / '.env'
+
     if not env_file.exists():
         logger.error(".env file not found!")
         logger.error("Please copy config/.env.template to config/.env and configure your credentials.")
@@ -47,6 +49,10 @@ def check_environment():
     # Prüfe Export-Ordner (aus Konfiguration)
     export_folder_path = config_manager.get_export_folder()
     export_folder = Path(export_folder_path)
+
+    # Make export folder absolute if it's relative
+    if not export_folder.is_absolute():
+        export_folder = project_root / export_folder
 
     if not export_folder.exists():
         logger.error(f"Export folder not found: {export_folder_path}")
@@ -74,11 +80,12 @@ def install_requirements():
     logger.info("Checking Python dependencies...")
 
     try:
-        requirements_file = Path("requirements.txt")
+        project_root = Path(__file__).parent.parent
+        requirements_file = project_root / "requirements.txt"
         if requirements_file.exists():
             logger.info("Installing dependencies...")
             subprocess.check_call([
-                sys.executable, "-m", "pip", "install", "-r", "requirements.txt"
+                sys.executable, "-m", "pip", "install", "-r", str(requirements_file)
             ], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
             logger.info("Dependencies installed successfully")
         else:
