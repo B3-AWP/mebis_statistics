@@ -457,46 +457,154 @@ class ExamPDFGenerator:
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text
 
-    def _extract_comment_from_html(self, comment_html: str) -> str:
+    def _convert_html_to_reportlab(self, comment_html: str) -> str:
         """
-        Extrahiert strukturierten Text aus comment_html
+        Konvertiert Mebis-HTML in ReportLab-kompatibles HTML
 
         Args:
             comment_html: HTML-String des Kommentars
 
         Returns:
-            str: Bereinigter Kommentar-Text
+            str: ReportLab-kompatibles HTML mit Formatierung
         """
         if not comment_html:
             return ''
 
         from bs4 import BeautifulSoup
+        import html as html_module
 
         try:
             soup = BeautifulSoup(comment_html, 'html.parser')
 
-            # Finde alle Listen-Elemente
-            list_items = soup.find_all('li')
-            if list_items:
-                # Extrahiere Text aus jedem <li>, behalte Zeilenumbrüche innerhalb
-                comment_parts = []
-                for li in list_items:
-                    # Extrahiere Text und behalte Zeilenumbrüche (separator='\n')
-                    li_text = li.get_text(separator='\n', strip=True)
-                    if li_text:
-                        comment_parts.append(f"• {li_text}")
-                return '\n'.join(comment_parts)
-
-            # Fallback: Normaler Text-Extrakt mit Zeilenumbrüchen als Separator
-            text = soup.get_text(separator='\n', strip=True)
             # Entferne "Kommentar:" Label
+            for div in soup.find_all('div', class_='comment'):
+                kommentar_text = div.find(text=lambda t: t and 'Kommentar:' in t)
+                if kommentar_text:
+                    kommentar_text.replace_with('')
+
+            def process_element(element, indent_level=0) -> str:
+                """Verarbeitet HTML-Element rekursiv zu ReportLab-HTML"""
+
+                # Text-Knoten
+                if element.name is None:
+                    text = str(element)
+                    # HTML-Entities dekodieren
+                    text = html_module.unescape(text)
+                    # &nbsp; -> normales Leerzeichen
+                    text = text.replace('\xa0', ' ')
+                    # XML-escape für ReportLab (ZUERST escapen)
+                    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    # Zeilenumbrüche (\n) in <br/> umwandeln (NACH dem Escaping)
+                    text = text.replace('\n', '<br/>')
+                    return text
+
+                # <br> bleibt <br/>
+                if element.name == 'br':
+                    return '<br/>'
+
+                # <code> -> grauer Hintergrund mit Monospace
+                if element.name == 'code':
+                    code_text = element.get_text()
+                    code_text = html_module.unescape(code_text)
+                    code_text = code_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    return f'<font face="Courier" color="#333333" backColor="#f5f5f5">{code_text}</font>'
+
+                # <strong> oder <b> -> <b>
+                if element.name in ['strong', 'b']:
+                    content = ''.join(process_element(child, indent_level) for child in element.children)
+                    return f'<b>{content}</b>'
+
+                # <i> oder <em> -> <i>
+                if element.name in ['i', 'em']:
+                    content = ''.join(process_element(child, indent_level) for child in element.children)
+                    return f'<i>{content}</i>'
+
+                # Listen-Elemente
+                if element.name == 'li':
+                    indent = '&nbsp;&nbsp;&nbsp;&nbsp;' * indent_level
+                    content = ''.join(process_element(child, indent_level) for child in element.children)
+                    return f'{indent}• {content}<br/>'
+
+                # Absätze
+                if element.name == 'p':
+                    content = ''.join(process_element(child, indent_level) for child in element.children)
+                    if content.strip():
+                        return f'{content}<br/><br/>'
+                    return ''
+
+                # Spans mit Farbe und Hintergrundfarbe
+                if element.name == 'span':
+                    style = element.get('style', '') or element.get('data-mce-style', '')
+                    content = ''.join(process_element(child, indent_level) for child in element.children)
+
+                    import re
+
+                    # Extrahiere Textfarbe (color)
+                    text_color = None
+                    color_match = re.search(r'color:\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3})', style)
+                    if color_match:
+                        text_color = color_match.group(1)
+
+                    # Extrahiere Hintergrundfarbe (background-color)
+                    bg_color = None
+                    bg_match = re.search(r'background-color:\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3})', style)
+                    if bg_match:
+                        bg_color = bg_match.group(1)
+
+                    # Baue font-Tag mit Farben
+                    if text_color or bg_color:
+                        font_attrs = []
+
+                        # Wenn Hintergrundfarbe vorhanden: Text immer schwarz für Lesbarkeit
+                        if bg_color:
+                            font_attrs.append('color="#000000"')
+                            font_attrs.append(f'backColor="{bg_color}"')
+                        elif text_color:
+                            # Nur Textfarbe ohne Hintergrund
+                            font_attrs.append(f'color="{text_color}"')
+
+                        font_tag = ' '.join(font_attrs)
+                        return f'<font {font_tag}>{content}</font>'
+
+                    return content
+
+                # Listen-Container (ul/ol) - erhöhe Einrückung
+                if element.name in ['ul', 'ol']:
+                    content = ''.join(process_element(child, indent_level + 1) for child in element.children)
+                    return content
+
+                # Default: Verarbeite Kinder rekursiv
+                return ''.join(process_element(child, indent_level) for child in element.children)
+
+            # Verarbeite das gesamte HTML
+            result = process_element(soup)
+
+            # Bereinige übermäßige Leerzeilen
             import re
-            text = re.sub(r'^Kommentare?\s*:?\s*', '', text, flags=re.IGNORECASE)
-            return text.strip()
+            result = re.sub(r'(<br/>){3,}', '<br/><br/>', result)
+            result = re.sub(r'^Kommentare?\s*:?\s*', '', result, flags=re.IGNORECASE)
+
+            return result.strip()
 
         except Exception as e:
-            self.logger.warning(f"Failed to parse comment HTML: {e}")
-            return ''
+            self.logger.warning(f"Failed to convert HTML to ReportLab format: {e}")
+            # Fallback: Einfache Text-Extraktion
+            try:
+                return soup.get_text(separator='<br/>', strip=True) if soup else ''
+            except:
+                return ''
+
+    def _extract_comment_from_html(self, comment_html: str) -> str:
+        """
+        Wrapper für Rückwärtskompatibilität - verwendet neue ReportLab-Konvertierung
+
+        Args:
+            comment_html: HTML-String des Kommentars
+
+        Returns:
+            str: ReportLab-kompatibles HTML
+        """
+        return self._convert_html_to_reportlab(comment_html)
 
     def _render_question(self, question: Dict, base_path: str) -> List:
         """
@@ -632,16 +740,19 @@ class ExamPDFGenerator:
         if comment_html:
             comment_text = self._extract_comment_from_html(comment_html)
         elif comment:
-            comment_text = comment
+            # Fallback: Einfacher Text-Kommentar
+            # 1. Escape HTML-Zeichen
+            import html as html_module
+            comment_text = html_module.escape(comment)
+            # 2. Konvertiere \n zu <br/>
+            comment_text = comment_text.replace('\n', '<br/>')
         else:
             comment_text = None
 
         if comment_text and comment_text.strip() and comment_text.strip().lower() != 'e':
-            # Normalisiere Leerzeilen
-            normalized_comment = self._normalize_linebreaks(comment_text)
-            escaped_comment = self._escape_html(normalized_comment)
-            comment_with_breaks = escaped_comment.replace('\n', '<br/>')
-            comment_para = Paragraph(f"<b>Kommentar:</b><br/>{comment_with_breaks}", self.styles['Comment'])
+            # Der Text ist bereits ReportLab-HTML (von _convert_html_to_reportlab)
+            # NICHT escapen, da es bereits formatiertes HTML ist
+            comment_para = Paragraph(f"<b>Kommentar:</b><br/>{comment_text}", self.styles['Comment'])
             elements.append(comment_para)
 
         # Abstand zur nächsten Frage

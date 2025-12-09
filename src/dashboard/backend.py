@@ -14,6 +14,9 @@ _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+# Change working directory to project root for relative paths to work
+os.chdir(_project_root)
+
 import json
 import glob
 import math
@@ -137,17 +140,46 @@ def load_excluded_names(file_path='config/exclude_names.txt'):
     logger = data_logger
 
     try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            excluded_names = {line.strip() for line in file.readlines() if line.strip()}
+        logger.info(f"Current working directory: {os.getcwd()}")
+        logger.info(f"Attempting to load excluded names from: {file_path}")
+        logger.info(f"File exists: {os.path.exists(file_path)}")
 
-        logger.info(f"Loaded {len(excluded_names)} excluded names from {file_path}")
-        return excluded_names
+        if not os.path.exists(file_path):
+            logger.warning(f"File not found at {file_path}")
+            # List directory contents for debugging
+            config_dir = 'config'
+            if os.path.exists(config_dir):
+                logger.info(f"Contents of {config_dir}: {os.listdir(config_dir)}")
+            return set()
+
+        # Try multiple encodings
+        encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
+        excluded_names = set()
+
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as file:
+                    # Read and clean names: strip whitespace and line endings
+                    excluded_names = {
+                        line.strip().rstrip('\r\n').strip()
+                        for line in file.readlines()
+                        if line.strip()
+                    }
+                logger.info(f"Successfully loaded {len(excluded_names)} excluded names from {file_path} using {encoding} encoding")
+                logger.info(f"Excluded names: {sorted(list(excluded_names))}")
+                return excluded_names
+            except (UnicodeDecodeError, UnicodeError):
+                logger.debug(f"Failed to decode with {encoding}, trying next encoding")
+                continue
+
+        logger.warning(f"Could not decode {file_path} with any known encoding")
+        return set()
 
     except FileNotFoundError:
-        logger.info(f"No excluded names file found at {file_path}")
+        logger.warning(f"No excluded names file found at {file_path}")
         return set()
     except Exception as e:
-        logger.error(f"Error loading excluded names from {file_path}: {e}")
+        logger.error(f"Error loading excluded names from {file_path}: {e}", exc_info=True)
         return set()
 
 def load_ignored_groups():
@@ -461,6 +493,12 @@ def get_data():
         excluded_names = load_excluded_names()
         ignored_groups = load_ignored_groups()
 
+        # Log excluded names for debugging
+        logger.info(f"=" * 80)
+        logger.info(f"EXCLUDED NAMES: {len(excluded_names)} names loaded")
+        logger.info(f"Excluded names list: {sorted(list(excluded_names))}")
+        logger.info(f"=" * 80)
+
         # Grade Mapping laden
         try:
             grade_mapping = config_manager.get_grade_mapping()
@@ -483,8 +521,22 @@ def get_data():
                 logger.debug(f"Skipping ignored group: {group_name}")
                 continue
 
-            group_users = [user for user in group.get('users', [])
-                          if user.get('name') not in excluded_names]
+            # Log names before filtering
+            all_users_in_group = [user.get('name') for user in group.get('users', [])]
+            logger.info(f"Group '{group_name}' has {len(all_users_in_group)} users before filtering")
+
+            group_users = []
+            excluded_count = 0
+            for user in group.get('users', []):
+                user_name = user.get('name', '')
+                if user_name in excluded_names:
+                    logger.info(f"  ✗ Excluding user '{user_name}' from group '{group_name}'")
+                    excluded_count += 1
+                else:
+                    group_users.append(user)
+
+            if excluded_count > 0:
+                logger.info(f"Group '{group_name}': Excluded {excluded_count} users, {len(group_users)} remaining")
 
             if group_users:  # Nur Gruppen mit Benutzern
                 groups_data[group_name] = {
@@ -543,7 +595,7 @@ def get_data():
             activities_ordered = data.get('activities_by_category', [])
 
         # Add user_status to activities for frontend
-        def add_user_status_to_activities(activities, data, groups_data):
+        def add_user_status_to_activities(activities, data, groups_data, excluded_names):
             for category in activities:
                 # Add user_status to assignments
                 for assignment in category.get('assignments', []):
@@ -559,6 +611,10 @@ def get_data():
 
                         group_users = group.get('users', [])
                         for user in group_users:
+                            # Skip excluded users
+                            if user.get('name') in excluded_names:
+                                continue
+
                             status = find_user_assignment_status(user, assignment_id)
                             assignment['user_status'].append({
                                 'user_name': user.get('name', ''),
@@ -582,6 +638,10 @@ def get_data():
 
                         group_users = group.get('users', [])
                         for user in group_users:
+                            # Skip excluded users
+                            if user.get('name') in excluded_names:
+                                continue
+
                             status = find_user_assignment_status(user, quiz_id)
                             quiz['user_status'].append({
                                 'user_name': user.get('name', ''),
@@ -592,7 +652,7 @@ def get_data():
                             })
             return activities
 
-        activities_with_status = add_user_status_to_activities(activities_ordered, data, groups_data)
+        activities_with_status = add_user_status_to_activities(activities_ordered, data, groups_data, excluded_names)
 
         # Environment-Settings für Frontend
         flask_config = config_manager.get_flask_config()
@@ -992,6 +1052,23 @@ def create_structured_tables(groups_data, categories):
         }
 
     return structured_tables
+
+@app.route('/api/debug/excluded-names')
+def debug_excluded_names():
+    """Debug-Endpoint um ausgeschlossene Namen anzuzeigen"""
+    logger = api_logger
+    logger.info("API endpoint /api/debug/excluded-names called")
+
+    try:
+        excluded_names = load_excluded_names()
+        return jsonify({
+            'count': len(excluded_names),
+            'names': sorted(list(excluded_names)),
+            'file_path': 'config/exclude_names.txt'
+        })
+    except Exception as e:
+        logger.error(f"Error loading excluded names: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/groups')
 def get_groups():
