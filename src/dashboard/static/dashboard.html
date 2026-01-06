@@ -142,6 +142,13 @@
                             </svg>
                             <span class="tab-text">Code-Review PDF</span>
                         </button>
+
+                        <button id="csvExportBtn" class="nav-btn" onclick="openCsvExportModal()" title="CSV Export erstellen">
+                            <svg class="icon" width="18" height="18" aria-hidden="true">
+                                <use href="#icon-csv"></use>
+                            </svg>
+                            <span class="tab-text">CSV Export</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -497,6 +504,13 @@
             <path d="M10 13h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             <path d="M10 17h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </symbol>
+
+        <symbol id="icon-csv" viewBox="0 0 24 24">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="2"/>
+            <polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="2"/>
+            <line x1="8" y1="13" x2="16" y2="13" stroke="currentColor" stroke-width="2"/>
+            <line x1="8" y1="17" x2="16" y2="17" stroke="currentColor" stroke-width="2"/>
+        </symbol>
     </svg>
 
     <!-- PDF Review Modal -->
@@ -550,6 +564,43 @@
         </div>
     </div>
 
+    <!-- CSV Export Modal -->
+    <div id="csvExportModal" class="pdf-modal">
+        <div class="pdf-modal-content">
+            <div class="pdf-modal-header">
+                <h2>CSV Export erstellen</h2>
+                <button class="pdf-modal-close" onclick="closeCsvExportModal()">&times;</button>
+            </div>
+            <div class="pdf-modal-body">
+                <form id="csvExportForm" onsubmit="event.preventDefault(); generateCsvExport();">
+                    <div class="pdf-form-group">
+                        <label for="csvWeekSlider">Referenzwoche:</label>
+                        <div class="pdf-week-slider-container">
+                            <span class="pdf-slider-value">1</span>
+                            <input type="range" id="csvWeekSlider" min="1" max="9" value="9"
+                                   class="pdf-week-slider" oninput="updateCsvSliderProgress(this)">
+                            <span class="pdf-slider-value" id="csvWeekSliderMax">9</span>
+                            <span class="pdf-current-week-display">Woche <span id="csvCurrentWeekDisplay">9</span></span>
+                        </div>
+                    </div>
+
+                    <div class="pdf-form-group">
+                        <label>Aktueller Filter:</label>
+                        <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                            <strong>Gruppierung:</strong> <span id="csvGroupingDisplay">-</span><br>
+                            <strong>Gruppe:</strong> <span id="csvGroupDisplay">-</span>
+                        </div>
+                    </div>
+
+                    <div class="pdf-modal-footer">
+                        <button type="button" class="pdf-btn pdf-btn-secondary" onclick="closeCsvExportModal()">Abbrechen</button>
+                        <button type="submit" class="pdf-btn pdf-btn-primary" id="generateCsvBtn">CSV erstellen</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Export Progress Panel (Floating, nicht-blockierend) -->
     <div id="exportProgressPanel" style="display: none; position: fixed; bottom: 20px; right: 20px; background: white; border: 2px solid #007bff; border-radius: 8px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; min-width: 350px; max-width: 400px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -590,6 +641,7 @@
 
     <script src="dashboard.js"></script>
     <script src="pdf_functions.js"></script>
+    <script src="csv_export.js"></script>
 </body>
 
 </html>

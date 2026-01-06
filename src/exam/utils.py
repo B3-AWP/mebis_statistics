@@ -65,6 +65,10 @@ class QuestionTypeDetector:
             return 'match'
         elif 'ddwtos' in classes:
             return 'ddwtos'
+        elif 'gapselect' in classes:
+            return 'gapselect'
+        elif 'ordering' in classes:
+            return 'ordering'
         elif 'description' in classes:
             return 'description'
 
@@ -556,6 +560,29 @@ class QuizParser:
                     )
                     feedback_images.extend(images)
 
+                # Number of Parts Correct (für Multichoice)
+                numparts_div = feedback_div.find('div', class_='numpartscorrect')
+                if numparts_div:
+                    text = numparts_div.get_text(separator='\n', strip=True)
+                    if text:
+                        feedback_texts.append(text)
+
+                # Right Answer (zeigt korrekte Antworten)
+                rightanswer_div = feedback_div.find('div', class_='rightanswer')
+                if rightanswer_div:
+                    text = rightanswer_div.get_text(separator='\n', strip=True)
+                    if text:
+                        feedback_texts.append(text)
+
+                    # Extrahiere Bilder in Right Answer (falls vorhanden)
+                    images = self.image_downloader.extract_and_download_images(
+                        rightanswer_div,
+                        os.path.join(output_dir, 'images'),
+                        prefix=f"q{question_data['question_number']}_feedback_rightanswer",
+                        base_dir=output_dir
+                    )
+                    feedback_images.extend(images)
+
                 # Kombiniere Feedback-Texte
                 if feedback_texts or feedback_images:
                     question_data['feedback'] = {
@@ -563,9 +590,17 @@ class QuizParser:
                         'images': feedback_images
                     }
 
-            # Kommentar (separat) - mit Formatierung
+            # Kommentar (separat) - mit Formatierung UND Bildern
             comment_div = question_elem.find('div', class_='comment')
             if comment_div:
+                # Extrahiere Bilder aus dem Kommentar BEVOR wir Links entfernen
+                comment_images = self.image_downloader.extract_and_download_images(
+                    comment_div,
+                    os.path.join(output_dir, 'images'),
+                    prefix=f"q{question_data['question_number']}_comment",
+                    base_dir=output_dir
+                )
+
                 # Entferne versteckte Elemente und Links
                 for hidden in comment_div.find_all(class_='accesshide'):
                     hidden.extract()
@@ -581,12 +616,31 @@ class QuizParser:
                 comment_text = re.sub(r'^Kommentare?\s*:?\s*', '', comment_text, flags=re.IGNORECASE | re.MULTILINE)
                 comment_text = comment_text.strip()
 
-                # Nur speichern wenn tatsächlich Text vorhanden (nicht nur Whitespace oder einzelne Buchstaben)
-                if comment_text and len(comment_text) > 1:
+                # Speichere Kommentar mit Text UND Bildern
+                if comment_text or comment_images:
                     # Hole HTML für spätere Verwendung
-                    comment_html = str(comment_div)
-                    question_data['comment'] = comment_text
-                    question_data['comment_html'] = comment_html
+                    # Erstelle eine neue Soup-Instanz mit dem Kommentar-HTML
+                    from bs4 import BeautifulSoup as BS
+                    comment_html_str = str(comment_div)
+                    comment_soup = BS(comment_html_str, 'html.parser')
+
+                    # Entferne accesshide und commentlink für HTML-Version
+                    for hidden in comment_soup.find_all(class_='accesshide'):
+                        hidden.extract()
+                    for div_commentlink in comment_soup.find_all('div', class_='commentlink'):
+                        div_commentlink.extract()
+
+                    # Extrahiere den inneren HTML-Content (ohne äußeres div)
+                    comment_html_content = ''.join(str(tag) for tag in comment_soup.find('div', class_='comment').children if tag.name != 'h4')
+
+                    # Entferne "Kommentar:" Prefix auch aus HTML
+                    comment_html_cleaned = re.sub(r'^Kommentare?\s*:\s*', '', comment_html_content, flags=re.IGNORECASE)
+
+                    question_data['comment'] = {
+                        'text': comment_text if comment_text and len(comment_text) > 1 else '',
+                        'images': comment_images,
+                        'html': comment_html_cleaned.strip()  # HTML-Version für bessere Formatierung
+                    }
 
             # Speichere Raw HTML für unbekannte Typen
             if question_data['question_type'] == 'unknown':
@@ -733,7 +787,7 @@ class QuizParser:
 
     def parse_essay_question(self, question_elem, base_data: Dict) -> Dict:
         """
-        Parst Essay/Freitext Fragen
+        Parst Essay/Freitext und Shortanswer Fragen
 
         Args:
             question_elem: BeautifulSoup Element
@@ -745,12 +799,20 @@ class QuizParser:
         data = base_data.copy()
 
         try:
-            # Antwort des Schülers - suche in div.ablock > div.answer
+            # Antwort des Schülers - suche in div.ablock
             ablock = question_elem.find('div', class_='ablock')
             if ablock:
-                answer_div = ablock.find('div', class_='answer')
+                # Strategie 1: Suche nach input[type="text"] (für shortanswer)
+                input_elem = ablock.find('input', type='text')
+                if input_elem:
+                    answer_value = input_elem.get('value', '')
+                    if answer_value:
+                        data['student_answer'] = answer_value
+                        return data
+
+                # Strategie 2: Suche nach textarea (für essay)
+                answer_div = ablock.find('div', class_='answer') or ablock.find('span', class_='answer')
                 if answer_div:
-                    # Suche nach textarea
                     textarea = answer_div.find('textarea')
                     if textarea:
                         # Zeilenumbrüche erhalten
@@ -764,7 +826,7 @@ class QuizParser:
                         data['student_answer'] = answer_div.get_text(separator='\n', strip=True)
 
         except Exception as e:
-            self.logger.error(f"Error parsing essay question: {e}")
+            self.logger.error(f"Error parsing essay/shortanswer question: {e}")
 
         return data
 
@@ -1009,6 +1071,174 @@ class QuizParser:
 
         return data
 
+    def parse_gapselect_question(self, question_elem, base_data: Dict, output_dir: str, attempt_id: Optional[str] = None) -> Dict:
+        """
+        Parst Gap-Select Fragen (Lückentext mit Dropdown-Auswahl) - IMMER mit Screenshot
+
+        Args:
+            question_elem: BeautifulSoup Element
+            base_data: Generische Fragedaten
+            output_dir: Output-Verzeichnis für Screenshots
+            attempt_id: Attempt-ID für eindeutige Dateinamen (optional)
+
+        Returns:
+            Dict mit erweiterten Fragedaten inkl. Screenshot
+        """
+        data = base_data.copy()
+
+        try:
+            # Für gapselect machen wir IMMER einen Screenshot, da die Dropdown-Auswahl
+            # komplex ist und Text-Extraktion nicht ausreicht
+            if attempt_id:
+                screenshot_filename = f"q{data['question_number']}_attempt{attempt_id}_gapselect_screenshot.png"
+            else:
+                screenshot_filename = f"q{data['question_number']}_gapselect_screenshot.png"
+
+            screenshot_path = os.path.join(output_dir, 'images', screenshot_filename)
+
+            self.logger.info(f"Creating screenshot for gapselect question {data['question_number']} (attempt {attempt_id})...")
+
+            # Verwende die Formulation für den Screenshot
+            unique_selector = f"#question-{data['question_id']} div.formulation"
+            screenshot_success = self.image_downloader.take_element_screenshot(
+                unique_selector,
+                screenshot_path,
+                soup_element=None,
+                timeout=5
+            )
+
+            # Fallback: Wenn Formulation fehlschlägt, versuche das gesamte Question-Element
+            if not screenshot_success:
+                self.logger.warning(f"Formulation screenshot failed, trying entire question element...")
+                fallback_selector = f"#question-{data['question_id']}"
+                screenshot_success = self.image_downloader.take_element_screenshot(
+                    fallback_selector,
+                    screenshot_path,
+                    soup_element=None,
+                    timeout=5
+                )
+
+            if screenshot_success:
+                data['screenshot'] = {
+                    'local_path': os.path.relpath(screenshot_path, output_dir),
+                    'success': True,
+                    'alt': 'Gapselect Question Screenshot',
+                    'title': 'Gapselect Frage mit Dropdown-Auswahl'
+                }
+                self.logger.info(f"✓ Screenshot created for gapselect question {data['question_number']}")
+            else:
+                self.logger.warning(f"Failed to create screenshot for gapselect question {data['question_number']}")
+
+            # Optional: Versuche zusätzlich Dropdown-Werte zu extrahieren
+            select_elements = question_elem.find_all('select')
+            if select_elements:
+                dropdowns = []
+                for idx, select in enumerate(select_elements, 1):
+                    selected_option = select.find('option', selected=True)
+                    dropdown_data = {
+                        'number': idx,
+                        'selected': selected_option.get_text(strip=True) if selected_option else '',
+                        'correct': 'correct' in select.get('class', []),
+                        'incorrect': 'incorrect' in select.get('class', [])
+                    }
+                    dropdowns.append(dropdown_data)
+
+                data['dropdowns'] = dropdowns
+
+        except Exception as e:
+            self.logger.error(f"Error parsing gapselect question: {e}")
+
+        return data
+
+    def parse_ordering_question(self, question_elem, base_data: Dict, output_dir: str, attempt_id: Optional[str] = None) -> Dict:
+        """
+        Parst Ordering Fragen (Sortierung/Reihenfolge) - IMMER mit Screenshot
+
+        Args:
+            question_elem: BeautifulSoup Element
+            base_data: Generische Fragedaten
+            output_dir: Output-Verzeichnis für Screenshots
+            attempt_id: Attempt-ID für eindeutige Dateinamen (optional)
+
+        Returns:
+            Dict mit erweiterten Fragedaten inkl. Screenshot
+        """
+        data = base_data.copy()
+
+        try:
+            # Für ordering machen wir IMMER einen Screenshot, da die Reihenfolge
+            # visuell am besten dargestellt wird
+            if attempt_id:
+                screenshot_filename = f"q{data['question_number']}_attempt{attempt_id}_ordering_screenshot.png"
+            else:
+                screenshot_filename = f"q{data['question_number']}_ordering_screenshot.png"
+
+            screenshot_path = os.path.join(output_dir, 'images', screenshot_filename)
+
+            self.logger.info(f"Creating screenshot for ordering question {data['question_number']} (attempt {attempt_id})...")
+
+            # Verwende die Formulation für den Screenshot
+            unique_selector = f"#question-{data['question_id']} div.formulation"
+            screenshot_success = self.image_downloader.take_element_screenshot(
+                unique_selector,
+                screenshot_path,
+                soup_element=None,
+                timeout=5
+            )
+
+            # Fallback: Wenn Formulation fehlschlägt, versuche das gesamte Question-Element
+            if not screenshot_success:
+                self.logger.warning(f"Formulation screenshot failed, trying entire question element...")
+                fallback_selector = f"#question-{data['question_id']}"
+                screenshot_success = self.image_downloader.take_element_screenshot(
+                    fallback_selector,
+                    screenshot_path,
+                    soup_element=None,
+                    timeout=5
+                )
+
+            if screenshot_success:
+                data['screenshot'] = {
+                    'local_path': os.path.relpath(screenshot_path, output_dir),
+                    'success': True,
+                    'alt': 'Ordering Question Screenshot',
+                    'title': 'Ordering Frage mit Sortierung'
+                }
+                self.logger.info(f"✓ Screenshot created for ordering question {data['question_number']}")
+            else:
+                self.logger.warning(f"Failed to create screenshot for ordering question {data['question_number']}")
+
+            # Optional: Versuche zusätzlich Ordering-Items zu extrahieren
+            sortable_list = question_elem.find('ul', class_='sortablelist')
+            if sortable_list:
+                items = []
+                list_items = sortable_list.find_all('li', recursive=False)
+                for idx, li in enumerate(list_items, 1):
+                    # Hole den Text des Items
+                    item_text_div = li.find('div', attrs={'data-itemcontent': ''})
+                    if item_text_div:
+                        # Entferne Icons aus dem Text
+                        item_text = item_text_div.get_text(strip=True)
+                        # Entferne Status-Texte wie "Richtig" oder "Falsch"
+                        item_text = item_text.replace('Richtig', '').replace('Falsch', '').strip()
+                    else:
+                        item_text = li.get_text(strip=True)
+
+                    item_data = {
+                        'position': idx,
+                        'text': item_text,
+                        'correct': 'correct' in li.get('class', []),
+                        'incorrect': 'incorrect' in li.get('class', [])
+                    }
+                    items.append(item_data)
+
+                data['ordering_items'] = items
+
+        except Exception as e:
+            self.logger.error(f"Error parsing ordering question: {e}")
+
+        return data
+
     def parse_match_question(self, question_elem, base_data: Dict) -> Dict:
         """
         Parst Match (Zuordnungs) Fragen mit Dropdown-Selects
@@ -1131,6 +1361,10 @@ class QuizParser:
             return self.parse_ddmarker_question(question_elem, base_data, output_dir, attempt_id=attempt_id)
         elif qtype == 'multianswer':
             return self.parse_multianswer_question(question_elem, base_data, output_dir, attempt_id=attempt_id)
+        elif qtype == 'gapselect':
+            return self.parse_gapselect_question(question_elem, base_data, output_dir, attempt_id=attempt_id)
+        elif qtype == 'ordering':
+            return self.parse_ordering_question(question_elem, base_data, output_dir, attempt_id=attempt_id)
         elif qtype == 'match':
             return self.parse_match_question(question_elem, base_data)
         elif qtype in ['multichoice', 'truefalse']:

@@ -697,9 +697,12 @@ class ExamPDFGenerator:
             # Für Description: Kein extra Header, nur Inhalt wird gezeigt
             pass
 
-        # Fragetext
+        # Fragetext (überspringe bei Screenshot-basierten Fragen)
+        # Bei ddmarker, multianswer, gapselect und ordering ist der Text im Screenshot enthalten
+        skip_question_text = q_type in ['ddmarker', 'ddmarker-readonly', 'multianswer', 'gapselect', 'ordering']
+
         q_text = question.get('question_text', '')
-        if q_text:
+        if q_text and not skip_question_text:
             normalized_q_text = self._normalize_linebreaks(q_text)
             escaped_q_text = self._escape_html(normalized_q_text)
             q_text_with_breaks = escaped_q_text.replace('\n', '<br/>')
@@ -712,6 +715,10 @@ class ExamPDFGenerator:
             elements.extend(self._render_ddmarker(question, base_path))
         elif q_type == 'multianswer':
             elements.extend(self._render_multianswer(question, base_path))
+        elif q_type == 'gapselect':
+            elements.extend(self._render_gapselect(question, base_path))
+        elif q_type == 'ordering':
+            elements.extend(self._render_ordering(question, base_path))
         elif q_type == 'match':
             elements.extend(self._render_match(question))
         elif q_type in ['multichoice', 'truefalse']:
@@ -734,16 +741,33 @@ class ExamPDFGenerator:
 
         # Kommentar (Lehrer-Kommentar) - nur wenn nicht leer oder "e"
         comment = question.get('comment')
-        comment_html = question.get('comment_html')
+        comment_html_legacy = question.get('comment_html')  # Alte Struktur (Rückwärtskompatibilität)
+
+        # Kommentar kann entweder String (alter Code) oder Dictionary (neuer Code) sein
+        comment_text_raw = None
+        comment_images = []
+        comment_html = None
+
+        if isinstance(comment, dict):
+            # Neuer Code: Dictionary mit text, images und html
+            comment_text_raw = comment.get('text', '')
+            comment_images = comment.get('images', [])
+            comment_html = comment.get('html', '')  # HTML-Version (falls vorhanden)
+        elif isinstance(comment, str):
+            # Alter Code: Einfacher String
+            comment_text_raw = comment
 
         # Versuche zuerst HTML-Version für bessere Formatierung
+        # Priorität: 1) comment.html (neu), 2) comment_html (alt)
         if comment_html:
             comment_text = self._extract_comment_from_html(comment_html)
-        elif comment:
+        elif comment_html_legacy:
+            comment_text = self._extract_comment_from_html(comment_html_legacy)
+        elif comment_text_raw:
             # Fallback: Einfacher Text-Kommentar
             # 1. Escape HTML-Zeichen
             import html as html_module
-            comment_text = html_module.escape(comment)
+            comment_text = html_module.escape(comment_text_raw)
             # 2. Konvertiere \n zu <br/>
             comment_text = comment_text.replace('\n', '<br/>')
         else:
@@ -754,6 +778,23 @@ class ExamPDFGenerator:
             # NICHT escapen, da es bereits formatiertes HTML ist
             comment_para = Paragraph(f"<b>Kommentar:</b><br/>{comment_text}", self.styles['Comment'])
             elements.append(comment_para)
+
+        # Füge Kommentar-Bilder hinzu (falls vorhanden)
+        if comment_images:
+            for img_info in comment_images:
+                img_path = os.path.join(base_path, img_info.get('local_path', ''))
+                if os.path.exists(img_path):
+                    try:
+                        img = Image(img_path)
+                        # Skaliere Bild auf max. 150mm Breite
+                        img_width = 150 * mm
+                        aspect = img.imageHeight / img.imageWidth
+                        img.drawHeight = img_width * aspect
+                        img.drawWidth = img_width
+                        elements.append(img)
+                        elements.append(Spacer(1, 3 * mm))
+                    except Exception as e:
+                        self.logger.warning(f"Failed to load comment image {img_path}: {e}")
 
         # Abstand zur nächsten Frage
         elements.append(Spacer(1, 5 * mm))
@@ -1077,6 +1118,172 @@ class ExamPDFGenerator:
                     ))
 
                 elements.append(Spacer(1, 2 * mm))
+
+        return elements
+
+    def _render_gapselect(self, question: Dict, base_path: str = '') -> List:
+        """Rendert Gapselect (Dropdown-Auswahl) Frage - IMMER mit Screenshot"""
+        elements = []
+
+        # Screenshot anzeigen (Hauptdarstellung für gapselect)
+        screenshot_info = question.get('screenshot')
+        if screenshot_info and screenshot_info.get('local_path'):
+            local_path_str = screenshot_info['local_path']
+            # Prüfe ob absoluter oder relativer Pfad
+            if os.path.isabs(local_path_str):
+                screenshot_path = local_path_str
+            else:
+                screenshot_path = os.path.join(base_path, local_path_str)
+
+            if os.path.exists(screenshot_path):
+                try:
+                    # Bildgröße ermitteln
+                    pil_img = PILImage.open(screenshot_path)
+                    img_width, img_height = pil_img.size
+
+                    # Auf 50% der ursprünglichen Größe skalieren (wie bei multianswer)
+                    # ReportLab arbeitet in Points (72 DPI), PIL in Pixels (üblicherweise 96 DPI)
+                    # Konvertierung: Pixel * 72/96 = Points
+                    width_points = (img_width * 72 / 96) * 0.5
+                    height_points = (img_height * 72 / 96) * 0.5
+
+                    img = Image(screenshot_path, width=width_points, height=height_points)
+                    elements.append(img)
+                    elements.append(Spacer(1, 3 * mm))
+                    self.logger.debug(f"Screenshot included for gapselect question {question.get('question_number')}")
+                except Exception as e:
+                    self.logger.error(f"Failed to load gapselect screenshot: {e}")
+                    elements.append(Paragraph(
+                        f"<i>[Screenshot konnte nicht geladen werden: {os.path.basename(screenshot_path)}]</i>",
+                        self.styles['Answer']
+                    ))
+            else:
+                self.logger.warning(f"Gapselect screenshot not found: {screenshot_path}")
+                # Fallback: Zeige generischen Hinweis
+                elements.append(Paragraph(
+                    "<i>[Screenshot nicht verfügbar - Details siehe Online-Version]</i>",
+                    self.styles['Answer']
+                ))
+        else:
+            # Kein Screenshot vorhanden (sollte nicht passieren)
+            self.logger.warning(f"No screenshot data for gapselect question {question.get('question_number')}")
+            elements.append(Paragraph(
+                "<i>[Screenshot nicht verfügbar - Details siehe Online-Version]</i>",
+                self.styles['Answer']
+            ))
+
+        # Optional: Dropdown-Werte anzeigen (falls extrahiert)
+        dropdowns = question.get('dropdowns', [])
+        if dropdowns:
+            # Filtere Dropdowns wenn only_incorrect aktiviert
+            if self.only_incorrect:
+                filtered_dropdowns = [d for d in dropdowns if d.get('incorrect', False)]
+            else:
+                filtered_dropdowns = dropdowns
+
+            if filtered_dropdowns:
+                elements.append(Paragraph("<b>Ihre Auswahl:</b>", self.styles['Answer']))
+                for dropdown in filtered_dropdowns:
+                    number = dropdown.get('number', '?')
+                    selected = dropdown.get('selected', 'Nicht ausgewählt')
+                    is_correct = dropdown.get('correct', False)
+                    is_incorrect = dropdown.get('incorrect', False)
+
+                    # Status-Marker mit Farben
+                    if is_correct:
+                        marker = ' <font color="#006400"><i>(✓ richtig)</i></font>'
+                    elif is_incorrect:
+                        marker = ' <font color="#8B0000"><i>(✗ falsch)</i></font>'
+                    else:
+                        marker = ''
+
+                    elements.append(Paragraph(
+                        f"  Lücke {number}: {self._escape_html(selected)}{marker}",
+                        self.styles['Answer']
+                    ))
+
+        return elements
+
+    def _render_ordering(self, question: Dict, base_path: str = '') -> List:
+        """Rendert Ordering (Sortierungs) Frage - IMMER mit Screenshot"""
+        elements = []
+
+        # Screenshot anzeigen (Hauptdarstellung für ordering)
+        screenshot_info = question.get('screenshot')
+        if screenshot_info and screenshot_info.get('local_path'):
+            local_path_str = screenshot_info['local_path']
+            # Prüfe ob absoluter oder relativer Pfad
+            if os.path.isabs(local_path_str):
+                screenshot_path = local_path_str
+            else:
+                screenshot_path = os.path.join(base_path, local_path_str)
+
+            if os.path.exists(screenshot_path):
+                try:
+                    # Bildgröße ermitteln
+                    pil_img = PILImage.open(screenshot_path)
+                    img_width, img_height = pil_img.size
+
+                    # Auf 50% der ursprünglichen Größe skalieren (wie bei gapselect)
+                    # ReportLab arbeitet in Points (72 DPI), PIL in Pixels (üblicherweise 96 DPI)
+                    # Konvertierung: Pixel * 72/96 = Points
+                    width_points = (img_width * 72 / 96) * 0.5
+                    height_points = (img_height * 72 / 96) * 0.5
+
+                    img = Image(screenshot_path, width=width_points, height=height_points)
+                    elements.append(img)
+                    elements.append(Spacer(1, 3 * mm))
+                    self.logger.debug(f"Screenshot included for ordering question {question.get('question_number')}")
+                except Exception as e:
+                    self.logger.error(f"Failed to load ordering screenshot: {e}")
+                    elements.append(Paragraph(
+                        f"<i>[Screenshot konnte nicht geladen werden: {os.path.basename(screenshot_path)}]</i>",
+                        self.styles['Answer']
+                    ))
+            else:
+                self.logger.warning(f"Ordering screenshot not found: {screenshot_path}")
+                # Fallback: Zeige generischen Hinweis
+                elements.append(Paragraph(
+                    "<i>[Screenshot nicht verfügbar - Details siehe Online-Version]</i>",
+                    self.styles['Answer']
+                ))
+        else:
+            # Kein Screenshot vorhanden (sollte nicht passieren)
+            self.logger.warning(f"No screenshot data for ordering question {question.get('question_number')}")
+            elements.append(Paragraph(
+                "<i>[Screenshot nicht verfügbar - Details siehe Online-Version]</i>",
+                self.styles['Answer']
+            ))
+
+        # Optional: Ordering-Items anzeigen (falls extrahiert)
+        ordering_items = question.get('ordering_items', [])
+        if ordering_items:
+            # Filtere Items wenn only_incorrect aktiviert
+            if self.only_incorrect:
+                filtered_items = [item for item in ordering_items if item.get('incorrect', False)]
+            else:
+                filtered_items = ordering_items
+
+            if filtered_items:
+                elements.append(Paragraph("<b>Ihre Reihenfolge:</b>", self.styles['Answer']))
+                for item in filtered_items:
+                    position = item.get('position', '?')
+                    text = item.get('text', 'Unbekannt')
+                    is_correct = item.get('correct', False)
+                    is_incorrect = item.get('incorrect', False)
+
+                    # Status-Marker mit Farben
+                    if is_correct:
+                        marker = ' <font color="#006400"><i>(✓ richtig)</i></font>'
+                    elif is_incorrect:
+                        marker = ' <font color="#8B0000"><i>(✗ falsch)</i></font>'
+                    else:
+                        marker = ''
+
+                    elements.append(Paragraph(
+                        f"  {position}. {self._escape_html(text)}{marker}",
+                        self.styles['Answer']
+                    ))
 
         return elements
 

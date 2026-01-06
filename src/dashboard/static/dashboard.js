@@ -9,6 +9,14 @@ let sortState = {}; // Track sorting state for different tables
 let gradeMapping = {}; // GradeMapping from config.ini
 let courseId = ''; // Mebis Course ID from config
 
+// Make variables available globally for csv_export.js
+window.dashboardData = dashboardData;
+window.currentGroup = currentGroup;
+window.currentGrouping = currentGrouping;
+window.currentWeek = currentWeek;
+window.maxSchoolweeks = maxSchoolweeks;
+window.gradeMapping = gradeMapping;
+
 // Tab-Management
 function showTab(tabName) {
     // Alle Tabs verstecken
@@ -273,6 +281,7 @@ async function loadData() {
         }
 
         dashboardData = await response.json();
+        window.dashboardData = dashboardData; // Sync to window
 
         // Load grade mapping from backend
         dashboardLogger.debug('DATA', 'Checking for grade_mapping in response');
@@ -280,6 +289,7 @@ async function loadData() {
 
         if (dashboardData.grade_mapping) {
             gradeMapping = dashboardData.grade_mapping;
+            window.gradeMapping = gradeMapping; // Sync to window
             dashboardLogger.info('DATA', 'Grade mapping loaded successfully', gradeMapping);
         } else {
             dashboardLogger.error('DATA', 'No grade_mapping found in backend response', {
@@ -290,6 +300,7 @@ async function loadData() {
         // Load max_schoolweeks from backend
         if (dashboardData.max_schoolweeks) {
             maxSchoolweeks = dashboardData.max_schoolweeks;
+            window.maxSchoolweeks = maxSchoolweeks; // Sync to window
             dashboardLogger.info('DATA', `Max schoolweeks loaded: ${maxSchoolweeks}`);
         } else {
             dashboardLogger.warn('DATA', `No max_schoolweeks found, using default: ${maxSchoolweeks}`);
@@ -1226,9 +1237,11 @@ function toggleProgressType() {
 // Gruppierung über Tab auswählen
 function selectGrouping(groupingName) {
     currentGrouping = groupingName;
+    window.currentGrouping = currentGrouping; // Sync to window
 
     // Bei Gruppierungsauswahl auf "Alle Gruppen" der Gruppierung setzen
     currentGroup = 'all';
+    window.currentGroup = currentGroup; // Sync to window
 
     // Gruppen-Tabs basierend auf neuer Gruppierung aktualisieren
     populateGroupTabs();
@@ -1244,6 +1257,7 @@ function selectGrouping(groupingName) {
 // Gruppe über Tab auswählen
 function selectGroup(groupName) {
     currentGroup = groupName;
+    window.currentGroup = currentGroup; // Sync to window
 
     // Alle Gruppen-Tabs und Dropdowns synchronisieren
     syncGroupSelectors();
@@ -1258,6 +1272,7 @@ function filterByGroup() {
     const groupSelect = document.getElementById('groupSelect');
     if (groupSelect) {
         currentGroup = groupSelect.value;
+        window.currentGroup = currentGroup; // Sync to window
     }
 
     // Alle anderen Gruppen-Dropdowns synchronisieren
@@ -1361,6 +1376,7 @@ function updateAllTabs() {
 // Referenzwoche aktualisieren
 function updateReferenceWeek(week) {
     currentWeek = parseInt(week);
+    window.currentWeek = currentWeek; // Sync to window
     dashboardLogger.info('USER', 'Referenzwoche geändert', { week: currentWeek });
 
     // Slider-Wert visuell aktualisieren

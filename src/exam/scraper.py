@@ -736,28 +736,15 @@ class QuizScraper:
         if os.path.exists(data_file) and force_rescrape:
             self.logger.info(f"Overwriting existing data for {quiz_name}/{group_prefix}")
 
-        # Erstelle Output-Verzeichnis
-        os.makedirs(output_dir, exist_ok=True)
-
         # Hole Versuche (mit optionalem Datumsfilter)
         attempts = self.get_attempts_for_group(quiz_id, group_id, since_date)
 
         if not attempts:
-            self.logger.warning(f"No attempts found for quiz '{quiz_name}', group '{group_prefix}'")
-            # Erstelle leere Datei als Marker
-            empty_data = {
-                'quiz_info': {
-                    'quiz_id': quiz_id,
-                    'quiz_name': quiz_name,
-                    'group_id': group_id,
-                    'group_name': group_name,
-                    'scraped_date': datetime.now().isoformat()
-                },
-                'students': []
-            }
-            with open(data_file, 'w', encoding='utf-8') as f:
-                json.dump(empty_data, f, ensure_ascii=False, indent=2)
+            self.logger.warning(f"No attempts found for quiz '{quiz_name}', group '{group_prefix}' - skipping file creation")
             return
+
+        # Erstelle Output-Verzeichnis nur wenn Daten vorhanden sind
+        os.makedirs(output_dir, exist_ok=True)
 
         # Scrape jede Review-Seite parallel
         students_data = []
