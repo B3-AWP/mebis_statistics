@@ -1370,6 +1370,73 @@ def main():
                         "category_name": quiz.get("category_name")
                     })
 
+    # =====================================================
+    # VALIDIERUNG: Prüfe ob kritische Daten vorhanden sind
+    # =====================================================
+    print("\n" + "="*60)
+    print("VALIDIERUNG DER EXPORTIERTEN DATEN")
+    print("="*60)
+
+    validation_errors = []
+
+    # Prüfe Aktivitäten
+    if not activities["assignments"] and not activities["checklists"] and not activities["quizzes"]:
+        validation_errors.append("FEHLER: Keine Aktivitäten gefunden (keine Assignments, Checklisten oder Quizzes)")
+
+    # Prüfe Gruppen
+    if not data["groups"]:
+        validation_errors.append("FEHLER: Keine Gruppen gefunden")
+    else:
+        # Prüfe ob Gruppen Benutzer haben
+        total_users_check = sum(len(group["users"]) for group in data["groups"])
+        if total_users_check == 0:
+            validation_errors.append("FEHLER: Keine Benutzer in Gruppen gefunden")
+
+    # Prüfe Kategorien
+    if not activities_by_category:
+        validation_errors.append("WARNUNG: Keine Kategorien gefunden")
+
+    # Prüfe Checklisten-Progress
+    if activities["checklists"] and not checklist_progress:
+        validation_errors.append("FEHLER: Checklisten gefunden, aber keine Fortschrittsdaten")
+
+    # Prüfe Assignments-Status
+    if activities["assignments"] and not assignments_status:
+        validation_errors.append("FEHLER: Assignments gefunden, aber keine Status-Daten")
+
+    # Ausgabe der Validierungsergebnisse
+    if validation_errors:
+        print("\n[!] VALIDIERUNGSFEHLER GEFUNDEN:")
+        sys.stdout.flush()  # Stelle sicher, dass Backend diese Meldung sieht
+        for error in validation_errors:
+            print(f"  - {error}")
+            sys.stdout.flush()
+
+        # Unterscheide zwischen Fehlern und Warnungen
+        critical_errors = [e for e in validation_errors if e.startswith("FEHLER:")]
+        if critical_errors:
+            print("\n" + "="*60)
+            print("[ABBRUCH] Kritische Fehler gefunden!")
+            print("Export wird NICHT gespeichert.")
+            print("="*60)
+            sys.stdout.flush()
+            print("\nBitte prüfen Sie:")
+            print("  1. Die Netzwerkverbindung zu Mebis")
+            print("  2. Die Login-Credentials in der Konfiguration")
+            print("  3. Die Kurs-ID in der Konfiguration")
+            print("  4. Die Logausgaben auf weitere Hinweise")
+            sys.stdout.flush()
+            driver.quit()
+            sys.exit(1)
+        else:
+            print("\n[INFO] Nur Warnungen gefunden, Export wird fortgesetzt.")
+            sys.stdout.flush()
+    else:
+        print("[OK] Alle Validierungen bestanden")
+        sys.stdout.flush()
+
+    print("="*60 + "\n")
+
     print("Speichere Daten lokal...")
     save_start_time = time.time()
 
@@ -1394,6 +1461,93 @@ def main():
         save_duration = time.time() - save_start_time
         print(f"Daten erfolgreich lokal gespeichert in {save_duration:.1f}s: {local_filename}")
         save_success = True
+
+        # =====================================================
+        # GRÖSSENVERGLEICH: Prüfe ob neuer Export kleiner ist
+        # =====================================================
+        new_file_size = os.path.getsize(local_filename)
+        print(f"\nGröße der neuen Datei: {new_file_size:,} bytes ({new_file_size / 1024:.1f} KB)")
+
+        # Finde vorherige Export-Dateien
+        import glob
+        previous_exports = glob.glob(os.path.join(export_folder, 'output_*.json'))
+        previous_exports = [f for f in previous_exports if f != local_filename]  # Schließe neue Datei aus
+
+        if previous_exports:
+            # Sortiere nach Erstellungsdatum (neueste zuerst)
+            previous_exports.sort(key=os.path.getctime, reverse=True)
+            latest_previous = previous_exports[0]
+            previous_file_size = os.path.getsize(latest_previous)
+
+            print(f"Größe der vorherigen Datei: {previous_file_size:,} bytes ({previous_file_size / 1024:.1f} KB)")
+            print(f"Vorherige Datei: {os.path.basename(latest_previous)}")
+
+            # Berechne Differenz
+            size_diff = new_file_size - previous_file_size
+            size_diff_percent = (size_diff / previous_file_size) * 100 if previous_file_size > 0 else 0
+
+            print(f"Differenz: {size_diff:+,} bytes ({size_diff_percent:+.1f}%)")
+
+            # Warnung bei kleineren Exporten
+            if new_file_size < previous_file_size:
+                print("\n" + "="*60)
+                print("⚠️  WARNUNG: NEUER EXPORT IST KLEINER!")
+                print("="*60)
+                sys.stdout.flush()
+                print(f"Der neue Export ist {abs(size_diff):,} bytes ({abs(size_diff_percent):.1f}%) kleiner.")
+                print(f"Dies könnte auf einen unvollständigen Export hinweisen.")
+                print("")
+                print(f"Neue Datei:      {new_file_size:>12,} bytes  {os.path.basename(local_filename)}")
+                print(f"Vorherige Datei: {previous_file_size:>12,} bytes  {os.path.basename(latest_previous)}")
+                print("")
+                sys.stdout.flush()
+
+                # Prüfe ob stdin interaktiv ist (Terminal vorhanden)
+                is_interactive = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
+
+                if is_interactive:
+                    # Interaktiver Modus: Frage Benutzer
+                    print("[INTERAKTIV] Sie werden um Bestätigung gebeten.")
+                    sys.stdout.flush()
+                    try:
+                        response = input("Möchten Sie den neuen (kleineren) Export behalten? (j/n): ").strip().lower()
+                        if response not in ['j', 'ja', 'y', 'yes']:
+                            print("\n[ABBRUCH] Export wird verworfen...")
+                            os.remove(local_filename)
+                            print(f"Datei gelöscht: {local_filename}")
+                            print("Der vorherige Export bleibt erhalten.")
+                            sys.stdout.flush()
+                            save_success = False
+                        else:
+                            print("\n[OK] Neuer Export wird behalten.")
+                            sys.stdout.flush()
+                    except (KeyboardInterrupt, EOFError):
+                        print("\n\n[ABBRUCH] Export wird verworfen...")
+                        os.remove(local_filename)
+                        print(f"Datei gelöscht: {local_filename}")
+                        sys.stdout.flush()
+                        save_success = False
+                else:
+                    # Nicht-interaktiver Modus (z.B. Dashboard): Automatisch ablehnen
+                    print("[NICHT-INTERAKTIV] Export wird automatisch abgelehnt.")
+                    print("\n[ABBRUCH] Export wird verworfen (automatisch)...")
+                    print("Im nicht-interaktiven Modus werden kleinere Exports nicht akzeptiert.")
+                    sys.stdout.flush()
+                    os.remove(local_filename)
+                    print(f"Datei gelöscht: {local_filename}")
+                    print("Der vorherige Export bleibt erhalten.")
+                    sys.stdout.flush()
+                    save_success = False
+
+                print("="*60)
+                sys.stdout.flush()
+            elif size_diff_percent > 50:
+                print("\n[INFO] Export ist signifikant größer (+{:.1f}%). Dies ist normal bei mehr Daten.".format(size_diff_percent))
+            else:
+                print("\n[OK] Dateigröße ist plausibel.")
+        else:
+            print("\n[INFO] Kein vorheriger Export gefunden, Größenvergleich übersprungen.")
+
     except Exception as e:
         print(f"Lokale Speicherung fehlgeschlagen: {e}")
         save_success = False
@@ -1416,7 +1570,10 @@ def main():
     total_users = sum(len(group["users"]) for group in data["groups"])
 
     print("\n" + "="*60)
-    print("EXPORT ABGESCHLOSSEN")
+    if save_success:
+        print("EXPORT ERFOLGREICH ABGESCHLOSSEN")
+    else:
+        print("EXPORT FEHLGESCHLAGEN ODER ABGEBROCHEN")
     print("="*60)
     print(f"Gesamtdauer: {duration_minutes:.2f} Minuten ({duration:.1f} Sekunden)")
     print(f"Aktivitaeten: {total_activities} ({len(activities['assignments'])} Assignments, {len(activities['checklists'])} Checklists, {len(activities['quizzes'])} Quizzes)")
@@ -1426,9 +1583,13 @@ def main():
     if save_success:
         print(f"Lokale Datei: {local_filename}")
     else:
-        print(f"[FEHLER] Speicherung fehlgeschlagen")
+        print(f"[FEHLER] Export wurde nicht gespeichert oder abgebrochen")
     print(f"Endzeit: {datetime.now().strftime('%H:%M:%S')}")
     print("="*60)
+
+    # Beende mit Fehlercode wenn Export fehlgeschlagen ist
+    if not save_success:
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

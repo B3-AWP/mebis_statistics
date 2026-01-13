@@ -1223,9 +1223,18 @@ def run_export_script():
             export_status['message'] = 'Export erfolgreich abgeschlossen'
             logger.info("Export completed successfully")
         else:
+            # Lese stderr für detaillierte Fehlermeldung
             stderr_output = process.stderr.read()
             export_status['running'] = False
-            export_status['error'] = f"Export fehlgeschlagen: {stderr_output}"
+
+            # Unterscheide zwischen Validierungsfehlern und anderen Fehlern
+            if "VALIDIERUNGSFEHLER" in export_status.get('message', ''):
+                export_status['error'] = "Export abgebrochen: Validierungsfehler (siehe Log)"
+            elif "NEUER EXPORT IST KLEINER" in export_status.get('message', ''):
+                export_status['error'] = "Export abgelehnt: Neuer Export wäre kleiner als vorheriger"
+            else:
+                export_status['error'] = f"Export fehlgeschlagen: {stderr_output[:200]}" if stderr_output else "Export fehlgeschlagen (unbekannter Fehler)"
+
             logger.error(f"Export failed with return code {return_code}: {stderr_output}")
 
     except Exception as e:
