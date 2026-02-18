@@ -523,8 +523,8 @@ MODE_WAITTIME=5
 Fehler-Logs enthalten jetzt die Review-URL zur Überprüfung:
 
 ```
-[ERROR] exam_utils - ✗ Screenshot failed for ddmarker question 18 - URL: https://lernplattform.mebis.bycs.de/mod/quiz/review.php?attempt=9764734
-[ERROR] exam_utils - Downloaded HTML instead of image - likely authentication issue. URL: https://lernplattform.mebis.bycs.de/pluginfile.php/...
+[ERROR] exam_utils - ✗ Screenshot failed for ddmarker question 18 - URL: https://lernplattform.bycs.de/mod/quiz/review.php?attempt=9764734
+[ERROR] exam_utils - Downloaded HTML instead of image - likely authentication issue. URL: https://lernplattform.bycs.de/pluginfile.php/...
 ```
 
 ## Caching & Performance

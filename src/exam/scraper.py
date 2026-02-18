@@ -243,7 +243,7 @@ class QuizScraper:
         self.waittime = waittime
         self.driver = None
         self.sesskey = None
-        self.base_url = 'https://lernplattform.mebis.bycs.de'
+        self.base_url = 'https://lernplattform.bycs.de'
         self.logger = scraper_logger
 
         # Konfiguration laden

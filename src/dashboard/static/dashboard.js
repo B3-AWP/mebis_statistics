@@ -7,6 +7,8 @@ let maxSchoolweeks = 9; // Maximale Schulwochen (aus Backend geladen, ersetzt to
 let checklistViewType = 'pflicht'; // New: track checklist column view setting
 let sortState = {}; // Track sorting state for different tables
 let gradeMapping = {}; // GradeMapping from config.ini
+let mitarbeitsnoteConfig = null; // Mitarbeitsnoten-Konfiguration aus Backend
+let manualGradeItemIds = {}; // Manuelle Bewertungselement-IDs aus Backend {id: title}
 let courseId = ''; // Mebis Course ID from config
 
 // Make variables available globally for csv_export.js
@@ -16,6 +18,7 @@ window.currentGrouping = currentGrouping;
 window.currentWeek = currentWeek;
 window.maxSchoolweeks = maxSchoolweeks;
 window.gradeMapping = gradeMapping;
+window.mitarbeitsnoteConfig = mitarbeitsnoteConfig;
 
 // Tab-Management
 function showTab(tabName) {
@@ -304,6 +307,19 @@ async function loadData() {
             dashboardLogger.info('DATA', `Max schoolweeks loaded: ${maxSchoolweeks}`);
         } else {
             dashboardLogger.warn('DATA', `No max_schoolweeks found, using default: ${maxSchoolweeks}`);
+        }
+
+        // Load mitarbeitsnote_config from backend
+        if (dashboardData.mitarbeitsnote_config) {
+            mitarbeitsnoteConfig = dashboardData.mitarbeitsnote_config;
+            window.mitarbeitsnoteConfig = mitarbeitsnoteConfig;
+            dashboardLogger.info('DATA', 'Mitarbeitsnote config loaded', mitarbeitsnoteConfig);
+        }
+
+        // Load manual_grade_item_ids from backend
+        if (dashboardData.manual_grade_item_ids) {
+            manualGradeItemIds = dashboardData.manual_grade_item_ids;
+            dashboardLogger.info('DATA', 'Manual grade item IDs loaded', manualGradeItemIds);
         }
 
         // Load course_id from backend
@@ -1127,14 +1143,450 @@ function calculateGradeFromPflichtProgress(pflichtProgress) {
     }
 }
 
+// ============================================================
+// MITARBEITSNOTEN-BERECHNUNG
+// ============================================================
+
+// Gibt die Schiene für eine Gruppe zurück (z.B. "Schiene1")
+// Unterstützt exakten Treffer und Prefix-Matching (z.B. "IFA12B" matcht "IFA12B - Team 1")
+function getTrackForGroup(groupName) {
+    if (!mitarbeitsnoteConfig || !mitarbeitsnoteConfig.class_to_track) return null;
+    const map = mitarbeitsnoteConfig.class_to_track;
+    if (map[groupName]) return map[groupName];
+    for (const key of Object.keys(map)) {
+        if (groupName.startsWith(key)) return map[key];
+    }
+    return null;
+}
+
+// Gibt die aktuelle Schulwoche (1-9) basierend auf dem heutigen Datum zurück.
+// Gibt 0 zurück wenn vor der ersten Woche, die letzte Woche wenn danach.
+function getCurrentReferenceWeekForTrack(track) {
+    if (!mitarbeitsnoteConfig || !mitarbeitsnoteConfig.track_schedules) return 0;
+    const schedule = mitarbeitsnoteConfig.track_schedules[track];
+    if (!schedule || schedule.length === 0) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let currentWeek = 0;
+    for (const entry of schedule) {
+        const start = new Date(entry.start);
+        if (today >= start) {
+            currentWeek = entry.week;
+        }
+    }
+    return currentWeek;
+}
+
+// Gibt Roh-Checklisten-Daten für einen Benutzer zurück
+// Rückgabe: {totalPflichtPercent, totalMandatoryChecklists} oder null
+function getChecklistRawData(user, groupName) {
+    const targetGroup = groupName || currentGroup;
+    if (!dashboardData || !dashboardData.structured_tables) return null;
+    const tableData = dashboardData.structured_tables[targetGroup] && dashboardData.structured_tables[targetGroup].checklists;
+    if (!tableData || !tableData.rows || !tableData.headers) return null;
+
+    const userIndex = tableData.headers.findIndex(h => h === user.name);
+    if (userIndex <= 0) return null;
+
+    const mandatoryChecklists = tableData.rows.filter(row =>
+        row.is_mandatory !== undefined ? row.is_mandatory : true
+    );
+
+    let totalPflichtPercent = 0;
+    mandatoryChecklists.forEach(row => {
+        if (row.user_progress && row.user_progress[userIndex - 1]) {
+            const progress = row.user_progress[userIndex - 1];
+            const pct = parseFloat((progress.required_progress || '0%').replace('%', ''));
+            if (!isNaN(pct)) totalPflichtPercent += pct;
+        }
+    });
+
+    return {
+        totalPflichtPercent: totalPflichtPercent,
+        totalMandatoryChecklists: mandatoryChecklists.length
+    };
+}
+
+// Berechnet den Pflichtaufgaben-Durchschnitt mit Datumsfilter
+// cutoffDate: ISO-Datum-String (z.B. "2025-12-10")
+// useAfter: false = nur Aufgaben VOR cutoffDate, true = nur Aufgaben NACH cutoffDate
+function calculatePflichtaufgabenGradeFiltered(userName, cutoffDate, useAfter) {
+    if (!dashboardData || !dashboardData.activities_by_category) return null;
+    const cutoff = cutoffDate ? new Date(cutoffDate) : null;
+    let totalPercent = 0;
+    let count = 0;
+
+    for (const category of dashboardData.activities_by_category) {
+        if (!category.category_name || !category.category_name.includes('Pflichtaufgaben')) continue;
+        const allActivities = (category.assignments || []).concat(category.quizzes || []);
+        for (const activity of allActivities) {
+            const userStatus = (activity.user_status || []).find(s => s.user_name === userName);
+            if (!userStatus || !userStatus.grade || userStatus.grade === '-') continue;
+
+            if (cutoff) {
+                if (!userStatus.submission_time) continue; // Ohne Datum ignorieren wenn Datumsfilter aktiv
+                const submDate = new Date(userStatus.submission_time);
+                if (useAfter) {
+                    if (submDate <= cutoff) continue;
+                } else {
+                    if (submDate > cutoff) continue;
+                }
+            }
+
+            const pct = extractPercentageFromString(userStatus.grade);
+            if (pct !== null) {
+                totalPercent += pct;
+                count++;
+            }
+        }
+    }
+
+    if (count === 0) return null;
+    const avg = totalPercent / count;
+    return { percent: avg, count: count, grade: convertPercentToIHKGrade(avg) };
+}
+
+// Sucht eine Aufgabe oder ein Quiz nach ID und gibt den Prozentwert für einen Benutzer zurück.
+// afterDate: Optional, nur Bewertungen MIT submission_time > afterDate
+function findAssignmentOrQuizGradeForUser(assignmentId, userName, afterDate) {
+    if (!assignmentId || !dashboardData || !dashboardData.activities_by_category) return null;
+    const idStr = String(assignmentId);
+    const cutoff = afterDate ? new Date(afterDate) : null;
+
+    for (const category of dashboardData.activities_by_category) {
+        for (const list of [category.assignments || [], category.quizzes || []]) {
+            for (const activity of list) {
+                if (String(activity.id) !== idStr) continue;
+                const userStatus = (activity.user_status || []).find(s => s.user_name === userName);
+                if (!userStatus || !userStatus.grade || userStatus.grade === '-') return null;
+                if (cutoff && userStatus.submission_time) {
+                    if (new Date(userStatus.submission_time) <= cutoff) return null;
+                } else if (cutoff && !userStatus.submission_time) {
+                    return null;
+                }
+                return extractPercentageFromString(userStatus.grade);
+            }
+        }
+    }
+    return null;
+}
+
+// Parst eine deutsche Dezimalzahl (z.B. "86,09" oder "86.09") zu einem Float
+function parseGermanDecimal(str) {
+    if (str === null || str === undefined) return null;
+    const cleaned = String(str).replace(',', '.').replace('%', '').trim();
+    const val = parseFloat(cleaned);
+    return isNaN(val) ? null : val;
+}
+
+// Gibt den numerischen Bewertungswert eines manuellen Notenbuchelements für einen User zurück
+// Sucht in user.manual_grades nach dem Eintrag mit der gegebenen itemId
+function getManualGradeValue(user, itemId) {
+    if (!user || !user.manual_grades) return null;
+    const entry = user.manual_grades.find(g => String(g.id) === String(itemId));
+    if (!entry || entry.grade === null || entry.grade === undefined) return null;
+    return parseGermanDecimal(entry.grade);
+}
+
+// Gibt die Item-ID für einen gegebenen Titel aus manualGradeItemIds zurück
+function getManualItemIdByTitle(title) {
+    return Object.keys(manualGradeItemIds).find(id => manualGradeItemIds[id] === title) || null;
+}
+
+// Berechnet die 1. Halbjahresnote (Mitarbeitsnote) für einen Benutzer
+// Rückgabe: {quantitaet, qualitaet, reviewTalk, overall, grade, componentCount}
+function calculateMitarbeitsnote1(user, groupName) {
+    if (!mitarbeitsnoteConfig) return null;
+
+    const track = getTrackForGroup(groupName);
+    const refWeek = mitarbeitsnoteConfig.mitarbeitsnote1_reference_week || 4;
+    const referenztermin = track && mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1
+        ? mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1[track]
+        : null;
+    const prognosisAssignments = mitarbeitsnoteConfig.prognosis_assignments || {};
+
+    // Suche Item-IDs aus Konfiguration
+    const quantitaetId = getManualItemIdByTitle('Quantität');
+    const qualitaetId = getManualItemIdByTitle('Qualität');
+    const ma1Id = getManualItemIdByTitle('1. Mitarbeitsnote');
+
+    // Komponente 1: Quantität – priorisiere tatsächliche Note aus Notenbuch
+    let quantitaet = quantitaetId ? getManualGradeValue(user, quantitaetId) : null;
+    let quantitaetIsActual = quantitaet !== null;
+    if (!quantitaetIsActual) {
+        // Fallback: Berechne aus Checklisten-Fortschritt
+        const quantProgress = calculateActualProgressForWeek(user, refWeek, maxSchoolweeks, groupName);
+        quantitaet = quantProgress.pflichtProgress;
+    }
+
+    // Komponente 2: Qualität – priorisiere tatsächliche Note aus Notenbuch
+    let qualitaet = qualitaetId ? getManualGradeValue(user, qualitaetId) : null;
+    let qualitaetIsActual = qualitaet !== null;
+    if (!qualitaetIsActual) {
+        // Fallback: Berechne aus Pflichtabgaben bis Referenztermin
+        const qualResult = calculatePflichtaufgabenGradeFiltered(user.name, referenztermin, false);
+        qualitaet = qualResult ? qualResult.percent : null;
+    }
+
+    // Komponente 3: Review-Talk 1 (optional, nur wenn ID konfiguriert)
+    const reviewTalk1Id = prognosisAssignments.reviewTalk1 || null;
+    const reviewTalk = reviewTalk1Id ? findAssignmentOrQuizGradeForUser(reviewTalk1Id, user.name, null) : null;
+
+    // Tatsächliche 1. Mitarbeitsnote aus Notenbuch (wenn Lehrer sie bereits eingetragen hat)
+    const actualMA1Grade = ma1Id ? getManualGradeValue(user, ma1Id) : null;
+
+    // Durchschnitt der Komponenten berechnen (Fallback falls keine tatsächliche Note)
+    const components = [quantitaet, qualitaet, reviewTalk].filter(v => v !== null && v !== undefined);
+    if (components.length === 0 && actualMA1Grade === null) return null;
+    const calculatedOverall = components.length > 0
+        ? components.reduce((a, b) => a + b, 0) / components.length
+        : null;
+
+    // Wenn tatsächliche 1. MA-Note vorhanden → verwende diese für die IHK-Note
+    const overallForGrade = actualMA1Grade !== null ? actualMA1Grade : calculatedOverall;
+
+    return {
+        quantitaet: quantitaet,
+        quantitaetIsActual: quantitaetIsActual,
+        qualitaet: qualitaet,
+        qualitaetIsActual: qualitaetIsActual,
+        reviewTalk: reviewTalk,
+        actualMA1Grade: actualMA1Grade,      // tatsächliche Note aus Notenbuch (oder null)
+        overall: overallForGrade,
+        grade: overallForGrade !== null ? convertPercentToIHKGrade(overallForGrade) : null,
+        componentCount: components.length
+    };
+}
+
+// Berechnet den Quantitäts-Fortschritt für die 2. Mitarbeitsnote
+function calculateQuantitaetMA2(user, groupName, quantitaet1Pct, currentWeek) {
+    const rawData = getChecklistRawData(user, groupName);
+    if (!rawData || rawData.totalMandatoryChecklists === 0) return null;
+
+    const refWeek = mitarbeitsnoteConfig.mitarbeitsnote1_reference_week || 4;
+    const B3 = rawData.totalMandatoryChecklists * 100;
+    const B4 = maxSchoolweeks;
+    const B7 = refWeek;
+    const B10 = (quantitaet1Pct || 0) / 100;
+    const C7 = currentWeek;
+
+    const denominator = (B3 / B4) * (C7 - B7);
+    if (denominator <= 0) return null;
+
+    const avgPflichtPct = rawData.totalPflichtPercent / rawData.totalMandatoryChecklists;
+    const C8 = (avgPflichtPct / 100) * ((B3 / B4) * C7);
+    const D8 = Math.max(0, (B10 - 1) * (B3 / B4 * B7));
+    const numerator = C8 - B10 * (B3 / B4 * B7) + D8;
+
+    return Math.round((numerator / denominator) * 100 * 10) / 10;
+}
+
+// Berechnet die Prognose der 2. Halbjahresnote für einen Benutzer
+// Rückgabe: {quantitaet, qualitaet, reviewTalk2, codeReview, overall, grade, componentCount}
+function calculateMitarbeitsnote2Prognose(user, groupName) {
+    if (!mitarbeitsnoteConfig) return null;
+
+    const track = getTrackForGroup(groupName);
+    const referenztermin = track && mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1
+        ? mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1[track]
+        : null;
+    const prognosisAssignments = mitarbeitsnoteConfig.prognosis_assignments || {};
+    const currentWeek = getCurrentReferenceWeekForTrack(track);
+
+    // Quantität der 1. MA für Formelberechnung
+    // Priorisiere tatsächliche Note aus Notenbuch, Fallback auf berechneten Wert
+    const quantitaetId = getManualItemIdByTitle('Quantität');
+    const actualQuantitaet1 = quantitaetId ? getManualGradeValue(user, quantitaetId) : null;
+    const ma1 = calculateMitarbeitsnote1(user, groupName);
+    const quantitaet1Pct = actualQuantitaet1 !== null ? actualQuantitaet1 : (ma1 ? ma1.quantitaet : 0);
+
+    // Komponente 1: Quantitäts-Fortschritt für 2. MA
+    const quantitaet = calculateQuantitaetMA2(user, groupName, quantitaet1Pct, currentWeek);
+
+    // Komponente 2: Qualität (Pflichtabgaben NACH Referenztermin)
+    const qualResult = calculatePflichtaufgabenGradeFiltered(user.name, referenztermin, true);
+    const qualitaet = qualResult ? qualResult.percent : null;
+
+    // Komponente 3: Review-Talk 2
+    const reviewTalk2Id = prognosisAssignments.reviewTalk2 || null;
+    const reviewTalk2 = reviewTalk2Id
+        ? findAssignmentOrQuizGradeForUser(reviewTalk2Id, user.name, referenztermin)
+        : null;
+
+    // Komponente 4: Code-Review
+    const codeReviewId = prognosisAssignments.codeReview || null;
+    const codeReview = codeReviewId
+        ? findAssignmentOrQuizGradeForUser(codeReviewId, user.name, referenztermin)
+        : null;
+
+    const components = [quantitaet, qualitaet, reviewTalk2, codeReview].filter(v => v !== null && v !== undefined);
+    if (components.length === 0) return null;
+    const overall = components.reduce((a, b) => a + b, 0) / components.length;
+
+    return {
+        quantitaet: quantitaet,
+        qualitaet: qualitaet,
+        reviewTalk2: reviewTalk2,
+        codeReview: codeReview,
+        overall: overall,
+        grade: convertPercentToIHKGrade(overall),
+        componentCount: components.length
+    };
+}
+
+// Hilfsfunktion: Rendert eine Prozentzelle mit Farbe und Fallback
+function renderPctCell(value, cssClass) {
+    if (value === null || value === undefined) {
+        return `<td class="text-center" style="color:#6C757D;">–</td>`;
+    }
+    const capped = Math.min(Math.max(value, 0), 200);
+    return `<td class="progress-cell ${cssClass}" style="--progress-width: ${Math.min(capped, 100)}%;">${value.toFixed(1)}%</td>`;
+}
+
+// Hilfsfunktion: Rendert eine Notenzelle
+function renderGradeCell(grade) {
+    if (grade === null || grade === undefined) {
+        return `<td class="text-center" style="color:#6C757D;">–</td>`;
+    }
+    return `<td class="text-center text-bold" style="color: ${getGradeColor(grade)};">${grade.toFixed(1)}</td>`;
+}
+
+// Generiert die Halbjahresnotenabschnitte unterhalb der Gesamtfortschritts-Tabelle
+function generateHalbjahresnotenTable(users) {
+    const container = document.getElementById('groupHalbjahresnotenTable');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!mitarbeitsnoteConfig || currentGroup === 'all') return;
+
+    const track = getTrackForGroup(currentGroup);
+    if (!track) return;
+
+    const refWeek = mitarbeitsnoteConfig.mitarbeitsnote1_reference_week || 4;
+    const currentWeek = getCurrentReferenceWeekForTrack(track);
+
+    if (currentWeek < refWeek) return; // Noch nicht in der Referenzwoche
+
+    const prognosisAssignments = mitarbeitsnoteConfig.prognosis_assignments || {};
+    const showReviewTalk1 = !!(prognosisAssignments.reviewTalk1);
+    const showReviewTalk2 = !!(prognosisAssignments.reviewTalk2);
+    const showCodeReview = !!(prognosisAssignments.codeReview);
+    const referenztermin = mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1
+        ? mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1[track]
+        : null;
+    const referenzterminDisplay = referenztermin
+        ? new Date(referenztermin).toLocaleDateString('de-DE')
+        : '–';
+
+    let html = '';
+
+    // Prüfe ob tatsächliche Notenbuch-Werte verfügbar sind (bei mindestens einem User)
+    const ma1Id = getManualItemIdByTitle('1. Mitarbeitsnote');
+    const hasActualMA1 = ma1Id && users.some(u => getManualGradeValue(u, ma1Id) !== null);
+
+    // --- Abschnitt 1: 1. Halbjahresnote ---
+    html += `<div style="margin-top: 24px;">`;
+    html += `<div class="stats-group-title" style="margin-bottom: 8px;">`;
+    html += `<span>1. Halbjahresnote (Referenzwoche ${refWeek}, Schiene: ${track})</span>`;
+    html += `</div>`;
+    html += `<table id="ma1Table" class="info-table dashboard-table overview-table">`;
+    html += `<thead><tr class="sticky-header">`;
+    html += `<th class="person-name">Person</th>`;
+    html += `<th>Quantität<br>(%)</th>`;
+    html += `<th>Qualität<br>(%)</th>`;
+    if (showReviewTalk1) html += `<th>Review-Talk 1<br>(%)</th>`;
+    if (hasActualMA1) html += `<th title="Tatsächliche Note aus Mebis-Notenbuch">1. MA<br>(Notenbuch)</th>`;
+    html += `<th>Ø 1. MA</th>`;
+    html += `</tr></thead><tbody>`;
+
+    users.forEach(user => {
+        const ma1 = calculateMitarbeitsnote1(user, currentGroup);
+        const colCount = 3 + (showReviewTalk1 ? 1 : 0) + (hasActualMA1 ? 1 : 0);
+        if (!ma1) {
+            html += `<tr><td class="person-name"><strong>${user.name}</strong></td>`;
+            html += `<td colspan="${colCount}" class="text-center" style="color:#6C757D;">Keine Daten</td></tr>`;
+            return;
+        }
+        html += `<tr>`;
+        html += `<td class="person-name"><strong>${user.name}</strong></td>`;
+        // Quantität: tatsächlich = blau, berechnet = gedimmt
+        if (ma1.quantitaetIsActual) {
+            html += renderPctCell(ma1.quantitaet, 'progress-color-info');
+        } else {
+            html += `<td class="progress-cell progress-color-info" style="opacity:0.65;" title="Berechneter Wert (noch keine tatsächliche Note)">${ma1.quantitaet !== null ? ma1.quantitaet.toFixed(1) + '%' : '–'}</td>`;
+        }
+        // Qualität: tatsächlich = orange, berechnet = gedimmt
+        if (ma1.qualitaetIsActual) {
+            html += renderPctCell(ma1.qualitaet, 'progress-color-warning');
+        } else {
+            html += `<td class="progress-cell progress-color-warning" style="opacity:0.65;" title="Berechneter Wert (noch keine tatsächliche Note)">${ma1.qualitaet !== null ? ma1.qualitaet.toFixed(1) + '%' : '–'}</td>`;
+        }
+        if (showReviewTalk1) html += renderPctCell(ma1.reviewTalk, 'progress-color-secondary');
+        // Tatsächliche 1. MA-Note aus Notenbuch
+        if (hasActualMA1) {
+            if (ma1.actualMA1Grade !== null) {
+                html += renderPctCell(ma1.actualMA1Grade, 'progress-color-success');
+            } else {
+                html += `<td class="text-center" style="color:#6C757D;">–</td>`;
+            }
+        }
+        html += renderGradeCell(ma1.grade);
+        html += `</tr>`;
+    });
+
+    html += `</tbody></table></div>`;
+
+    // --- Abschnitt 2: Prognose 2. Halbjahresnote ---
+    html += `<div style="margin-top: 24px;">`;
+    html += `<div class="stats-group-title" style="margin-bottom: 8px;">`;
+    html += `<span>Prognose 2. Halbjahresnote (aktuell Woche ${currentWeek}, Referenztermin: ${referenzterminDisplay})</span>`;
+    html += `</div>`;
+    html += `<table id="ma2Table" class="info-table dashboard-table overview-table">`;
+    html += `<thead><tr class="sticky-header">`;
+    html += `<th class="person-name">Person</th>`;
+    html += `<th>Quantität<br>Fortschritt (%)</th>`;
+    html += `<th>Qualität<br>(%)</th>`;
+    if (showReviewTalk2) html += `<th>Review-Talk 2<br>(%)</th>`;
+    if (showCodeReview) html += `<th>Code-Review<br>(%)</th>`;
+    html += `<th>Ø Prognose</th>`;
+    html += `</tr></thead><tbody>`;
+
+    users.forEach(user => {
+        const ma2 = calculateMitarbeitsnote2Prognose(user, currentGroup);
+        if (!ma2) {
+            const cols = 3 + (showReviewTalk2 ? 1 : 0) + (showCodeReview ? 1 : 0);
+            html += `<tr><td class="person-name"><strong>${user.name}</strong></td>`;
+            html += `<td colspan="${cols}" class="text-center" style="color:#6C757D;">Keine Daten</td></tr>`;
+            return;
+        }
+        html += `<tr>`;
+        html += `<td class="person-name"><strong>${user.name}</strong></td>`;
+        html += renderPctCell(ma2.quantitaet, 'progress-color-info');
+        html += renderPctCell(ma2.qualitaet, 'progress-color-warning');
+        if (showReviewTalk2) html += renderPctCell(ma2.reviewTalk2, 'progress-color-secondary');
+        if (showCodeReview) html += renderPctCell(ma2.codeReview, 'progress-color-success');
+        html += renderGradeCell(ma2.grade);
+        html += `</tr>`;
+    });
+
+    html += `</tbody></table></div>`;
+
+    container.innerHTML = html;
+    makeTableSortable('ma1Table');
+    makeTableSortable('ma2Table');
+}
+
 // Generiert die Fortschritts-Tabelle für die Übersicht
 function generateGroupProgressTable(users) {
     const container = document.getElementById('groupProgressTable');
     if (!container) return;
 
-    // Wenn "Alle Gruppen" ausgewählt ist, zeige Vergleichstabelle
+    // Wenn "Alle Gruppen" ausgewählt ist, zeige Vergleichstabelle und leere Halbjahres-Tabelle
     if (currentGroup === 'all') {
         generateGroupComparisonTable();
+        const halbjahresContainer = document.getElementById('groupHalbjahresnotenTable');
+        if (halbjahresContainer) halbjahresContainer.innerHTML = '';
         return;
     }
 
@@ -1200,11 +1652,14 @@ function generateGroupProgressTable(users) {
 
     // Tabelle sortierbar machen
     makeTableSortable('individualProgressTable');
-}
 
-    
+    // Halbjahresnotenberechnung anzeigen
+    generateHalbjahresnotenTable(users);
+
     // Scroll-Wrapper anwenden
     setTimeout(() => wrapTableWithScrollContainer('groupProgressTable'), 50);
+    setTimeout(() => wrapTableWithScrollContainer('groupHalbjahresnotenTable'), 50);
+}
 // Progress Ring aktualisieren
 function updateProgressRing(ringId, percentage) {
     const ring = document.getElementById(ringId);
@@ -3173,7 +3628,7 @@ function generateExamTable() {
             const currentGroupId = (currentGroup !== 'all' && dashboardData.groups[currentGroup]?.value)
                 ? dashboardData.groups[currentGroup].value
                 : '0';
-            const overrideUrl = `https://lernplattform.mebis.bycs.de/grade/report/singleview/index.php?id=${courseId}&item=grade&groupsearchvalue=&group=${currentGroupId}&itemid=${activity.id}`;
+            const overrideUrl = `https://lernplattform.bycs.de/grade/report/singleview/index.php?id=${courseId}&item=grade&groupsearchvalue=&group=${currentGroupId}&itemid=${activity.id}`;
             html += `<br><small><a href="${overrideUrl}" target="_blank" style="color: #007bff;">Bewertung überschreiben</a></small>`;
         }
 
@@ -3453,7 +3908,7 @@ function generateAllGroupsExamTable() {
 
         // Add "Bewertung überschreiben" link for assignments in header
         if (activity.activity_type !== 'quiz' && activity.id && courseId) {
-            const overrideUrl = `https://lernplattform.mebis.bycs.de/grade/report/singleview/index.php?id=${courseId}&item=grade&groupsearchvalue=&group=0&itemid=${activity.id}`;
+            const overrideUrl = `https://lernplattform.bycs.de/grade/report/singleview/index.php?id=${courseId}&item=grade&groupsearchvalue=&group=0&itemid=${activity.id}`;
             html += `<br><a href="${overrideUrl}" target="_blank" class="link-light" style="font-size: 0.7em;">Überschr.</a>`;
         }
 

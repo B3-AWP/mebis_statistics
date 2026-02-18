@@ -672,6 +672,8 @@ def get_data():
             'ignored_groups': list(ignored_groups),
             'grade_mapping': grade_mapping,
             'max_schoolweeks': config_manager.get_max_schoolweeks(),
+            'mitarbeitsnote_config': config_manager.get_mitarbeitsnote_config(),
+            'manual_grade_item_ids': config_manager.get_manual_grade_item_ids(),
             'course_id': config_manager.get_course_id(),
             'last_updated': latest_file,
             'environment': environment_settings
@@ -733,7 +735,8 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
             "avg_required_progress_timed": 0,
             "avg_all_progress_timed": 0,
             "individual_checklists": []
-        }
+        },
+        "manual_grades": user.get('activities', {}).get('manual_grades', [])
     }
 
     # Nur Pflichtaufgaben berücksichtigen

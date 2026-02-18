@@ -301,7 +301,7 @@ def get_checklists_mandatory_status(driver, course_id):
     mandatory_status = {}
 
     # Lade die Übersichtsseite aller Checklisten
-    overview_url = f"https://lernplattform.mebis.bycs.de/mod/checklist/index.php?id={course_id}"
+    overview_url = f"https://lernplattform.bycs.de/mod/checklist/index.php?id={course_id}"
     driver.get(overview_url)
 
     try:
@@ -545,7 +545,7 @@ def get_grader_report_data(driver, course_id, group_id, waittime):
     Diese Seite zeigt alle Aktivitäten (Quizzes, Assignments, etc.) in einer Tabelle
     mit Personen in Zeilen und Aktivitäten in Spalten
     """
-    grader_url = f"https://lernplattform.mebis.bycs.de/grade/report/grader/index.php?id={course_id}&groupsearchvalue=&group={group_id}"
+    grader_url = f"https://lernplattform.bycs.de/grade/report/grader/index.php?id={course_id}&groupsearchvalue=&group={group_id}"
     driver.get(grader_url)
 
     try:
@@ -659,6 +659,7 @@ def get_grader_report_data(driver, course_id, group_id, waittime):
 
                             # Speichere die Bewertung für diese Aktivität und diesen Benutzer
                             quizzes[activity_id]["grades"][user_id] = grade_text
+
                     except:
                         continue
 
@@ -670,6 +671,47 @@ def get_grader_report_data(driver, course_id, group_id, waittime):
         print(f"Fehler beim Extrahieren der Benutzerdaten: {e}")
 
     return quizzes
+
+
+def get_singleview_grades(driver, course_id, item_id, base_url, waittime):
+    """
+    Liest Bewertungen für ein einzelnes Bewertungselement aus dem Moodle-Singleview-Report.
+    URL-Muster: /grade/report/singleview/index.php?id={course_id}&item=grade&itemid={item_id}
+    Gibt {vollständiger_name: bewertung_str} zurück.
+    """
+    domain = base_url.split('/report/')[0]
+    url = f"{domain}/grade/report/singleview/index.php?id={course_id}&userid=&itemid={item_id}&item=grade&page=0&perpage=0&group=0"
+    driver.get(url)
+
+    try:
+        WebDriverWait(driver, waittime).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table#singleview-grades"))
+        )
+    except TimeoutException:
+        print(f"  Singleview-Tabelle für itemid={item_id} nicht gefunden")
+        return {}
+
+    grades = {}
+    try:
+        rows = driver.find_elements(By.CSS_SELECTOR, "table#singleview-grades tbody tr")
+        for row in rows:
+            try:
+                user_link = row.find_element(By.CSS_SELECTOR, "th.user a")
+                user_href = user_link.get_attribute("href") or ""
+                user_id_match = re.search(r'[?&]id=(\d+)', user_href)
+                if not user_id_match:
+                    continue
+                user_id = user_id_match.group(1)
+                grade_el = row.find_element(By.CSS_SELECTOR, "td.grade.cell.c2")
+                grade_text = grade_el.text.strip()
+                if user_id and grade_text:
+                    grades[user_id] = grade_text
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"  Fehler beim Lesen der Singleview-Daten für itemid={item_id}: {e}")
+
+    return grades
 
 
 def get_quiz_status(driver, quiz_url, waittime):
@@ -686,7 +728,7 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
 
     Args:
         driver: Selenium WebDriver
-        quiz_url: URL zum Quiz (z.B. "https://lernplattform.mebis.bycs.de/mod/quiz/view.php?id=72039961")
+        quiz_url: URL zum Quiz (z.B. "https://lernplattform.bycs.de/mod/quiz/view.php?id=72039961")
         waittime: Wartezeit in Sekunden
 
     Returns:
@@ -704,7 +746,7 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
     quiz_id = quiz_id_match.group(1)
 
     # Baue die Report-URL mit Sortierung (absteigend nach Beendet-Zeit)
-    report_url = f"https://lernplattform.mebis.bycs.de/mod/quiz/report.php?id={quiz_id}&mode=overview&attempts=enrolled_with&onlygraded&group=0&onlyregraded=0&slotmarks=1&tsort=timefinish&tdir=3"
+    report_url = f"https://lernplattform.bycs.de/mod/quiz/report.php?id={quiz_id}&mode=overview&attempts=enrolled_with&onlygraded&group=0&onlyregraded=0&slotmarks=1&tsort=timefinish&tdir=3"
 
     try:
         driver.get(report_url)
@@ -995,7 +1037,7 @@ def get_all_activity_categories(driver, course_id):
     categories_data = {}
 
     # Lade die Seite nur einmal
-    grade_url = f"https://lernplattform.mebis.bycs.de/grade/edit/tree/index.php?id={course_id}"
+    grade_url = f"https://lernplattform.bycs.de/grade/edit/tree/index.php?id={course_id}"
     driver.get(grade_url)
 
     # Verwenden Sie WebDriverWait, um sicherzustellen, dass die Elemente geladen sind
@@ -1034,7 +1076,7 @@ def get_activity_category(driver, activity_id, course_id, waittime):
     category_data = {"category_id": "-1", "category_name": "nicht bewertet"}
     print(f"Verarbeite Aktivität ID: {activity_id}")
 
-    grade_url = f"https://lernplattform.mebis.bycs.de/grade/edit/tree/index.php?id={course_id}"
+    grade_url = f"https://lernplattform.bycs.de/grade/edit/tree/index.php?id={course_id}"
     driver.get(grade_url)
     
     try:
@@ -1295,6 +1337,26 @@ def main():
     grader_data = get_grader_report_data(driver, course_id, "0", waittime)
     print(f"  Gefunden: {len(grader_data)} Aktivitäten mit Bewertungen")
 
+    # Manuelle Elemente aus .env-Konfiguration (MANUAL_GRADE_ITEM_IDS)
+    tree_manual_ids = config_manager.get_manual_grade_item_ids()
+    print(f"  {len(tree_manual_ids)} manuelle Bewertungselemente aus Konfiguration: {list(tree_manual_ids.values())}")
+
+    # Bewertungen für manuelle Elemente via Singleview holen (direkt mit Schülernamen)
+    manual_grade_items = {}
+    for item_id, title in tree_manual_ids.items():
+        print(f"  Hole Singleview-Bewertungen für '{title}' (itemid={item_id})...")
+        sys.stdout.flush()
+        user_grades = get_singleview_grades(driver, course_id, item_id, base_url, waittime)
+        manual_grade_items[item_id] = {
+            "title": title,
+            "user_grades": user_grades
+        }
+        print(f"    -> {len(user_grades)} Bewertungen gelesen")
+    data["manual_grade_items"] = manual_grade_items
+    if manual_grade_items:
+        titles = [v["title"] for v in manual_grade_items.values()]
+        print(f"  Manuelle Bewertungselemente: {titles}")
+
     for group in data["groups"]:
 
         for user in group["users"]:
@@ -1302,7 +1364,8 @@ def main():
                 "assignments": [],
                 "checklists": [],
                 "feedbacks": [],
-                "quizzes": []
+                "quizzes": [],
+                "manual_grades": []
             }
 
             # Verwende die zuvor erfassten Assignment-Status
@@ -1369,6 +1432,15 @@ def main():
                         "category_id": quiz.get("category_id"),
                         "category_name": quiz.get("category_name")
                     })
+
+            # Füge manuelle Bewertungselemente zum User hinzu
+            for item_id, item_data in manual_grade_items.items():
+                grade = item_data["user_grades"].get(user["id"])
+                user["activities"]["manual_grades"].append({
+                    "id": item_id,
+                    "title": item_data["title"],
+                    "grade": grade  # None wenn keine Bewertung vorhanden
+                })
 
     # =====================================================
     # VALIDIERUNG: Prüfe ob kritische Daten vorhanden sind

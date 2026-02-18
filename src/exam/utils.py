@@ -79,7 +79,7 @@ class QuestionTypeDetector:
 class ImageDownloader:
     """Lädt Bilder von Mebis herunter mit Retry-Logik"""
 
-    def __init__(self, session=None, base_url='https://lernplattform.mebis.bycs.de', driver=None):
+    def __init__(self, session=None, base_url='https://lernplattform.bycs.de', driver=None):
         """
         Initialisiert den Image Downloader
 

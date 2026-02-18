@@ -85,7 +85,7 @@ class ConfigManager:
         return {
             'base_url': os.getenv(
                 'MEBIS_BASE_URL',
-                'https://lernplattform.mebis.bycs.de/report/progress/index.php'
+                'https://lernplattform.bycs.de/report/progress/index.php'
             ),
             'common_params': os.getenv(
                 'MEBIS_COMMON_PARAMS',
@@ -196,6 +196,23 @@ class ConfigManager:
             130: "**** Exzellent"
         }
 
+    def get_manual_grade_item_ids(self) -> Dict[str, str]:
+        """
+        Holt manuell konfigurierte Bewertungselement-IDs aus MANUAL_GRADE_ITEM_IDS.
+
+        Format in .env: ID1:Titel1,ID2:Titel2,...
+        Returns: {item_id: title}
+        """
+        env_val = os.getenv('MANUAL_GRADE_ITEM_IDS', '')
+        result = {}
+        if env_val:
+            for entry in env_val.split(','):
+                entry = entry.strip()
+                if ':' in entry:
+                    item_id, title = entry.split(':', 1)
+                    result[item_id.strip()] = title.strip()
+        return result
+
     def get_max_schoolweeks(self) -> int:
         """
         Holt maximale Anzahl der Schulwochen aus Environment Variable.
@@ -204,6 +221,31 @@ class ConfigManager:
             Maximale Anzahl der Schulwochen (Standard: 9)
         """
         return self._get_int('MAX_SCHOOLWEEKS', 9)
+
+    def get_mitarbeitsnote_config(self) -> Dict[str, Any]:
+        """
+        Holt Mitarbeitsnoten-Konfiguration aus Environment Variables.
+
+        Returns:
+            Dictionary mit allen Mitarbeitsnoten-Einstellungen.
+            Gibt None-Werte zurück wenn nicht konfiguriert.
+        """
+        def parse_json_env(key: str) -> Optional[Any]:
+            val = os.getenv(key)
+            if val:
+                try:
+                    return json.loads(val)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Invalid JSON for {key}: {e}")
+            return None
+
+        return {
+            'class_to_track': parse_json_env('CLASS_TO_TRACK'),
+            'mitarbeitsnote1_reference_week': self._get_int('MITARBEITSNOTE1_REFERENCE_WEEK', 4),
+            'referenztermin_mitarbeitsnote1': parse_json_env('REFERENZTERMIN_MITARBEITSNOTE1'),
+            'prognosis_assignments': parse_json_env('PROGNOSIS_ASSIGNMENTS'),
+            'track_schedules': parse_json_env('TRACK_SCHEDULES'),
+        }
 
     def _get_int(self, env_var: str, default: int) -> int:
         """Holt Integer-Wert aus Environment Variable"""
