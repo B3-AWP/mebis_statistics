@@ -918,6 +918,39 @@ def get_thread_sesskey():
         return thread_local.sesskey
     return None
 
+def get_grade_history_time(driver, course_id, grade_item_id, user_id, waittime=10):
+    """
+    Liest das Datum der letzten Bewertungsänderung aus der Moodle-Bewertungshistorie.
+    Wird verwendet, wenn submission_time fehlt aber eine Bewertung vorhanden ist
+    (z.B. bei manuell im Notenbuch eingetragenen Bewertungen ohne echte Abgabe).
+    URL-Parameter: itemid = grade_item_id, userids = user_id, tsort/tdir = nach Zeit absteigend
+    """
+    if not grade_item_id or not user_id:
+        return None
+
+    url = (
+        f"https://lernplattform.bycs.de/grade/report/history/index.php"
+        f"?id={course_id}&showreport=1&itemid={grade_item_id}"
+        f"&userids={user_id}&tsort=timemodified&tdir=3"
+    )
+
+    try:
+        driver.get(url)
+        # Warte auf Tabellen-Body; falls keine Zeilen, gibt es keine Historie
+        WebDriverWait(driver, waittime).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table.gradereport_history"))
+        )
+        first_cell = driver.find_element(
+            By.CSS_SELECTOR, "table.gradereport_history tbody tr:first-child td.c0"
+        )
+        date_text = first_cell.text.strip()
+        if not date_text or date_text in ['-', '']:
+            return None
+        return parse_german_datetime(date_text)
+    except Exception:
+        return None
+
+
 def process_assignment_parallel(assignment, isheadless, waittime, username, password, base_url, course_id, index, total):
     """Process a single assignment in parallel"""
     try:
@@ -941,6 +974,24 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
 
         # Extrahiere Status
         status = get_assignment_status(driver, assignment_url, waittime)
+
+        # Fallback: Datum aus Bewertungshistorie für Einträge mit Bewertung aber ohne Abgabezeit
+        # (passiert bei manuell im Notenbuch eingetragenen Bewertungen)
+        grade_item_id = assignment.get("grade_item_id")
+        if grade_item_id:
+            missing_time_count = 0
+            for entry in status:
+                grade_val = entry.get("grade", "")
+                has_grade = grade_val and grade_val not in ["Keine Bewertung", "-", ""]
+                if entry.get("submission_time") is None and has_grade:
+                    history_time = get_grade_history_time(
+                        driver, course_id, grade_item_id, entry["user_id"], waittime
+                    )
+                    if history_time:
+                        entry["submission_time"] = history_time
+                        missing_time_count += 1
+            if missing_time_count:
+                print(f"  Datum aus Bewertungshistorie ergänzt: {missing_time_count} Einträge")
 
         duration = time.time() - start_time
         print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege, groups: {groups})")
@@ -1058,6 +1109,8 @@ def get_all_activity_categories(driver, course_id):
             # Finde die übergeordnete Kategorie
             parent_tr = activity_element.find_element(By.XPATH, "./ancestor::tr")
             category_id = parent_tr.get_attribute("data-parent-category")
+            # Bewertungs-ID (data-itemid auf dem TR) – unterscheidet sich von der Activity-ID
+            grade_item_id = parent_tr.get_attribute("data-itemid") or None
 
             full_id = f"grade-item-{category_id}"
             category_tr = driver.find_element(By.ID, full_id)
@@ -1065,7 +1118,11 @@ def get_all_activity_categories(driver, course_id):
             # Extrahiere den Kategorienamen aus dem `data-toggle-selectall` Attribut
             category_name = category_tr.find_element(By.CSS_SELECTOR, "input.itemselect").get_attribute("data-toggle-selectall")
 
-            categories_data[activity_id] = {"category_id": category_id, "category_name": category_name}
+            categories_data[activity_id] = {
+                "category_id": category_id,
+                "category_name": category_name,
+                "grade_item_id": grade_item_id
+            }
 
         except Exception as e:
             print(f"Fehler beim Verarbeiten der Aktivität: {e}")
@@ -1086,15 +1143,17 @@ def get_activity_category(driver, activity_id, course_id, waittime):
         )
         parent_tr = activity_element.find_element(By.XPATH, "./ancestor::tr")
         category_id = parent_tr.get_attribute("data-parent-category")
-        
+        grade_item_id = parent_tr.get_attribute("data-itemid") or None
+
         full_id = f"grade-item-{category_id}"
         category_tr = driver.find_element(By.ID, full_id)
 
         # Extrahiere den Kategorienamen aus dem `data-toggle-selectall` Attribut
         category_name = category_tr.find_element(By.CSS_SELECTOR, "input.itemselect").get_attribute("data-toggle-selectall")
-        
+
         category_data["category_id"] = category_id
         category_data["category_name"] = category_name
+        category_data["grade_item_id"] = grade_item_id
     except Exception as e:
         print(f"Fehler beim Verarbeiten der Aktivität ID {activity_id}: {e}")
     

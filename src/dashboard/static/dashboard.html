@@ -114,8 +114,8 @@
 
         <!-- Übersicht Tab -->
         <div id="homeTab">
-            <!-- Schulwochen-Auswahl -->
-            <div class="reference-container">
+            <!-- Schulwochen-Auswahl (nur bei Gesamt-Tab relevant) -->
+            <div class="reference-container" id="gesamtControls">
                 <div class="reference-controls">
                     <div class="controls-wrapper">
                         <label for="referenceWeekSlider" class="slider-label">Schulwoche:</label>
@@ -153,39 +153,26 @@
                 </div>
             </div>
 
-            <!-- Statistics Overview -->
-            <div class="stats-group stats-group-checklist">
-                <div class="stats-group-title">
-                    <svg width="20" height="20" aria-hidden="true">
-                        <use href="#icon-checklist"></use>
-                    </svg>
-                    Checklisten Übersicht
-                </div>
-                <div class="stats-row stats-grid" id="statsRow">
-                    <div class="stat-card combined-stats-card">
-                        <div class="combined-stats-content">
-                            <div class="completion-overview">
-                                <div class="completion-main">
-                                    <span class="completion-count" id="completedCount">0</span>
-                                    <span class="completion-separator">von</span>
-                                    <span class="completion-total" id="totalCount">0</span>
-                                </div>
-                                <div class="completion-label">Erledigt / Erwartet (für Woche)</div>
-                            </div>
-                            <div class="completion-visual">
-                                <div class="completion-progress-ring">
-                                    <svg width="60" height="60" viewBox="0 0 60 60">
-                                        <circle cx="30" cy="30" r="25" stroke="#e9ecef" stroke-width="4" fill="none" />
-                                        <circle id="completionRing" cx="30" cy="30" r="25" stroke="#28a745" stroke-width="4"
-                                            fill="none" stroke-dasharray="157" stroke-dashoffset="157"
-                                            style="transition: stroke-dashoffset 0.8s ease-in-out;" />
-                                    </svg>
-                                    <div class="completion-percentage" id="completionPercentage">0%</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
+            <!-- Halbjahr-Tab-Navigation -->
+            <div class="card-container">
+                <nav class="halbjahr-nav-container">
+                    <button class="halbjahr-nav-btn active" id="halbjahrBtn2hj" onclick="selectHalbjahr('2hj')">
+                        2. Halbjahr
+                    </button>
+                    <button class="halbjahr-nav-btn" id="halbjahrBtnGesamt" onclick="selectHalbjahr('gesamt')">
+                        Gesamt
+                    </button>
+                    <button class="halbjahr-nav-btn" id="halbjahrBtn1hj" onclick="selectHalbjahr('1hj')">
+                        1. Halbjahr
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Übersichts-Cards (eine Reihe, inhalt wechselt je nach Tab) -->
+            <div class="stats-group" id="overviewCardsGroup">
+                <div class="stats-row stats-grid" id="overviewCardsRow">
+                    <!-- Gesamt-Cards -->
+                    <div class="stat-card halbjahr-cards gesamt-cards" style="display:none;">
                         <div class="stat-progress-text" id="avgCompletionText">0%</div>
                         <div class="progress-toggle">
                             <label id="pflichtLabel" class="active">
@@ -205,48 +192,39 @@
                         </div>
                         <div class="stat-label" id="progressLabel">Checkliste Durchschnitt</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card halbjahr-cards gesamt-cards" style="display:none;">
                         <div class="stat-number" id="avgGradeText">-</div>
                         <div class="stat-label">Durchschnittsnote Gruppe</div>
                     </div>
-                </div>
-            </div>
-
-            <!-- Pflichtaufgaben Statistics -->
-            <div class="stats-group stats-group-pflicht">
-                <div class="stats-group-title">
-                    <svg width="20" height="20" aria-hidden="true">
-                        <use href="#icon-pflicht"></use>
-                    </svg>
-                    Pflichtaufgaben Übersicht
-                </div>
-                <div class="stats-row stats-grid" id="pflichtStatsRow">
-                    <div class="stat-card combined-stats-card">
-                        <div class="combined-stats-content">
-                            <div class="completion-overview">
-                                <div class="completion-main">
-                                    <span class="completion-count" id="pflichtCompletedCount">0</span>
-                                    <span class="completion-separator">von</span>
-                                    <span class="completion-total" id="pflichtTotalCount">0</span>
-                                </div>
-                                <div class="completion-label">Erledigt / Erwartet (für Woche)</div>
-                            </div>
-                            <div class="completion-visual">
-                                <div class="completion-progress-ring">
-                                    <svg width="60" height="60" viewBox="0 0 60 60">
-                                        <circle cx="30" cy="30" r="25" stroke="#e9ecef" stroke-width="4" fill="none" />
-                                        <circle id="pflichtCompletionRing" cx="30" cy="30" r="25" stroke="#28a745"
-                                            stroke-width="4" fill="none" stroke-dasharray="157" stroke-dashoffset="157"
-                                            style="transition: stroke-dashoffset 0.8s ease-in-out;" />
-                                    </svg>
-                                    <div class="completion-percentage" id="pflichtCompletionPercentage">0%</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
+                    <div class="stat-card halbjahr-cards gesamt-cards" style="display:none;">
                         <div class="stat-number" id="pflichtAverageGrade">-</div>
-                        <div class="stat-label">Durchschnittsnote Pflichtaufgaben</div>
+                        <div class="stat-label">Ø Note Pflichtaufgaben</div>
+                    </div>
+                    <!-- 1. Halbjahr-Cards -->
+                    <div class="stat-card halbjahr-cards hj1-cards" style="display:none;">
+                        <div class="stat-number" id="hj1QuantitaetText">-</div>
+                        <div class="stat-label">Ø Quantität</div>
+                    </div>
+                    <div class="stat-card halbjahr-cards hj1-cards" style="display:none;">
+                        <div class="stat-number" id="hj1QualitaetText">-</div>
+                        <div class="stat-label">Ø Qualität</div>
+                    </div>
+                    <div class="stat-card halbjahr-cards hj1-cards" style="display:none;">
+                        <div class="stat-number" id="hj1GradeText">-</div>
+                        <div class="stat-label">Ø 1. MA Note</div>
+                    </div>
+                    <!-- 2. Halbjahr-Cards -->
+                    <div class="stat-card halbjahr-cards hj2-cards" style="display:none;">
+                        <div class="stat-number" id="hj2QuantitaetText">-</div>
+                        <div class="stat-label">Ø Quantität 2. HJ</div>
+                    </div>
+                    <div class="stat-card halbjahr-cards hj2-cards" style="display:none;">
+                        <div class="stat-number" id="hj2QualitaetText">-</div>
+                        <div class="stat-label">Ø Qualität 2. HJ</div>
+                    </div>
+                    <div class="stat-card halbjahr-cards hj2-cards" style="display:none;">
+                        <div class="stat-number" id="hj2GradeText">-</div>
+                        <div class="stat-label">Ø 2. MA Prognose</div>
                     </div>
                 </div>
             </div>
