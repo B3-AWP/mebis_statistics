@@ -11,7 +11,10 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import (
+    TimeoutException, WebDriverException,
+    StaleElementReferenceException, NoSuchElementException
+)
 from selenium.webdriver.chrome.options import Options
 import json
 import re
@@ -22,12 +25,35 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import requests
 import io
+import functools
 
 # Sichere Konfiguration
 from config.config_manager import config_manager
 
 # TensorFlow-Logstufe auf ERROR setzen
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+def retry(max_retries=3, base_delay=1.0, backoff_factor=2.0,
+          exceptions=(TimeoutException, WebDriverException)):
+    """Decorator für automatische Wiederholungsversuche mit exponentiellem Backoff"""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (backoff_factor ** attempt)
+                        print(f"[RETRY] {func.__name__} Versuch {attempt+1}/{max_retries} "
+                              f"fehlgeschlagen: {type(e).__name__}. Warte {delay:.1f}s...")
+                        time.sleep(delay)
+            raise last_exception
+        return wrapper
+    return decorator
+
 
 def parse_german_datetime(datetime_str):
     """
@@ -124,18 +150,21 @@ def create_webdriver(headless=False):
 
     return webdriver.Chrome(options=options)
 
+@retry(max_retries=3, base_delay=2.0)
 def login(driver, username, password, waittime):
     """Robuster Login mit mehreren Fallback-Strategien"""
     try:
         # Warte bis die Seite vollständig geladen ist
-        time.sleep(2)
+        WebDriverWait(driver, waittime).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
 
         # Strategie 1: Warte auf visibility_of_element
         try:
             username_field = WebDriverWait(driver, waittime).until(
                 EC.visibility_of_element_located((By.ID, "input-username"))
             )
-        except:
+        except (TimeoutException, WebDriverException):
             # Strategie 2: Warte nur auf presence (für headless mode)
             print("[INFO] Visibility fehlgeschlagen, versuche presence_of_element...")
             username_field = WebDriverWait(driver, waittime).until(
@@ -155,8 +184,10 @@ def login(driver, username, password, waittime):
         login_button = driver.find_element(By.ID, "button-do-log-in")
         login_button.click()
 
-        # Warte kurz bis Login durchgeführt wurde
-        time.sleep(2)
+        # Warte bis Login durchgeführt wurde (URL wechselt weg von Login-Seite)
+        WebDriverWait(driver, waittime).until(
+            lambda d: "login" not in d.current_url
+        )
 
     except Exception as e:
         print(f"[FEHLER] Login fehlgeschlagen: {e}")
@@ -168,19 +199,29 @@ def login(driver, username, password, waittime):
         raise
 
 def get_select_options(driver, select_name, waittime):
-    select_element = WebDriverWait(driver, waittime).until(
-        EC.presence_of_element_located((By.NAME, select_name))
-    )
-    options = select_element.find_elements(By.TAG_NAME, "option")
-    return [{"value": option.get_attribute("value"), "name": option.text} for option in options]
+    try:
+        select_element = WebDriverWait(driver, waittime).until(
+            EC.presence_of_element_located((By.NAME, select_name))
+        )
+        options = select_element.find_elements(By.TAG_NAME, "option")
+        return [{"value": option.get_attribute("value"), "name": option.text} for option in options]
+    except TimeoutException:
+        print(f"[FEHLER] Select '{select_name}' nicht gefunden nach {waittime}s")
+        return []
 
 def get_user_ids_from_group(driver, group_value, base_url, course_id):
-    group_url = f"{base_url}?course={course_id}&group={group_value}"
-    driver.get(group_url)
-    
-    user_elements = driver.find_elements(By.CSS_SELECTOR, "#completion-progress tbody th[scope='row'] a")
-    users = [{"id": re.search(r'id=(\d+)', user.get_attribute("href")).group(1), "name": user.text} for user in user_elements]
-    return users
+    try:
+        group_url = f"{base_url}?course={course_id}&group={group_value}"
+        driver.get(group_url)
+        WebDriverWait(driver, 10).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+        user_elements = driver.find_elements(By.CSS_SELECTOR, "#completion-progress tbody th[scope='row'] a")
+        users = [{"id": re.search(r'id=(\d+)', user.get_attribute("href")).group(1), "name": user.text} for user in user_elements]
+        return users
+    except (TimeoutException, WebDriverException) as e:
+        print(f"[FEHLER] Benutzer für Gruppe {group_value} nicht ladbar: {e}")
+        return []
 
 def get_activity_urls(driver):
     activity_urls = {
@@ -331,7 +372,7 @@ def get_checklists_mandatory_status(driver, course_id):
                     row.find_element(By.CSS_SELECTOR, "td.cell.c1 div.checklist_progress_outer")
                     # Element gefunden = Pflicht-Checkliste
                     mandatory_status[checklist_id] = True
-                except:
+                except NoSuchElementException:
                     # Element nicht gefunden = keine Pflicht-Checkliste
                     mandatory_status[checklist_id] = False
 
@@ -365,10 +406,10 @@ def extract_progress(driver):
                     progress_elem = row.find_element(By.CSS_SELECTOR, "div.checklist_percentcomplete")
                     progress_percent = progress_elem.text.strip()
                     progress_data[user_id] = progress_percent
-                except:
+                except NoSuchElementException:
                     # Kein Progress-Element in dieser Zeile
                     pass
-            except:
+            except (NoSuchElementException, AttributeError):
                 # Keine User-ID in dieser Zeile
                 continue
 
@@ -404,7 +445,9 @@ def get_assignment_groups(driver, assignment_url, waittime):
     try:
         # Navigiere zur Assignment-Seite
         driver.get(assignment_url)
-        time.sleep(1)  # Kurze Wartezeit für Seitenaufbau
+        WebDriverWait(driver, waittime).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
 
         # Suche nach dem Form mit id="selectgroup"
         try:
@@ -486,17 +529,17 @@ def get_assignment_status(driver, assignment_url, waittime):
         # Extrahiere die gewünschten Informationen aus den td-Elementen
         try:
             status = row.find_element(By.CSS_SELECTOR, "div.submissionstatussubmitted").text
-        except:
+        except NoSuchElementException:
             status = "Nicht eingereicht"
 
         try:
             status2 = row.find_element(By.CSS_SELECTOR, "div.submissiongraded").text
-        except:
+        except NoSuchElementException:
             status2 = "Nicht bewertet"
 
         try:
             submission = row.find_element(By.CSS_SELECTOR, "div.assignsubmission_onlinetext .no-overflow p").text
-        except:
+        except NoSuchElementException:
             submission = "Keine Abgabe"
 
         # grade_options werden leer gelassen (wie gewünscht)
@@ -505,7 +548,7 @@ def get_assignment_status(driver, assignment_url, waittime):
         # Verwende die ermittelte Klasse, um die Endbewertung abzurufen (ursprüngliche Methode)
         try:
             grade = row.find_element(By.CSS_SELECTOR, f"td.cell.{grade_column_class}").text
-        except:
+        except NoSuchElementException:
             grade = "Keine Bewertung"
 
         # Extrahiere den Abgabezeitpunkt, falls die Spalte vorhanden ist
@@ -515,7 +558,7 @@ def get_assignment_status(driver, assignment_url, waittime):
                 submission_time_raw = row.find_element(By.CSS_SELECTOR, f"td.cell.{submission_time_column_class}").text.strip()
                 # Konvertiere deutsche Zeitangabe in ISO-Format
                 submission_time = parse_german_datetime(submission_time_raw)
-            except:
+            except NoSuchElementException:
                 submission_time = None
 
         # Korrigiere Status basierend auf der Bewertung
@@ -660,10 +703,10 @@ def get_grader_report_data(driver, course_id, group_id, waittime):
                             # Speichere die Bewertung für diese Aktivität und diesen Benutzer
                             quizzes[activity_id]["grades"][user_id] = grade_text
 
-                    except:
+                    except (NoSuchElementException, StaleElementReferenceException):
                         continue
 
-            except:
+            except (NoSuchElementException, StaleElementReferenceException):
                 # Keine User-Zeile, überspringe
                 continue
 
@@ -750,7 +793,9 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
 
     try:
         driver.get(report_url)
-        time.sleep(2)  # Kurze Wartezeit für Seitenaufbau
+        WebDriverWait(driver, waittime).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
     except Exception as e:
         print(f"[FEHLER] Konnte Quiz-Report-Seite nicht laden (Quiz {quiz_id}): {e}")
         return submission_times
@@ -768,6 +813,19 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
         return submission_times
 
     try:
+        # Ermittle die "Beendet"-Spalte dynamisch aus den Tabellenheadern
+        finish_col_class = None
+        headers = table_element.find_elements(By.CSS_SELECTOR, "th")
+        for header in headers:
+            header_text = header.text.strip()
+            if "Beendet" in header_text or "timefinish" in (header.get_attribute("data-sortby") or ""):
+                col_match = re.search(r'\bc\d+\b', header.get_attribute("class") or "")
+                if col_match:
+                    finish_col_class = col_match.group(0)
+                    break
+        if not finish_col_class:
+            finish_col_class = "c7"  # Fallback
+
         # Finde alle Zeilen in der Tabelle (tbody tr)
         tbody = table_element.find_element(By.TAG_NAME, "tbody")
         rows = tbody.find_elements(By.CSS_SELECTOR, "tr")
@@ -775,16 +833,18 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
         # Durchlaufe alle Zeilen
         for row in rows:
             try:
-                # Extrahiere User-ID aus Spalte c1 oder c2 (manchmal ist c1 die Checkbox)
-                # Versuche zuerst c2, dann c1
+                # Extrahiere User-ID – Fallback-Kette für verschiedene Moodle-Layouts
                 user_link = None
-                try:
-                    user_link = row.find_element(By.CSS_SELECTOR, "td.cell.c2 a[href*='user/view.php?id=']")
-                except:
+                for selector in [
+                    "td.cell.c2 a[href*='user/view.php?id=']",
+                    "td.cell.c1 a[href*='user/view.php?id=']",
+                    "td a[href*='user/view.php?id=']",
+                ]:
                     try:
-                        user_link = row.find_element(By.CSS_SELECTOR, "td.cell.c1 a[href*='user/view.php?id=']")
-                    except:
-                        pass
+                        user_link = row.find_element(By.CSS_SELECTOR, selector)
+                        break
+                    except NoSuchElementException:
+                        continue
 
                 if not user_link:
                     continue
@@ -801,14 +861,14 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
                 if user_id in submission_times:
                     continue
 
-                # Extrahiere submission_time aus Spalte c7 (achte Spalte) - "Beendet"
+                # Extrahiere submission_time aus der dynamisch ermittelten "Beendet"-Spalte
                 submission_time_cell = None
                 submission_time_raw = None
 
                 try:
-                    submission_time_cell = row.find_element(By.CSS_SELECTOR, "td.cell.c7")
+                    submission_time_cell = row.find_element(By.CSS_SELECTOR, f"td.cell.{finish_col_class}")
                     submission_time_raw = submission_time_cell.text.strip()
-                except:
+                except NoSuchElementException:
                     continue
 
                 if not submission_time_raw or submission_time_raw == "":
@@ -872,12 +932,16 @@ def get_sesskey(driver, waittime=10, max_retries=3):
 
 # Thread-local storage for WebDriver instances
 thread_local = threading.local()
+_all_thread_drivers = []
+_driver_lock = threading.Lock()
 
 def get_thread_driver(isheadless, username=None, password=None, base_url=None, course_id=None, waittime=10):
     """Get or create a WebDriver instance for the current thread"""
     if not hasattr(thread_local, 'driver'):
         try:
             thread_local.driver = create_webdriver(headless=isheadless)
+            with _driver_lock:
+                _all_thread_drivers.append(thread_local.driver)
             thread_local.logged_in = False
             thread_local.sesskey = None
         except Exception as e:
@@ -889,13 +953,13 @@ def get_thread_driver(isheadless, username=None, password=None, base_url=None, c
         try:
             thread_local.driver.get(f"{base_url}?course={course_id}")
 
-            # Warte kurz bis Seite geladen ist
-            time.sleep(2)
+            # Warte bis Seite geladen ist
+            WebDriverWait(thread_local.driver, waittime).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
 
             if "login" in thread_local.driver.current_url:
                 login(thread_local.driver, username, password, waittime)
-                # Warte nach Login
-                time.sleep(2)
 
             # Extrahiere sesskey für diesen Thread mit robuster Funktion
             thread_local.sesskey = get_sesskey(thread_local.driver, waittime)
@@ -1180,13 +1244,14 @@ def add_activity_to_category(category_entry, activity_type, activity):
         category_entry[activity_type] = [activity]
 
 def cleanup_thread_drivers():
-    """Cleanup WebDriver instances in all threads"""
-    try:
-        if hasattr(thread_local, 'driver'):
-            thread_local.driver.quit()
-            delattr(thread_local, 'driver')
-    except:
-        pass
+    """Cleanup aller Thread-WebDriver-Instanzen"""
+    with _driver_lock:
+        for driver in _all_thread_drivers:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+        _all_thread_drivers.clear()
 
 # Cloud functionality removed
 
@@ -1659,16 +1724,19 @@ def main():
                         sys.stdout.flush()
                         save_success = False
                 else:
-                    # Nicht-interaktiver Modus (z.B. Dashboard): Automatisch ablehnen
-                    print("[NICHT-INTERAKTIV] Export wird automatisch abgelehnt.")
-                    print("\n[ABBRUCH] Export wird verworfen (automatisch)...")
-                    print("Im nicht-interaktiven Modus werden kleinere Exports nicht akzeptiert.")
-                    sys.stdout.flush()
-                    os.remove(local_filename)
-                    print(f"Datei gelöscht: {local_filename}")
-                    print("Der vorherige Export bleibt erhalten.")
-                    sys.stdout.flush()
-                    save_success = False
+                    # Nicht-interaktiver Modus: Ablehnen wenn >1% kleiner (sollte nicht vorkommen)
+                    if abs(size_diff_percent) > 1:
+                        print("[NICHT-INTERAKTIV] Export ist kleiner als vorher – wird automatisch abgelehnt.")
+                        print("\n[ABBRUCH] Export wird verworfen (automatisch)...")
+                        sys.stdout.flush()
+                        os.remove(local_filename)
+                        print(f"Datei gelöscht: {local_filename}")
+                        print("Der vorherige Export bleibt erhalten.")
+                        sys.stdout.flush()
+                        save_success = False
+                    else:
+                        print(f"[NICHT-INTERAKTIV] Kleinerer Export akzeptiert (nur {abs(size_diff_percent):.1f}% Differenz)")
+                        sys.stdout.flush()
 
                 print("="*60)
                 sys.stdout.flush()
@@ -1687,8 +1755,7 @@ def main():
     driver.quit()
 
     # Cleanup aller Thread-spezifischen WebDriver
-    import atexit
-    atexit.register(cleanup_thread_drivers)
+    cleanup_thread_drivers()
 
     # Endzeit des Skripts
     end_time = time.time()
