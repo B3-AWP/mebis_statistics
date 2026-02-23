@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 
 # Add project root to path for imports
 # This allows the file to be run directly from src/export/ or via wrapper scripts
@@ -29,9 +30,71 @@ import functools
 
 # Sichere Konfiguration
 from config.config_manager import config_manager
+from config.logger_config import get_logger
+
+logger = get_logger('exporter')
 
 # TensorFlow-Logstufe auf ERROR setzen
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+
+# =====================================================
+# Phasen-Timer für Performance-Analyse
+# =====================================================
+class PhaseTimer:
+    """Sammelt Timing-Daten für jede Export-Phase"""
+
+    def __init__(self):
+        self.phases = []
+        self._current_phase = None
+        self._current_start = None
+
+    def start(self, name):
+        """Startet eine neue Phase"""
+        if self._current_phase:
+            self.stop()
+        self._current_phase = name
+        self._current_start = time.time()
+        logger.info(f"--- Phase: {name} ---")
+
+    def stop(self, details=None):
+        """Stoppt die aktuelle Phase und speichert die Dauer"""
+        if not self._current_phase:
+            return
+        duration = time.time() - self._current_start
+        entry = {
+            "name": self._current_phase,
+            "duration": duration,
+        }
+        if details:
+            entry.update(details)
+        self.phases.append(entry)
+        detail_str = ""
+        if details:
+            detail_str = " | " + ", ".join(f"{k}={v}" for k, v in details.items())
+        logger.info(f"  Phase '{self._current_phase}' abgeschlossen in {duration:.1f}s{detail_str}")
+        self._current_phase = None
+        self._current_start = None
+
+    def summary(self):
+        """Gibt eine Zusammenfassung aller Phasen aus"""
+        logger.info("")
+        logger.info("=" * 65)
+        logger.info("PHASEN-TIMING ZUSAMMENFASSUNG")
+        logger.info("-" * 65)
+        logger.info(f"{'Phase':<35} {'Dauer':>8} {'Details'}")
+        logger.info("-" * 65)
+        total = 0
+        for p in self.phases:
+            dur = p["duration"]
+            total += dur
+            extras = {k: v for k, v in p.items() if k not in ("name", "duration")}
+            detail_str = ", ".join(f"{k}={v}" for k, v in extras.items()) if extras else ""
+            logger.info(f"  {p['name']:<33} {dur:>7.1f}s  {detail_str}")
+        logger.info("-" * 65)
+        logger.info(f"  {'GESAMT':<33} {total:>7.1f}s")
+        logger.info("=" * 65)
+
 
 def retry(max_retries=3, base_delay=1.0, backoff_factor=2.0,
           exceptions=(TimeoutException, WebDriverException)):
@@ -47,7 +110,7 @@ def retry(max_retries=3, base_delay=1.0, backoff_factor=2.0,
                     last_exception = e
                     if attempt < max_retries - 1:
                         delay = base_delay * (backoff_factor ** attempt)
-                        print(f"[RETRY] {func.__name__} Versuch {attempt+1}/{max_retries} "
+                        logger.warning(f"[RETRY] {func.__name__} Versuch {attempt+1}/{max_retries} "
                               f"fehlgeschlagen: {type(e).__name__}. Warte {delay:.1f}s...")
                         time.sleep(delay)
             raise last_exception
@@ -102,11 +165,11 @@ def parse_german_datetime(datetime_str):
                 continue
 
         # Wenn kein Format passt
-        print(f"Fehler beim Parsen der Zeitangabe '{datetime_str}': Kein passendes Format gefunden")
+        logger.warning(f"Fehler beim Parsen der Zeitangabe '{datetime_str}': Kein passendes Format gefunden")
         return datetime_str
 
     except Exception as e:
-        print(f"Fehler beim Parsen der Zeitangabe '{datetime_str}': {e}")
+        logger.warning(f"Fehler beim Parsen der Zeitangabe '{datetime_str}': {e}")
         return datetime_str  # Fallback: ursprünglichen Text zurückgeben
 
 def create_webdriver(headless=False):
@@ -166,7 +229,7 @@ def login(driver, username, password, waittime):
             )
         except (TimeoutException, WebDriverException):
             # Strategie 2: Warte nur auf presence (für headless mode)
-            print("[INFO] Visibility fehlgeschlagen, versuche presence_of_element...")
+            logger.info("Visibility fehlgeschlagen, versuche presence_of_element...")
             username_field = WebDriverWait(driver, waittime).until(
                 EC.presence_of_element_located((By.ID, "input-username"))
             )
@@ -190,12 +253,12 @@ def login(driver, username, password, waittime):
         )
 
     except Exception as e:
-        print(f"[FEHLER] Login fehlgeschlagen: {e}")
+        logger.error(f"Login fehlgeschlagen: {e}")
         import traceback
         try:
-            print(f"[FEHLER] Traceback: {traceback.format_exc()}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
         except UnicodeEncodeError:
-            print(f"[FEHLER] Traceback enthaelt Unicode-Zeichen")
+            logger.error("Traceback enthaelt Unicode-Zeichen")
         raise
 
 def get_select_options(driver, select_name, waittime):
@@ -206,7 +269,7 @@ def get_select_options(driver, select_name, waittime):
         options = select_element.find_elements(By.TAG_NAME, "option")
         return [{"value": option.get_attribute("value"), "name": option.text} for option in options]
     except TimeoutException:
-        print(f"[FEHLER] Select '{select_name}' nicht gefunden nach {waittime}s")
+        logger.error(f"Select '{select_name}' nicht gefunden nach {waittime}s")
         return []
 
 def get_user_ids_from_group(driver, group_value, base_url, course_id):
@@ -220,7 +283,7 @@ def get_user_ids_from_group(driver, group_value, base_url, course_id):
         users = [{"id": re.search(r'id=(\d+)', user.get_attribute("href")).group(1), "name": user.text} for user in user_elements]
         return users
     except (TimeoutException, WebDriverException) as e:
-        print(f"[FEHLER] Benutzer für Gruppe {group_value} nicht ladbar: {e}")
+        logger.error(f"Benutzer für Gruppe {group_value} nicht ladbar: {e}")
         return []
 
 def get_activity_urls(driver):
@@ -234,9 +297,9 @@ def get_activity_urls(driver):
     # Method 1: Search completion progress table (original method)
     activity_elements = driver.find_elements(By.CSS_SELECTOR, "#completion-progress thead th.completion-header a")
     if not activity_elements:
-        print("No activity elements found in completion progress.")
+        logger.warning("No activity elements found in completion progress.")
     else:
-        print(f"Found {len(activity_elements)} activities in completion progress.")
+        logger.info(f"Found {len(activity_elements)} activities in completion progress.")
 
     activity_ids_found = set()
 
@@ -265,11 +328,11 @@ def get_activity_urls(driver):
                 activity_ids_found.add(activity_id)
 
     # Method 2: Also search gradebook for any additional assignments that might be hidden from completion progress
-    print("Searching gradebook for additional activities...")
+    logger.info("Searching gradebook for additional activities...")
     try:
         # Look for gradebook item headers that might contain additional assignments
         gradebook_elements = driver.find_elements(By.CSS_SELECTOR, "a.gradeitemheader")
-        print(f"Found {len(gradebook_elements)} items in gradebook.")
+        logger.info(f"Found {len(gradebook_elements)} items in gradebook.")
 
         for element in gradebook_elements:
             href = element.get_attribute("href")
@@ -279,33 +342,33 @@ def get_activity_urls(driver):
                     title = element.text or element.get_attribute("title") or f"Assignment {activity_id}"
                     activity_urls["assignments"].append({"id": activity_id, "title": title, "url": href})
                     activity_ids_found.add(activity_id)
-                    print(f"Found additional assignment in gradebook: {activity_id} - {title}")
+                    logger.info(f"Found additional assignment in gradebook: {activity_id} - {title}")
             elif href and "mod/checklist/view.php?id=" in href:
                 activity_id = re.search(r'id=(\d+)', href).group(1)
                 if activity_id not in activity_ids_found:
                     title = element.text or element.get_attribute("title") or f"Checklist {activity_id}"
                     activity_urls["checklists"].append({"id": activity_id, "title": title, "url": href})
                     activity_ids_found.add(activity_id)
-                    print(f"Found additional checklist in gradebook: {activity_id} - {title}")
+                    logger.info(f"Found additional checklist in gradebook: {activity_id} - {title}")
             elif href and "mod/feedback/view.php?id=" in href:
                 activity_id = re.search(r'id=(\d+)', href).group(1)
                 if activity_id not in activity_ids_found:
                     title = element.text or element.get_attribute("title") or f"Feedback {activity_id}"
                     activity_urls["feedbacks"].append({"id": activity_id, "title": title, "url": href})
                     activity_ids_found.add(activity_id)
-                    print(f"Found additional feedback in gradebook: {activity_id} - {title}")
+                    logger.info(f"Found additional feedback in gradebook: {activity_id} - {title}")
             elif href and "mod/quiz/view.php?id=" in href:
                 activity_id = re.search(r'id=(\d+)', href).group(1)
                 if activity_id not in activity_ids_found:
                     title = element.text or element.get_attribute("title") or f"Quiz {activity_id}"
                     activity_urls["quizzes"].append({"id": activity_id, "title": title, "url": href})
                     activity_ids_found.add(activity_id)
-                    print(f"Found additional quiz in gradebook: {activity_id} - {title}")
+                    logger.info(f"Found additional quiz in gradebook: {activity_id} - {title}")
 
     except Exception as e:
-        print(f"Error searching gradebook for additional activities: {e}")
+        logger.error(f"Error searching gradebook for additional activities: {e}")
 
-    print(f"Total activities found: {len(activity_urls['assignments'])} assignments, {len(activity_urls['checklists'])} checklists, {len(activity_urls['feedbacks'])} feedbacks, {len(activity_urls['quizzes'])} quizzes")
+    logger.info(f"Total activities found: {len(activity_urls['assignments'])} assignments, {len(activity_urls['checklists'])} checklists, {len(activity_urls['feedbacks'])} feedbacks, {len(activity_urls['quizzes'])} quizzes")
     return activity_urls
 
 def get_checklist_progress_optimized(driver, checklist_url, sesskey, course_id):
@@ -381,7 +444,7 @@ def get_checklists_mandatory_status(driver, course_id):
                 continue
 
     except Exception as e:
-        print(f"Fehler beim Laden der Checklisten-Übersicht: {e}")
+        logger.error(f"Fehler beim Laden der Checklisten-Übersicht: {e}")
 
     return mandatory_status
 
@@ -475,7 +538,7 @@ def get_assignment_groups(driver, assignment_url, waittime):
             return "all"
 
     except Exception as e:
-        print(f"[FEHLER] Fehler beim Extrahieren der Gruppierungsinformationen: {e}")
+        logger.error(f"Fehler beim Extrahieren der Gruppierungsinformationen: {e}")
         return "all"
 
 def get_assignment_status(driver, assignment_url, waittime):
@@ -509,7 +572,7 @@ def get_assignment_status(driver, assignment_url, waittime):
             submission_time_column_class = header.get_attribute("class").split()[1]
 
     if not grade_column_class:
-        print("Spalte 'Endbewertung' nicht gefunden.")
+        logger.warning("Spalte 'Endbewertung' nicht gefunden.")
         return []
 
     # Finde alle Zeilen in der Tabelle
@@ -597,7 +660,7 @@ def get_grader_report_data(driver, course_id, group_id, waittime):
             EC.presence_of_element_located((By.CSS_SELECTOR, "table.gradereport-grader-table#user-grades"))
         )
     except TimeoutException:
-        print(f"Grader-Report-Tabelle für Kurs {course_id}, Gruppe {group_id} nicht gefunden")
+        logger.warning(f"Grader-Report-Tabelle für Kurs {course_id}, Gruppe {group_id} nicht gefunden")
         return {}
 
     # Extrahiere die Header-Struktur (Aktivitäten) und erstelle Spalten-Mapping
@@ -658,7 +721,7 @@ def get_grader_report_data(driver, course_id, group_id, waittime):
                     column_to_quiz[col_class] = activity_id
 
     except Exception as e:
-        print(f"Fehler beim Extrahieren der Activity-Header: {e}")
+        logger.error(f"Fehler beim Extrahieren der Activity-Header: {e}")
 
     # Extrahiere die Benutzerdaten (Zeilen)
     try:
@@ -711,7 +774,7 @@ def get_grader_report_data(driver, course_id, group_id, waittime):
                 continue
 
     except Exception as e:
-        print(f"Fehler beim Extrahieren der Benutzerdaten: {e}")
+        logger.error(f"Fehler beim Extrahieren der Benutzerdaten: {e}")
 
     return quizzes
 
@@ -731,7 +794,7 @@ def get_singleview_grades(driver, course_id, item_id, base_url, waittime):
             EC.presence_of_element_located((By.CSS_SELECTOR, "table#singleview-grades"))
         )
     except TimeoutException:
-        print(f"  Singleview-Tabelle für itemid={item_id} nicht gefunden")
+        logger.warning(f"  Singleview-Tabelle für itemid={item_id} nicht gefunden")
         return {}
 
     grades = {}
@@ -752,7 +815,7 @@ def get_singleview_grades(driver, course_id, item_id, base_url, waittime):
             except Exception:
                 continue
     except Exception as e:
-        print(f"  Fehler beim Lesen der Singleview-Daten für itemid={item_id}: {e}")
+        logger.error(f"  Fehler beim Lesen der Singleview-Daten für itemid={item_id}: {e}")
 
     return grades
 
@@ -762,7 +825,7 @@ def get_quiz_status(driver, quiz_url, waittime):
     VERALTET: Diese Funktion wird nicht mehr verwendet.
     Verwende stattdessen get_grader_report_data()
     """
-    print("[WARNUNG] get_quiz_status ist veraltet. Verwende get_grader_report_data()")
+    logger.warning("get_quiz_status ist veraltet. Verwende get_grader_report_data()")
     return []
 
 def get_quiz_submission_times(driver, quiz_url, waittime):
@@ -783,7 +846,7 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
     # Extrahiere Quiz-ID aus der URL
     quiz_id_match = re.search(r'id=(\d+)', quiz_url)
     if not quiz_id_match:
-        print(f"[FEHLER] Konnte Quiz-ID aus URL nicht extrahieren: {quiz_url}")
+        logger.error(f"Konnte Quiz-ID aus URL nicht extrahieren: {quiz_url}")
         return submission_times
 
     quiz_id = quiz_id_match.group(1)
@@ -797,7 +860,7 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
             lambda d: d.execute_script("return document.readyState") == "complete"
         )
     except Exception as e:
-        print(f"[FEHLER] Konnte Quiz-Report-Seite nicht laden (Quiz {quiz_id}): {e}")
+        logger.error(f"Konnte Quiz-Report-Seite nicht laden (Quiz {quiz_id}): {e}")
         return submission_times
 
     try:
@@ -809,7 +872,7 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
         # Keine Versuche vorhanden - das ist normal
         return submission_times
     except Exception as e:
-        print(f"[FEHLER] Fehler beim Warten auf Tabelle für Quiz {quiz_id}: {e}")
+        logger.error(f"Fehler beim Warten auf Tabelle für Quiz {quiz_id}: {e}")
         return submission_times
 
     try:
@@ -886,9 +949,9 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
                 continue
 
     except Exception as e:
-        print(f"[FEHLER] Fehler beim Extrahieren der Quiz-Submission-Times für Quiz {quiz_id}: {e}")
+        logger.error(f"Fehler beim Extrahieren der Quiz-Submission-Times für Quiz {quiz_id}: {e}")
         import traceback
-        print(f"[FEHLER] Traceback: {traceback.format_exc()}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
 
     return submission_times
 
@@ -915,19 +978,19 @@ def get_sesskey(driver, waittime=10, max_retries=3):
             if sesskey_value:
                 return sesskey_value
             else:
-                print(f"Sesskey gefunden, aber leer (Versuch {attempt + 1}/{max_retries})")
+                logger.warning(f"Sesskey gefunden, aber leer (Versuch {attempt + 1}/{max_retries})")
                 time.sleep(1)
 
         except TimeoutException:
-            print(f"Timeout beim Warten auf sesskey (Versuch {attempt + 1}/{max_retries})")
+            logger.warning(f"Timeout beim Warten auf sesskey (Versuch {attempt + 1}/{max_retries})")
             if attempt < max_retries - 1:
                 time.sleep(2)
         except Exception as e:
-            print(f"Fehler beim Extrahieren des sesskey (Versuch {attempt + 1}/{max_retries}): {e}")
+            logger.error(f"Fehler beim Extrahieren des sesskey (Versuch {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
                 time.sleep(2)
 
-    print("[FEHLER] Sesskey konnte nach allen Versuchen nicht extrahiert werden")
+    logger.error("Sesskey konnte nach allen Versuchen nicht extrahiert werden")
     return None
 
 # Thread-local storage for WebDriver instances
@@ -945,7 +1008,7 @@ def get_thread_driver(isheadless, username=None, password=None, base_url=None, c
             thread_local.logged_in = False
             thread_local.sesskey = None
         except Exception as e:
-            print(f"[FEHLER] Fehler beim Erstellen des WebDrivers: {e}")
+            logger.error(f"Fehler beim Erstellen des WebDrivers: {e}")
             return None
 
     # Login und sesskey für jeden Thread
@@ -966,12 +1029,12 @@ def get_thread_driver(isheadless, username=None, password=None, base_url=None, c
 
             if thread_local.sesskey:
                 thread_local.logged_in = True
-                print(f"[OK] Thread-Login erfolgreich, sesskey: {thread_local.sesskey[:10]}...")
+                logger.info(f"Thread-Login erfolgreich, sesskey: {thread_local.sesskey[:10]}...")
             else:
-                print("[WARNUNG] Thread-Login abgeschlossen, aber sesskey fehlt")
+                logger.warning("Thread-Login abgeschlossen, aber sesskey fehlt")
 
         except Exception as e:
-            print(f"[FEHLER] Fehler beim Thread-Login: {e}")
+            logger.error(f"Fehler beim Thread-Login: {e}")
             thread_local.logged_in = False
 
     return thread_local.driver
@@ -1021,14 +1084,14 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
         driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
 
         if driver is None:
-            print(f"[FEHLER] [{index+1}/{total}] Kein WebDriver verfügbar für Assignment {assignment.get('id', 'unknown')}")
+            logger.error(f"[{index+1}/{total}] Kein WebDriver verfügbar für Assignment {assignment.get('id', 'unknown')}")
             return assignment.get('id', 'unknown'), [], "all"
 
         assignment_id = assignment["id"]
         assignment_url = assignment["url"]
         assignment_title = assignment.get("title", f"Assignment {assignment_id}")
 
-        print(f"[{index+1}/{total}] Verarbeite Assignment: {assignment_title[:50]}...")
+        logger.info(f"[{index+1}/{total}] Verarbeite Assignment: {assignment_title[:50]}...")
         print(f"PROGRESS|assignments|{index+1}|{total}")
         sys.stdout.flush()
         start_time = time.time()
@@ -1055,19 +1118,24 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
                         entry["submission_time"] = history_time
                         missing_time_count += 1
             if missing_time_count:
-                print(f"  Datum aus Bewertungshistorie ergänzt: {missing_time_count} Einträge")
+                logger.info(f"  Datum aus Bewertungshistorie ergänzt: {missing_time_count} Einträge")
 
         duration = time.time() - start_time
-        print(f"  Abgeschlossen in {duration:.1f}s ({len(status)} Eintraege, groups: {groups})")
+
+        # Detailliertes Ergebnis-Logging
+        with_grade = sum(1 for s in status if s.get("grade") and s["grade"] not in ["Keine Bewertung", "-", ""])
+        with_time = sum(1 for s in status if s.get("submission_time"))
+        logger.info(f"  Abgeschlossen in {duration:.1f}s | {len(status)} User | {with_grade} mit Bewertung | {with_time} mit Zeitstempel | groups={groups}")
+
         return assignment_id, status, groups
     except Exception as e:
         import traceback
         try:
-            print(f"[FEHLER] Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
-            print(f"[FEHLER] Traceback: {traceback.format_exc()}")
+            logger.error(f"Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
         except UnicodeEncodeError:
-            print(f"[FEHLER] Fehler bei Assignment {assignment.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
-            print(f"[FEHLER] Traceback enthaelt Unicode-Zeichen")
+            logger.error(f"Fehler bei Assignment {assignment.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
+            logger.error("Traceback enthaelt Unicode-Zeichen")
         sys.stdout.flush()
         return assignment.get('id', 'unknown'), [], "all"
 
@@ -1077,20 +1145,20 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
         driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
 
         if driver is None:
-            print(f"[FEHLER] [{index+1}/{total}] Kein WebDriver verfügbar für Checklist {checklist.get('id', 'unknown')}")
+            logger.error(f"[{index+1}/{total}] Kein WebDriver verfügbar für Checklist {checklist.get('id', 'unknown')}")
             return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
         thread_sesskey = get_thread_sesskey()
 
         if not thread_sesskey:
-            print(f"[FEHLER] [{index+1}/{total}] Kein sesskey für Checklist {checklist.get('id', 'unknown')}")
+            logger.error(f"[{index+1}/{total}] Kein sesskey für Checklist {checklist.get('id', 'unknown')}")
             return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
         checklist_id = checklist["id"]
         checklist_url = checklist["url"]
         checklist_title = checklist.get("title", f"Checklist {checklist_id}")
 
-        print(f"[{index+1}/{total}] Verarbeite Checklist: {checklist_title[:50]}...")
+        logger.info(f"[{index+1}/{total}] Verarbeite Checklist: {checklist_title[:50]}...")
         print(f"PROGRESS|checklists|{index+1}|{total}")
         sys.stdout.flush()
         start_time = time.time()
@@ -1099,19 +1167,19 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
 
         req_count = len(progress.get('required_progress', {}))
         all_count = len(progress.get('all_progress', {}))
-        print(f"  [OK] Abgeschlossen in {duration:.1f}s ({req_count} req, {all_count} all)")
+        logger.info(f"  Abgeschlossen in {duration:.1f}s | {req_count} User mit required_progress | {all_count} User mit all_progress")
         return checklist_id, progress
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
         # Encode error details to avoid Unicode issues on Windows
         try:
-            print(f"[FEHLER] Fehler bei Checklist {checklist.get('id', 'unknown')}: {e}")
-            print(f"[FEHLER] Traceback: {error_details}")
+            logger.error(f"Fehler bei Checklist {checklist.get('id', 'unknown')}: {e}")
+            logger.error(f"Traceback: {error_details}")
         except UnicodeEncodeError:
             # Fallback: nur ASCII-sichere Ausgabe
-            print(f"[FEHLER] Fehler bei Checklist {checklist.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
-            print(f"[FEHLER] Traceback enthaelt Unicode-Zeichen (siehe Logfile)")
+            logger.error(f"Fehler bei Checklist {checklist.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
+            logger.error("Traceback enthaelt Unicode-Zeichen (siehe Logfile)")
         sys.stdout.flush()
         return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
@@ -1121,32 +1189,32 @@ def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_u
         driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
 
         if driver is None:
-            print(f"[FEHLER] [{index+1}/{total}] Kein WebDriver verfügbar für Quiz {quiz.get('id', 'unknown')}")
+            logger.error(f"[{index+1}/{total}] Kein WebDriver verfügbar für Quiz {quiz.get('id', 'unknown')}")
             return quiz.get('id', 'unknown'), {}
 
         quiz_id = quiz["id"]
         quiz_url = quiz["url"]
         quiz_title = quiz.get("title", f"Quiz {quiz_id}")
 
-        print(f"[{index+1}/{total}] Verarbeite Quiz: {quiz_title[:50]}...")
+        logger.info(f"[{index+1}/{total}] Verarbeite Quiz: {quiz_title[:50]}...")
         print(f"PROGRESS|quizzes|{index+1}|{total}")
         sys.stdout.flush()
         start_time = time.time()
         submission_times = get_quiz_submission_times(driver, quiz_url, waittime)
         duration = time.time() - start_time
-        print(f"  Abgeschlossen in {duration:.1f}s ({len(submission_times)} Eintraege)")
+        logger.info(f"  Abgeschlossen in {duration:.1f}s | {len(submission_times)} submission_times gefunden")
         return quiz_id, submission_times
     except Exception as e:
         import traceback
         try:
-            print(f"[FEHLER] Fehler bei Quiz {quiz.get('id', 'unknown')}: {e}")
-            print(f"[FEHLER] Traceback: {traceback.format_exc()}")
+            logger.error(f"Fehler bei Quiz {quiz.get('id', 'unknown')}: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
         except UnicodeEncodeError:
-            print(f"[FEHLER] Fehler bei Quiz {quiz.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
-            print(f"[FEHLER] Traceback enthaelt Unicode-Zeichen")
+            logger.error(f"Fehler bei Quiz {quiz.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
+            logger.error("Traceback enthaelt Unicode-Zeichen")
         sys.stdout.flush()
         return quiz.get('id', 'unknown'), {}
-    
+
 
 def get_all_activity_categories(driver, course_id):
     categories_data = {}
@@ -1189,17 +1257,17 @@ def get_all_activity_categories(driver, course_id):
             }
 
         except Exception as e:
-            print(f"Fehler beim Verarbeiten der Aktivität: {e}")
+            logger.warning(f"Fehler beim Verarbeiten der Aktivität: {e}")
 
     return categories_data
 
 def get_activity_category(driver, activity_id, course_id, waittime):
     category_data = {"category_id": "-1", "category_name": "nicht bewertet"}
-    print(f"Verarbeite Aktivität ID: {activity_id}")
+    logger.debug(f"Verarbeite Aktivität ID: {activity_id}")
 
     grade_url = f"https://lernplattform.bycs.de/grade/edit/tree/index.php?id={course_id}"
     driver.get(grade_url)
-    
+
     try:
         # Verwenden Sie WebDriverWait, um sicherzustellen, dass das Element geladen ist
         activity_element = WebDriverWait(driver, waittime).until(
@@ -1219,8 +1287,8 @@ def get_activity_category(driver, activity_id, course_id, waittime):
         category_data["category_name"] = category_name
         category_data["grade_item_id"] = grade_item_id
     except Exception as e:
-        print(f"Fehler beim Verarbeiten der Aktivität ID {activity_id}: {e}")
-    
+        logger.warning(f"Fehler beim Verarbeiten der Aktivität ID {activity_id}: {e}")
+
     return category_data
 
 def group_activities_by_category(activities):
@@ -1258,16 +1326,24 @@ def cleanup_thread_drivers():
 # Cloud upload functionality removed
 
 
-def main():
+def main(test_mode=False):
     # Startzeit des Skripts
     start_time = time.time()
-    print("Starte Mebis-Datenexport...")
-    print(f"Startzeit: {datetime.now().strftime('%H:%M:%S')}")
-    sys.stdout.flush()
+    timer = PhaseTimer()
+
+    test_limit = 5  # Anzahl Items pro Typ im Testmodus
+
+    if test_mode:
+        logger.info("=" * 60)
+        logger.info(f"[TESTMODUS] Export limitiert auf {test_limit} Einträge pro Aktivitätstyp")
+        logger.info(f"[TESTMODUS] Dateiname wird 'test_output_...' sein")
+        logger.info("=" * 60)
+
+    logger.info("Starte Mebis-Datenexport...")
+    logger.info(f"Startzeit: {datetime.now().strftime('%H:%M:%S')}")
 
     # Lade Konfiguration über config_manager
-    print("Lade Konfiguration...")
-    sys.stdout.flush()
+    timer.start("Konfiguration laden")
     credentials = config_manager.get_login_credentials()
     username = credentials['username']
     password = credentials['password']
@@ -1281,52 +1357,60 @@ def main():
     mode_settings = config_manager.get_mode_settings()
     isheadless = str(mode_settings['headless'])
     waittime = mode_settings['waittime']
+    timer.stop()
 
-    print("Erstelle WebDriver...")
-    sys.stdout.flush()
+    timer.start("WebDriver erstellen & Login")
     driver = create_webdriver(headless=isheadless)
     driver.get(f"{base_url}?course={course_id}")
 
-    print("Führe Login durch...")
-    sys.stdout.flush()
+    logger.info("Führe Login durch...")
     login(driver, username, password, waittime)
 
     # Extrahiere den sesskey nach dem Login
-    print("Extrahiere Sesskey...")
-    sys.stdout.flush()
+    logger.info("Extrahiere Sesskey...")
     sesskey = get_sesskey(driver)
     if not sesskey:
-        print("Sesskey konnte nicht extrahiert werden. Überprüfe den Login-Prozess.")
+        logger.error("Sesskey konnte nicht extrahiert werden. Überprüfe den Login-Prozess.")
         driver.quit()
         return
+    timer.stop()
 
-    print("Lade Gruppen und Optionen...")
-    sys.stdout.flush()
+    timer.start("Gruppen & Optionen laden")
     group_options = get_select_options(driver, "group", waittime)
     activityinclude_options = get_select_options(driver, "activityinclude", waittime)
     activitysection_options = get_select_options(driver, "activitysection", waittime)
+    timer.stop({"gruppen": len(group_options)})
 
     # Erfasse die Aktivitäten einmalig
-    print("Erfasse Aktivitäten...")
-    sys.stdout.flush()
+    timer.start("Aktivitäten erfassen")
     activities = get_activity_urls(driver)
+    timer.stop({
+        "assignments": len(activities["assignments"]),
+        "checklists": len(activities["checklists"]),
+        "quizzes": len(activities["quizzes"]),
+        "feedbacks": len(activities["feedbacks"]),
+    })
+
+    # Im Testmodus: Limitiere auf test_limit Items pro Typ
+    if test_mode:
+        for act_type in ["assignments", "checklists", "quizzes", "feedbacks"]:
+            original_count = len(activities[act_type])
+            activities[act_type] = activities[act_type][:test_limit]
+            if original_count > test_limit:
+                logger.info(f"[TESTMODUS] {act_type}: {original_count} -> {len(activities[act_type])} (limitiert)")
 
     # Ermittle den Pflicht-Status aller Checklisten (vor der Kategorisierung)
-    print("Ermittle Pflicht-Status der Checklisten...")
-    sys.stdout.flush()
+    timer.start("Checklisten Pflicht-Status")
     checklists_mandatory = get_checklists_mandatory_status(driver, course_id)
-    print(f"  Pflicht-Status für {len(checklists_mandatory)} Checklisten ermittelt")
-
-    # Aktualisiere Aktivitäten mit Kategorieinformationen
-    activities_by_category = []
-
+    timer.stop({"checklisten": len(checklists_mandatory)})
 
     # Erfasse alle Kategorieninformationen in einem einzigen Aufruf
+    timer.start("Kategorien laden")
     all_categories_data = get_all_activity_categories(driver, course_id)
+    timer.stop({"kategorien": len(all_categories_data)})
 
     # Aktualisiere Aktivitäten mit Kategorieinformationen
     activities_by_category = []
-
 
     for activity_type in activities:
         for activity in activities[activity_type]:
@@ -1354,7 +1438,8 @@ def main():
             category_entry[activity_type].append(activity)
 
 
-    print("Analysiere Status Assignments (parallel)")
+    timer.start("Assignments verarbeiten (parallel)")
+    logger.info(f"Analysiere Status Assignments ({len(activities['assignments'])} Stück)")
     print(f"PROGRESS|assignments|0|{len(activities['assignments'])}")
     sys.stdout.flush()
     assignments_status = {}
@@ -1377,9 +1462,25 @@ def main():
                 assignments_status[assignment_id] = status
                 assignments_groups[assignment_id] = groups
 
+    # Ergebnis-Logging für Assignments
+    total_assignment_users = sum(len(s) for s in assignments_status.values())
+    assignments_missing_grade = 0
+    assignments_missing_time = 0
+    for aid, statuses in assignments_status.items():
+        for s in statuses:
+            if not s.get("grade") or s["grade"] in ["Keine Bewertung", "-", ""]:
+                assignments_missing_grade += 1
+            if not s.get("submission_time"):
+                assignments_missing_time += 1
+    timer.stop({
+        "assignments": len(assignments_status),
+        "user_einträge": total_assignment_users,
+        "ohne_bewertung": assignments_missing_grade,
+        "ohne_zeitstempel": assignments_missing_time,
+    })
+
     # Füge die "groups"-Informationen zu den Assignment-Objekten in activities_by_category hinzu
-    print("Aktualisiere Gruppierungsinformationen in activities_by_category...")
-    sys.stdout.flush()
+    logger.info("Aktualisiere Gruppierungsinformationen in activities_by_category...")
     for category in activities_by_category:
         if "assignments" in category:
             for assignment in category["assignments"]:
@@ -1392,7 +1493,8 @@ def main():
     # Note: user_status is handled by dashboard_backend.py using existing user.activities data
     # No need to duplicate data structure here
 
-    print("Analysiere Status Checkliste (parallel)")
+    timer.start("Checklisten verarbeiten (parallel)")
+    logger.info(f"Analysiere Status Checkliste ({len(activities['checklists'])} Stück)")
     print(f"PROGRESS|checklists|0|{len(activities['checklists'])}")
     sys.stdout.flush()
     checklist_progress = {}
@@ -1413,7 +1515,17 @@ def main():
                 checklist_id, progress = future.result()
                 checklist_progress[checklist_id] = progress
 
-    print("Analysiere Quiz Submission Times (parallel)")
+    # Ergebnis-Logging für Checklisten
+    checklists_empty_req = sum(1 for cp in checklist_progress.values() if not cp.get("required_progress"))
+    checklists_empty_all = sum(1 for cp in checklist_progress.values() if not cp.get("all_progress"))
+    timer.stop({
+        "checklisten": len(checklist_progress),
+        "ohne_required": checklists_empty_req,
+        "ohne_all": checklists_empty_all,
+    })
+
+    timer.start("Quiz Submission Times (parallel)")
+    logger.info(f"Analysiere Quiz Submission Times ({len(activities['quizzes'])} Stück)")
     print(f"PROGRESS|quizzes|0|{len(activities['quizzes'])}")
     sys.stdout.flush()
     quiz_submission_times = {}
@@ -1434,8 +1546,15 @@ def main():
                 quiz_id, submission_times = future.result()
                 quiz_submission_times[quiz_id] = submission_times
 
-    print("Quiz-Bewertungen werden aus Grader-Report extrahiert (siehe unten bei Gruppen-Verarbeitung)")
-    sys.stdout.flush()
+    total_quiz_times = sum(len(st) for st in quiz_submission_times.values())
+    quizzes_without_times = sum(1 for st in quiz_submission_times.values() if not st)
+    timer.stop({
+        "quizzes": len(quiz_submission_times),
+        "submission_times_gesamt": total_quiz_times,
+        "quizzes_ohne_times": quizzes_without_times,
+    })
+
+    logger.info("Quiz-Bewertungen werden aus Grader-Report extrahiert (siehe unten bei Gruppen-Verarbeitung)")
 
     # Zentralisierte Speicherung der Aktivitäten
     data = {
@@ -1445,6 +1564,7 @@ def main():
         "activitysections": activitysection_options
     }
 
+    timer.start("Gruppen-User laden")
     for group in group_options:
         if group["value"] == "0":
             continue  # Überspringe Gruppe 0
@@ -1454,33 +1574,36 @@ def main():
             "users": get_user_ids_from_group(driver, group["value"], base_url, course_id)
         }
         data["groups"].append(group_data)
+    total_users = sum(len(g["users"]) for g in data["groups"])
+    timer.stop({"gruppen": len(data["groups"]), "user_gesamt": total_users})
 
     # Extrahiere Grader-Report-Daten (einmalig für alle Gruppen mit group=0)
-    print("\nExtrahiere Bewertungsdaten aus Grader-Report (alle Gruppen)...")
-    sys.stdout.flush()
+    timer.start("Grader-Report laden")
     grader_data = get_grader_report_data(driver, course_id, "0", waittime)
-    print(f"  Gefunden: {len(grader_data)} Aktivitäten mit Bewertungen")
+    timer.stop({"aktivitäten_mit_bewertungen": len(grader_data)})
 
     # Manuelle Elemente aus .env-Konfiguration (MANUAL_GRADE_ITEM_IDS)
+    timer.start("Manuelle Bewertungselemente")
     tree_manual_ids = config_manager.get_manual_grade_item_ids()
-    print(f"  {len(tree_manual_ids)} manuelle Bewertungselemente aus Konfiguration: {list(tree_manual_ids.values())}")
+    logger.info(f"  {len(tree_manual_ids)} manuelle Bewertungselemente aus Konfiguration: {list(tree_manual_ids.values())}")
 
     # Bewertungen für manuelle Elemente via Singleview holen (direkt mit Schülernamen)
     manual_grade_items = {}
     for item_id, title in tree_manual_ids.items():
-        print(f"  Hole Singleview-Bewertungen für '{title}' (itemid={item_id})...")
-        sys.stdout.flush()
+        logger.info(f"  Hole Singleview-Bewertungen für '{title}' (itemid={item_id})...")
         user_grades = get_singleview_grades(driver, course_id, item_id, base_url, waittime)
         manual_grade_items[item_id] = {
             "title": title,
             "user_grades": user_grades
         }
-        print(f"    -> {len(user_grades)} Bewertungen gelesen")
+        logger.info(f"    -> {len(user_grades)} Bewertungen gelesen")
     data["manual_grade_items"] = manual_grade_items
     if manual_grade_items:
         titles = [v["title"] for v in manual_grade_items.values()]
-        print(f"  Manuelle Bewertungselemente: {titles}")
+        logger.info(f"  Manuelle Bewertungselemente: {titles}")
+    timer.stop({"elemente": len(manual_grade_items)})
 
+    timer.start("User-Daten zusammenführen")
     for group in data["groups"]:
 
         for user in group["users"]:
@@ -1517,9 +1640,6 @@ def main():
                             "required_progress": required_progress,
                             "all_progress": all_progress
                         }
-                        # ,
-                        # "category_id": checklist.get("category_id"),
-                        # "category_name": checklist.get("category_name")
                     })
 
             # Verwende die Grader-Report-Daten für Quiz-Status
@@ -1565,13 +1685,15 @@ def main():
                     "title": item_data["title"],
                     "grade": grade  # None wenn keine Bewertung vorhanden
                 })
+    timer.stop()
 
     # =====================================================
     # VALIDIERUNG: Prüfe ob kritische Daten vorhanden sind
     # =====================================================
-    print("\n" + "="*60)
-    print("VALIDIERUNG DER EXPORTIERTEN DATEN")
-    print("="*60)
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("VALIDIERUNG DER EXPORTIERTEN DATEN")
+    logger.info("=" * 60)
 
     validation_errors = []
 
@@ -1602,43 +1724,77 @@ def main():
 
     # Ausgabe der Validierungsergebnisse
     if validation_errors:
-        print("\n[!] VALIDIERUNGSFEHLER GEFUNDEN:")
-        sys.stdout.flush()  # Stelle sicher, dass Backend diese Meldung sieht
+        logger.warning("[!] VALIDIERUNGSFEHLER GEFUNDEN:")
         for error in validation_errors:
-            print(f"  - {error}")
-            sys.stdout.flush()
+            logger.warning(f"  - {error}")
 
         # Unterscheide zwischen Fehlern und Warnungen
         critical_errors = [e for e in validation_errors if e.startswith("FEHLER:")]
         if critical_errors:
-            print("\n" + "="*60)
-            print("[ABBRUCH] Kritische Fehler gefunden!")
-            print("Export wird NICHT gespeichert.")
-            print("="*60)
-            sys.stdout.flush()
-            print("\nBitte prüfen Sie:")
-            print("  1. Die Netzwerkverbindung zu Mebis")
-            print("  2. Die Login-Credentials in der Konfiguration")
-            print("  3. Die Kurs-ID in der Konfiguration")
-            print("  4. Die Logausgaben auf weitere Hinweise")
-            sys.stdout.flush()
+            logger.error("=" * 60)
+            logger.error("[ABBRUCH] Kritische Fehler gefunden!")
+            logger.error("Export wird NICHT gespeichert.")
+            logger.error("=" * 60)
+            logger.error("Bitte prüfen Sie:")
+            logger.error("  1. Die Netzwerkverbindung zu Mebis")
+            logger.error("  2. Die Login-Credentials in der Konfiguration")
+            logger.error("  3. Die Kurs-ID in der Konfiguration")
+            logger.error("  4. Die Logausgaben auf weitere Hinweise")
             driver.quit()
             sys.exit(1)
         else:
-            print("\n[INFO] Nur Warnungen gefunden, Export wird fortgesetzt.")
-            sys.stdout.flush()
+            logger.info("Nur Warnungen gefunden, Export wird fortgesetzt.")
     else:
-        print("[OK] Alle Validierungen bestanden")
-        sys.stdout.flush()
+        logger.info("[OK] Alle Validierungen bestanden")
 
-    print("="*60 + "\n")
+    logger.info("=" * 60)
 
-    print("Speichere Daten lokal...")
+    # =====================================================
+    # FEHLENDE-DATEN-REPORT
+    # =====================================================
+    logger.info("")
+    logger.info("DATEN-VOLLSTÄNDIGKEITS-REPORT")
+    logger.info("-" * 60)
+
+    incomplete_activities = []
+    for aid, statuses in assignments_status.items():
+        title = next((a["title"] for a in activities["assignments"] if a["id"] == aid), aid)
+        missing_grade = sum(1 for s in statuses if not s.get("grade") or s["grade"] in ["Keine Bewertung", "-", ""])
+        missing_time = sum(1 for s in statuses if not s.get("submission_time"))
+        if missing_grade > 0 or missing_time > 0:
+            incomplete_activities.append(f"  Assignment '{title[:40]}': {missing_grade} ohne Bewertung, {missing_time} ohne Zeitstempel (von {len(statuses)})")
+
+    for cid, progress in checklist_progress.items():
+        title = next((c["title"] for c in activities["checklists"] if c["id"] == cid), cid)
+        req = len(progress.get("required_progress", {}))
+        all_p = len(progress.get("all_progress", {}))
+        if req == 0 and all_p == 0:
+            incomplete_activities.append(f"  Checklist '{title[:40]}': KEINE Daten extrahiert")
+        elif req == 0:
+            incomplete_activities.append(f"  Checklist '{title[:40]}': required_progress leer ({all_p} all_progress)")
+
+    for qid, times in quiz_submission_times.items():
+        title = next((q["title"] for q in activities["quizzes"] if q["id"] == qid), qid)
+        if not times:
+            incomplete_activities.append(f"  Quiz '{title[:40]}': KEINE submission_times extrahiert")
+
+    if incomplete_activities:
+        logger.warning(f"{len(incomplete_activities)} Aktivitäten mit unvollständigen Daten:")
+        for line in incomplete_activities:
+            logger.warning(line)
+    else:
+        logger.info("[OK] Alle Aktivitäten haben vollständige Daten")
+    logger.info("-" * 60)
+
+    timer.start("Daten speichern")
     save_start_time = time.time()
 
     # Zeitstempel hinzufügen
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_filename = f'output_{timestamp}.json'
+    if test_mode:
+        json_filename = f'test_output_{timestamp}.json'
+    else:
+        json_filename = f'output_{timestamp}.json'
 
     # Hole Export-Ordner aus Konfiguration
     export_folder = config_manager.get_export_folder()
@@ -1655,101 +1811,95 @@ def main():
         with open(local_filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
         save_duration = time.time() - save_start_time
-        print(f"Daten erfolgreich lokal gespeichert in {save_duration:.1f}s: {local_filename}")
+        logger.info(f"Daten erfolgreich lokal gespeichert in {save_duration:.1f}s: {local_filename}")
         save_success = True
 
         # =====================================================
         # GRÖSSENVERGLEICH: Prüfe ob neuer Export kleiner ist
+        # (Nur im normalen Modus – im Testmodus überspringen)
         # =====================================================
         new_file_size = os.path.getsize(local_filename)
-        print(f"\nGröße der neuen Datei: {new_file_size:,} bytes ({new_file_size / 1024:.1f} KB)")
+        logger.info(f"Größe der neuen Datei: {new_file_size:,} bytes ({new_file_size / 1024:.1f} KB)")
 
-        # Finde vorherige Export-Dateien
-        import glob
-        previous_exports = glob.glob(os.path.join(export_folder, 'output_*.json'))
-        previous_exports = [f for f in previous_exports if f != local_filename]  # Schließe neue Datei aus
+        if test_mode:
+            logger.info("[TESTMODUS] Größenvergleich übersprungen")
+        else:
+            # Finde vorherige Export-Dateien
+            import glob
+            previous_exports = glob.glob(os.path.join(export_folder, 'output_*.json'))
+            previous_exports = [f for f in previous_exports if f != local_filename]  # Schließe neue Datei aus
 
-        if previous_exports:
-            # Sortiere nach Erstellungsdatum (neueste zuerst)
-            previous_exports.sort(key=os.path.getctime, reverse=True)
-            latest_previous = previous_exports[0]
-            previous_file_size = os.path.getsize(latest_previous)
+            if previous_exports:
+                # Sortiere nach Erstellungsdatum (neueste zuerst)
+                previous_exports.sort(key=os.path.getctime, reverse=True)
+                latest_previous = previous_exports[0]
+                previous_file_size = os.path.getsize(latest_previous)
 
-            print(f"Größe der vorherigen Datei: {previous_file_size:,} bytes ({previous_file_size / 1024:.1f} KB)")
-            print(f"Vorherige Datei: {os.path.basename(latest_previous)}")
+                logger.info(f"Größe der vorherigen Datei: {previous_file_size:,} bytes ({previous_file_size / 1024:.1f} KB)")
+                logger.info(f"Vorherige Datei: {os.path.basename(latest_previous)}")
 
-            # Berechne Differenz
-            size_diff = new_file_size - previous_file_size
-            size_diff_percent = (size_diff / previous_file_size) * 100 if previous_file_size > 0 else 0
+                # Berechne Differenz
+                size_diff = new_file_size - previous_file_size
+                size_diff_percent = (size_diff / previous_file_size) * 100 if previous_file_size > 0 else 0
 
-            print(f"Differenz: {size_diff:+,} bytes ({size_diff_percent:+.1f}%)")
+                logger.info(f"Differenz: {size_diff:+,} bytes ({size_diff_percent:+.1f}%)")
 
-            # Warnung bei kleineren Exporten
-            if new_file_size < previous_file_size:
-                print("\n" + "="*60)
-                print("⚠️  WARNUNG: NEUER EXPORT IST KLEINER!")
-                print("="*60)
-                sys.stdout.flush()
-                print(f"Der neue Export ist {abs(size_diff):,} bytes ({abs(size_diff_percent):.1f}%) kleiner.")
-                print(f"Dies könnte auf einen unvollständigen Export hinweisen.")
-                print("")
-                print(f"Neue Datei:      {new_file_size:>12,} bytes  {os.path.basename(local_filename)}")
-                print(f"Vorherige Datei: {previous_file_size:>12,} bytes  {os.path.basename(latest_previous)}")
-                print("")
-                sys.stdout.flush()
+                # Warnung bei kleineren Exporten
+                if new_file_size < previous_file_size:
+                    logger.warning("=" * 60)
+                    logger.warning("WARNUNG: NEUER EXPORT IST KLEINER!")
+                    logger.warning("=" * 60)
+                    logger.warning(f"Der neue Export ist {abs(size_diff):,} bytes ({abs(size_diff_percent):.1f}%) kleiner.")
+                    logger.warning(f"Dies könnte auf einen unvollständigen Export hinweisen.")
+                    logger.warning(f"Neue Datei:      {new_file_size:>12,} bytes  {os.path.basename(local_filename)}")
+                    logger.warning(f"Vorherige Datei: {previous_file_size:>12,} bytes  {os.path.basename(latest_previous)}")
 
-                # Prüfe ob stdin interaktiv ist (Terminal vorhanden)
-                is_interactive = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
+                    # Prüfe ob stdin interaktiv ist (Terminal vorhanden)
+                    is_interactive = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
 
-                if is_interactive:
-                    # Interaktiver Modus: Frage Benutzer
-                    print("[INTERAKTIV] Sie werden um Bestätigung gebeten.")
-                    sys.stdout.flush()
-                    try:
-                        response = input("Möchten Sie den neuen (kleineren) Export behalten? (j/n): ").strip().lower()
-                        if response not in ['j', 'ja', 'y', 'yes']:
-                            print("\n[ABBRUCH] Export wird verworfen...")
+                    if is_interactive:
+                        # Interaktiver Modus: Frage Benutzer
+                        logger.info("[INTERAKTIV] Sie werden um Bestätigung gebeten.")
+                        try:
+                            response = input("Möchten Sie den neuen (kleineren) Export behalten? (j/n): ").strip().lower()
+                            if response not in ['j', 'ja', 'y', 'yes']:
+                                logger.info("[ABBRUCH] Export wird verworfen...")
+                                os.remove(local_filename)
+                                logger.info(f"Datei gelöscht: {local_filename}")
+                                logger.info("Der vorherige Export bleibt erhalten.")
+                                save_success = False
+                            else:
+                                logger.info("[OK] Neuer Export wird behalten.")
+                        except (KeyboardInterrupt, EOFError):
+                            logger.info("[ABBRUCH] Export wird verworfen...")
                             os.remove(local_filename)
-                            print(f"Datei gelöscht: {local_filename}")
-                            print("Der vorherige Export bleibt erhalten.")
-                            sys.stdout.flush()
+                            logger.info(f"Datei gelöscht: {local_filename}")
+                            save_success = False
+                    else:
+                        # Nicht-interaktiver Modus: Ablehnen wenn >1% kleiner (sollte nicht vorkommen)
+                        if abs(size_diff_percent) > 1:
+                            logger.warning("[NICHT-INTERAKTIV] Export ist kleiner als vorher – wird automatisch abgelehnt.")
+                            logger.info("[ABBRUCH] Export wird verworfen (automatisch)...")
+                            os.remove(local_filename)
+                            logger.info(f"Datei gelöscht: {local_filename}")
+                            logger.info("Der vorherige Export bleibt erhalten.")
                             save_success = False
                         else:
-                            print("\n[OK] Neuer Export wird behalten.")
-                            sys.stdout.flush()
-                    except (KeyboardInterrupt, EOFError):
-                        print("\n\n[ABBRUCH] Export wird verworfen...")
-                        os.remove(local_filename)
-                        print(f"Datei gelöscht: {local_filename}")
-                        sys.stdout.flush()
-                        save_success = False
-                else:
-                    # Nicht-interaktiver Modus: Ablehnen wenn >1% kleiner (sollte nicht vorkommen)
-                    if abs(size_diff_percent) > 1:
-                        print("[NICHT-INTERAKTIV] Export ist kleiner als vorher – wird automatisch abgelehnt.")
-                        print("\n[ABBRUCH] Export wird verworfen (automatisch)...")
-                        sys.stdout.flush()
-                        os.remove(local_filename)
-                        print(f"Datei gelöscht: {local_filename}")
-                        print("Der vorherige Export bleibt erhalten.")
-                        sys.stdout.flush()
-                        save_success = False
-                    else:
-                        print(f"[NICHT-INTERAKTIV] Kleinerer Export akzeptiert (nur {abs(size_diff_percent):.1f}% Differenz)")
-                        sys.stdout.flush()
+                            logger.info(f"[NICHT-INTERAKTIV] Kleinerer Export akzeptiert (nur {abs(size_diff_percent):.1f}% Differenz)")
 
-                print("="*60)
-                sys.stdout.flush()
-            elif size_diff_percent > 50:
-                print("\n[INFO] Export ist signifikant größer (+{:.1f}%). Dies ist normal bei mehr Daten.".format(size_diff_percent))
+                    logger.info("=" * 60)
+                elif size_diff_percent > 50:
+                    logger.info(f"Export ist signifikant größer (+{size_diff_percent:.1f}%). Dies ist normal bei mehr Daten.")
+                else:
+                    logger.info("[OK] Dateigröße ist plausibel.")
             else:
-                print("\n[OK] Dateigröße ist plausibel.")
-        else:
-            print("\n[INFO] Kein vorheriger Export gefunden, Größenvergleich übersprungen.")
+                logger.info("Kein vorheriger Export gefunden, Größenvergleich übersprungen.")
 
     except Exception as e:
-        print(f"Lokale Speicherung fehlgeschlagen: {e}")
+        logger.error(f"Lokale Speicherung fehlgeschlagen: {e}")
         save_success = False
+
+    timer.stop()
 
     # Cleanup: Schließe alle WebDriver-Instanzen
     driver.quit()
@@ -1767,33 +1917,37 @@ def main():
     total_groups = len(data["groups"])
     total_users = sum(len(group["users"]) for group in data["groups"])
 
-    print("\n" + "="*60)
+    logger.info("")
+    logger.info("=" * 60)
     if save_success:
-        print("EXPORT ERFOLGREICH ABGESCHLOSSEN")
+        if test_mode:
+            logger.info("TEST-EXPORT ERFOLGREICH ABGESCHLOSSEN")
+        else:
+            logger.info("EXPORT ERFOLGREICH ABGESCHLOSSEN")
     else:
-        print("EXPORT FEHLGESCHLAGEN ODER ABGEBROCHEN")
-    print("="*60)
-    print(f"Gesamtdauer: {duration_minutes:.2f} Minuten ({duration:.1f} Sekunden)")
-    print(f"Aktivitaeten: {total_activities} ({len(activities['assignments'])} Assignments, {len(activities['checklists'])} Checklists, {len(activities['quizzes'])} Quizzes)")
-    print(f"Gruppen: {total_groups} mit insgesamt {total_users} Benutzern")
+        logger.error("EXPORT FEHLGESCHLAGEN ODER ABGEBROCHEN")
+    logger.info("=" * 60)
+    logger.info(f"Gesamtdauer: {duration_minutes:.2f} Minuten ({duration:.1f} Sekunden)")
+    logger.info(f"Aktivitaeten: {total_activities} ({len(activities['assignments'])} Assignments, {len(activities['checklists'])} Checklists, {len(activities['quizzes'])} Quizzes)")
+    logger.info(f"Gruppen: {total_groups} mit insgesamt {total_users} Benutzern")
     if total_activities > 0:
-        print(f"Durchschnitt: {(duration / total_activities):.1f}s pro Aktivitaet")
+        logger.info(f"Durchschnitt: {(duration / total_activities):.1f}s pro Aktivitaet")
     if save_success:
-        print(f"Lokale Datei: {local_filename}")
+        logger.info(f"Lokale Datei: {local_filename}")
     else:
-        print(f"[FEHLER] Export wurde nicht gespeichert oder abgebrochen")
-    print(f"Endzeit: {datetime.now().strftime('%H:%M:%S')}")
-    print("="*60)
+        logger.error("Export wurde nicht gespeichert oder abgebrochen")
+    logger.info(f"Endzeit: {datetime.now().strftime('%H:%M:%S')}")
+    logger.info("=" * 60)
+
+    # Phasen-Timing-Zusammenfassung
+    timer.summary()
 
     # Beende mit Fehlercode wenn Export fehlgeschlagen ist
     if not save_success:
         sys.exit(1)
 
 if __name__ == "__main__":
-    main()
-
-
-
-
-
-    
+    parser = argparse.ArgumentParser(description="Mebis Daten-Export")
+    parser.add_argument("--test", action="store_true", help="Testmodus: nur 5 Einträge pro Typ exportieren")
+    args = parser.parse_args()
+    main(test_mode=args.test)
