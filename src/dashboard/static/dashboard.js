@@ -983,12 +983,11 @@ function generateGroupComparisonTable() {
     html += '<thead><tr class="sticky-header">';
     html += '<th class="group-name-cell">Gruppe</th>';
     html += '<th>Personen</th>';
-    html += '<th>Checklisten<br>100%</th>';
     html += '<th>Ø Pflicht<br>(%)</th>';
     html += '<th>Ø Note</th>';
     html += '<th>Ø Gesamt<br>(%)</th>';
-    html += '<th>Eingereichte<br>Aufgaben</th>';
-    html += '<th>Note<br>Pflichtaufgaben</th>';
+    html += '<th>Ø Eingereichte<br>Aufgaben</th>';
+    html += '<th>Ø Note<br>Pflichtaufgaben</th>';
     html += '</tr></thead>';
     html += '<tbody>';
 
@@ -1021,7 +1020,6 @@ function generateGroupComparisonTable() {
         html += '<tr>';
         html += `<td class="group-name-cell"><strong>${stats.groupName}</strong></td>`;
         html += `<td class="text-center">${stats.userCount}</td>`;
-        html += `<td class="progress-cell progress-color-success" style="--progress-width: ${Math.min(stats.avgCompletedChecklists * 10, 100)}%;">${stats.avgCompletedChecklists.toFixed(1)}</td>`;
         html += `<td class="progress-cell progress-color-info" style="--progress-width: ${displayRequiredProgress}%;">${displayRequiredProgress.toFixed(1)}%</td>`;
         html += `<td class="text-center text-bold">${gradeText}</td>`;
         html += `<td class="progress-cell progress-color-secondary" style="--progress-width: ${stats.avgAllProgress}%;">${stats.avgAllProgress.toFixed(1)}%</td>`;
@@ -1344,8 +1342,18 @@ function calculateMitarbeitsnote1(user, groupName) {
     let quantitaet = quantitaetId ? getManualGradeValue(user, quantitaetId) : null;
     let quantitaetIsActual = quantitaet !== null;
     let quantitaetPoints = null; // {actual, expected} für Punkteanzeige
-    if (!quantitaetIsActual) {
-        // Fallback: Berechne aus Checklisten-Fortschritt
+
+    if (quantitaetIsActual) {
+        // Manueller Wert: Zähler/Nenner aus Checklisten-Rohdaten rückrechnen
+        // expected = was bei der Ref.-Woche erwartet wurde, actual = was der %-Wert als Punkte entspricht
+        const rawData = getChecklistRawData(user, groupName);
+        if (rawData && rawData.totalMandatoryChecklists > 0) {
+            const expected = rawData.totalMandatoryChecklists * 100 / maxSchoolweeks * refWeek;
+            const actual = (quantitaet / 100) * expected;
+            quantitaetPoints = { actual, expected };
+        }
+    } else {
+        // Berechneter Wert: aus calculateActualProgressForWeek
         const quantProgress = calculateActualProgressForWeek(user, refWeek, maxSchoolweeks, groupName);
         quantitaet = quantProgress.pflichtProgress;
         if (quantProgress.rawPflichtPercent !== null && quantProgress.rawExpectedPflicht !== null) {
@@ -1550,8 +1558,8 @@ function generateHalbjahresnotenTable(users, mode = 'both') {
         html += `<th>Quantität<br>(%)</th>`;
         html += `<th>Qualität<br>(%)</th>`;
         if (showReviewTalk1) html += `<th>Review-Talk 1<br>(%)</th>`;
-        if (hasActualMA1) html += `<th title="Tatsächliche Note aus Mebis-Notenbuch">1. MA<br>(Notenbuch)</th>`;
-        html += `<th>Ø 1. MA</th>`;
+        if (hasActualMA1) html += `<th title="Tatsächliche Note aus Mebis-Notenbuch">1. Mitarbeitsnote<br>(%))</th>`;
+        html += `<th>Ø 1. Mitarbeitsnote</th>`;
         html += `</tr></thead><tbody>`;
 
         users.forEach(user => {
@@ -1565,9 +1573,10 @@ function generateHalbjahresnotenTable(users, mode = 'both') {
             html += `<tr>`;
             html += `<td class="person-name"><strong>${user.name}</strong></td>`;
             if (ma1.quantitaetIsActual) {
-                html += renderPctCell(ma1.quantitaet, 'progress-color-info');
+                // Manueller Wert (volle Deckkraft) – Punkte werden rückberechnet angezeigt
+                html += renderPctCell(ma1.quantitaet, 'progress-color-info', ma1.quantitaetPoints);
             } else {
-                // Berechneter Wert – mit Punkten und leicht transparenter Darstellung
+                // Berechneter Wert (leicht transparent als Hinweis)
                 const qPts = ma1.quantitaetPoints;
                 const qSub = qPts ? `<span class="cell-points">${Math.round(qPts.actual)} / ${Math.round(qPts.expected)}</span>` : '';
                 html += `<td class="progress-cell progress-color-info" style="opacity:0.65;" title="Berechneter Wert (noch keine tatsächliche Note)">${ma1.quantitaet !== null ? ma1.quantitaet.toFixed(1) + '%' : '–'}${qSub}</td>`;
@@ -1601,11 +1610,11 @@ function generateHalbjahresnotenTable(users, mode = 'both') {
         html += `<table id="ma2Table" class="info-table dashboard-table overview-table">`;
         html += `<thead><tr class="sticky-header">`;
         html += `<th class="person-name">Person</th>`;
-        html += `<th>Quantität<br>Fortschritt (%)</th>`;
+        html += `<th>Quantität<br>(%)</th>`;
         html += `<th>Qualität<br>(%)</th>`;
         if (showReviewTalk2) html += `<th>Review-Talk 2<br>(%)</th>`;
         if (showCodeReview) html += `<th>Code-Review<br>(%)</th>`;
-        html += `<th>Ø Prognose</th>`;
+        html += `<th>2. Mitarbeitsnote<br>Prognose</th>`;
         html += `</tr></thead><tbody>`;
 
         users.forEach(user => {
@@ -1673,10 +1682,9 @@ function generateGroupProgressTable(users) {
     let html = '<table id="individualProgressTable" class="info-table dashboard-table overview-table">';
     html += '<thead><tr class="sticky-header">';
     html += '<th class="person-name">Person</th>';
-    html += '<th>Checklisten<br>100%</th>';
-    html += '<th>Ø Pflicht<br>(%)</th>';
+    html += '<th>Quantität<br>Pflicht (%)</th>';
     html += '<th>Ø Note</th>';
-    html += '<th>Ø Gesamt<br>(%)</th>';
+    html += '<th>Quantität<br>Gesamt (%)</th>';
     html += '<th>Eingereichte<br>Aufgaben</th>';
     html += '<th>Note<br>Pflichtaufgaben</th>';
     html += '</tr></thead>';
@@ -1710,7 +1718,6 @@ function generateGroupProgressTable(users) {
 
         html += '<tr>';
         html += `<td class="person-name"><strong>${user.name}</strong></td>`;
-        html += `<td class="progress-cell progress-color-success" style="--progress-width: ${Math.min(user.checklists.required_100_count * 10, 100)}%;">${user.checklists.required_100_count}</td>`;
         const pflichtSub = pflichtPoints ? `<span class="cell-points">${Math.round(pflichtPoints.actual)} / ${Math.round(pflichtPoints.expected)}</span>` : '';
         html += `<td class="progress-cell progress-color-info" style="--progress-width: ${displayPflichtProgress}%;">${displayPflichtProgress.toFixed(1)}%${pflichtSub}</td>`;
         html += `<td class="text-center text-bold">${gradeText}</td>`;

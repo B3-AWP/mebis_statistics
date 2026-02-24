@@ -25,6 +25,7 @@ import locale
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import requests
+from bs4 import BeautifulSoup
 import io
 import functools
 
@@ -57,6 +58,14 @@ class PhaseTimer:
         self._current_start = time.time()
         logger.info(f"--- Phase: {name} ---")
 
+    @staticmethod
+    def format_duration(seconds):
+        """Formatiert Sekunden: ab 60s in Minuten, sonst Sekunden"""
+        if seconds >= 60:
+            minutes = seconds / 60
+            return f"{minutes:.1f}min"
+        return f"{seconds:.1f}s"
+
     def stop(self, details=None):
         """Stoppt die aktuelle Phase und speichert die Dauer"""
         if not self._current_phase:
@@ -72,7 +81,7 @@ class PhaseTimer:
         detail_str = ""
         if details:
             detail_str = " | " + ", ".join(f"{k}={v}" for k, v in details.items())
-        logger.info(f"  Phase '{self._current_phase}' abgeschlossen in {duration:.1f}s{detail_str}")
+        logger.info(f"  Phase '{self._current_phase}' abgeschlossen in {self.format_duration(duration)}{detail_str}")
         self._current_phase = None
         self._current_start = None
 
@@ -90,9 +99,9 @@ class PhaseTimer:
             total += dur
             extras = {k: v for k, v in p.items() if k not in ("name", "duration")}
             detail_str = ", ".join(f"{k}={v}" for k, v in extras.items()) if extras else ""
-            logger.info(f"  {p['name']:<33} {dur:>7.1f}s  {detail_str}")
+            logger.info(f"  {p['name']:<33} {self.format_duration(dur):>8}  {detail_str}")
         logger.info("-" * 65)
-        logger.info(f"  {'GESAMT':<33} {total:>7.1f}s")
+        logger.info(f"  {'GESAMT':<33} {self.format_duration(total):>8}")
         logger.info("=" * 65)
 
 
@@ -285,6 +294,34 @@ def get_user_ids_from_group(driver, group_value, base_url, course_id):
     except (TimeoutException, WebDriverException) as e:
         logger.error(f"Benutzer für Gruppe {group_value} nicht ladbar: {e}")
         return []
+
+def get_user_ids_from_group_fast(session, group_value, base_url, course_id):
+    """Lädt User-IDs via requests+BeautifulSoup statt Selenium (viel schneller)"""
+    try:
+        url = f"{base_url}?course={course_id}&group={group_value}"
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        users = []
+        for a in soup.select('#completion-progress tbody th[scope="row"] a'):
+            href = a.get('href', '')
+            m = re.search(r'id=(\d+)', href)
+            if m:
+                users.append({"id": m.group(1), "name": a.get_text(strip=True)})
+        return users
+    except Exception as e:
+        logger.error(f"Benutzer für Gruppe {group_value} nicht ladbar (fast): {e}")
+        return []
+
+def create_requests_session_from_driver(driver):
+    """Erstellt eine requests.Session mit den Cookies des Selenium-Drivers"""
+    session = requests.Session()
+    for cookie in driver.get_cookies():
+        session.cookies.set(cookie['name'], cookie['value'], domain=cookie.get('domain'))
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    })
+    return session
 
 def get_activity_urls(driver):
     activity_urls = {
@@ -647,136 +684,135 @@ def get_assignment_status(driver, assignment_url, waittime):
 
 def get_grader_report_data(driver, course_id, group_id, waittime):
     """
-    Extrahiert alle Bewertungsdaten aus der Grader-Report-Seite
-    Diese Seite zeigt alle Aktivitäten (Quizzes, Assignments, etc.) in einer Tabelle
-    mit Personen in Zeilen und Aktivitäten in Spalten
+    Extrahiert alle Bewertungsdaten aus der Grader-Report-Seite.
+    Nutzt JavaScript-Extraktion statt einzelner Selenium-Aufrufe (>50x schneller).
     """
     grader_url = f"https://lernplattform.bycs.de/grade/report/grader/index.php?id={course_id}&groupsearchvalue=&group={group_id}"
     driver.get(grader_url)
 
     try:
-        # Warte auf das Laden der Haupttabelle
-        table_element = WebDriverWait(driver, waittime).until(
+        WebDriverWait(driver, waittime).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "table.gradereport-grader-table#user-grades"))
         )
     except TimeoutException:
         logger.warning(f"Grader-Report-Tabelle für Kurs {course_id}, Gruppe {group_id} nicht gefunden")
         return {}
 
-    # Extrahiere die Header-Struktur (Aktivitäten) und erstelle Spalten-Mapping
-    quizzes = {}
-    column_to_quiz = {}
-
+    # Extrahiere alle Daten in einem einzigen JavaScript-Aufruf
     try:
-        # Finde alle Header-Links zu Aktivitäten
-        header_links = driver.find_elements(By.CSS_SELECTOR, "table.gradereport-grader-table th a.gradeitemheader")
+        result = driver.execute_script("""
+            var table = document.querySelector('table.gradereport-grader-table#user-grades');
+            if (!table) return null;
 
-        for link in header_links:
-            href = link.get_attribute("href")
-            title = link.get_attribute("title") or link.text
+            // 1. Header: Spalten-Mapping erstellen (col_class -> activity info)
+            var columnMap = {};
+            var headers = table.querySelectorAll('th a.gradeitemheader');
+            headers.forEach(function(link) {
+                var href = link.getAttribute('href') || '';
+                var title = link.getAttribute('title') || link.textContent;
+                var th = link.closest('th');
+                if (!th) return;
+                var classMatch = (th.className || '').match(/\\b(c\\d+)\\b/);
+                if (!classMatch) return;
+                var colClass = classMatch[1];
 
-            # Extrahiere Aktivitäts-ID und Typ aus der URL
-            if "mod/quiz/view.php?id=" in href:
-                activity_id = re.search(r'id=(\d+)', href).group(1)
+                var idMatch = href.match(/id=(\\d+)/);
+                if (!idMatch) return;
 
-                # Finde das übergeordnete th-Element
-                header = link.find_element(By.XPATH, "./ancestor::th")
+                var type = null;
+                if (href.indexOf('mod/quiz/') >= 0) type = 'quiz';
+                else if (href.indexOf('mod/assign/') >= 0) type = 'assignment';
+                if (!type) return;
 
-                # Extrahiere die Spalten-Klasse (z.B. "c15")
-                header_class = header.get_attribute("class")
-                col_class_match = re.search(r'\bc(\d+)\b', header_class)
+                if (!columnMap[colClass]) {
+                    columnMap[colClass] = {id: idMatch[1], type: type, title: title, url: href};
+                }
+            });
 
-                if col_class_match and activity_id not in quizzes:
-                    col_class = f"c{col_class_match.group(1)}"
+            // 2. Ergebnis-Struktur initialisieren
+            var activities = {};
+            Object.keys(columnMap).forEach(function(col) {
+                var info = columnMap[col];
+                activities[info.id] = {
+                    type: info.type, title: info.title,
+                    url: info.url, column_class: col, grades: {}
+                };
+            });
 
-                    quizzes[activity_id] = {
-                        "type": "quiz",
-                        "title": title,
-                        "url": href,
-                        "column_class": col_class,
-                        "grades": {}
+            // 3. Hilfsfunktion: Notentext aus Zelle extrahieren
+            //    Moodle 4.x Zellen enthalten Dropdown-Buttons und Menüs neben der Note.
+            //    Strategie: Nur direkte Text-Nodes der Zelle lesen (keine Button/Dropdown-Texte)
+            function extractGradeText(cell) {
+                // Versuch 1: Suche ein dediziertes Noten-Element
+                var gradeEl = cell.querySelector('.gradevalue, .gradetext');
+                if (gradeEl) return gradeEl.textContent.trim();
+
+                // Versuch 2: Sammle nur direkte Text-Nodes der Zelle (ignoriere Buttons/Dropdowns)
+                var text = '';
+                for (var i = 0; i < cell.childNodes.length; i++) {
+                    var node = cell.childNodes[i];
+                    if (node.nodeType === 3) { // TEXT_NODE
+                        text += node.textContent;
                     }
-                    column_to_quiz[col_class] = activity_id
+                }
+                text = text.trim();
+                if (text) return text;
 
-            elif "mod/assign/view.php?id=" in href:
-                activity_id = re.search(r'id=(\d+)', href).group(1)
+                // Versuch 3: Fallback - gesamten textContent nehmen, aber Dropdown-Text entfernen
+                var clone = cell.cloneNode(true);
+                var dropdowns = clone.querySelectorAll('.dropdown, button, .dropdown-menu, [role="menu"]');
+                dropdowns.forEach(function(el) { el.remove(); });
+                text = clone.textContent.trim();
+                if (text) return text;
 
-                # Finde das übergeordnete th-Element
-                header = link.find_element(By.XPATH, "./ancestor::th")
+                // Versuch 4: Letzter Fallback - ersten sichtbaren Text nehmen
+                return (cell.textContent || '').replace(/Zellaktionen/g, '').trim().split('\\n')[0].trim();
+            }
 
-                # Extrahiere die Spalten-Klasse (z.B. "c15")
-                header_class = header.get_attribute("class")
-                col_class_match = re.search(r'\bc(\d+)\b', header_class)
+            // 4. Zeilen durchlaufen: User-Bewertungen extrahieren
+            var rows = table.querySelectorAll('tbody tr');
+            rows.forEach(function(row) {
+                var userLink = row.querySelector('th a[href*="user/view.php?id="]');
+                if (!userLink) return;
+                var userMatch = (userLink.getAttribute('href') || '').match(/id=(\\d+)/);
+                if (!userMatch) return;
+                var userId = userMatch[1];
 
-                if col_class_match and activity_id not in quizzes:
-                    col_class = f"c{col_class_match.group(1)}"
+                var cells = row.querySelectorAll('td');
+                cells.forEach(function(cell) {
+                    var cm = (cell.className || '').match(/\\b(c\\d+)\\b/);
+                    if (!cm || !columnMap[cm[1]]) return;
+                    var text = extractGradeText(cell);
+                    activities[columnMap[cm[1]].id].grades[userId] = text;
+                });
+            });
 
-                    quizzes[activity_id] = {
-                        "type": "assignment",
-                        "title": title,
-                        "url": href,
-                        "column_class": col_class,
-                        "grades": {}
-                    }
-                    column_to_quiz[col_class] = activity_id
+            return activities;
+        """)
 
-    except Exception as e:
-        logger.error(f"Fehler beim Extrahieren der Activity-Header: {e}")
+        if result is None:
+            logger.warning("JavaScript-Extraktion lieferte kein Ergebnis")
+            return {}
 
-    # Extrahiere die Benutzerdaten (Zeilen)
-    try:
-        tbody = table_element.find_element(By.CSS_SELECTOR, "tbody")
-        rows = tbody.find_elements(By.CSS_SELECTOR, "tr")
-
-        for row in rows:
-            try:
-                # Extrahiere User-ID aus dem Link
-                user_link = row.find_element(By.CSS_SELECTOR, "th a[href*='user/view.php?id=']")
-                user_href = user_link.get_attribute("href")
-                user_id_match = re.search(r'id=(\d+)', user_href)
-                if not user_id_match:
-                    continue
-                user_id = user_id_match.group(1)
-
-                # Finde alle Bewertungs-Zellen in dieser Zeile
-                grade_cells = row.find_elements(By.CSS_SELECTOR, "td")
-
-                # Durchlaufe alle Zellen und versuche, Bewertungen zu extrahieren
-                for cell in grade_cells:
-                    try:
-                        # Extrahiere die Spalten-Klasse aus der Zelle
-                        cell_class = cell.get_attribute("class")
-                        col_class_match = re.search(r'\bc(\d+)\b', cell_class)
-
-                        if not col_class_match:
-                            continue
-
-                        col_class = f"c{col_class_match.group(1)}"
-
-                        # Prüfe ob diese Spalte ein Quiz/Assignment ist
-                        if col_class in column_to_quiz:
-                            activity_id = column_to_quiz[col_class]
-
-                            # Extrahiere die Bewertung aus der Zelle
-                            grade_text = cell.text.strip()
-
-                            # Entferne "Zellaktionen" und andere Menü-Texte
-                            grade_text = grade_text.split('\n')[0].strip()
-
-                            # Speichere die Bewertung für diese Aktivität und diesen Benutzer
-                            quizzes[activity_id]["grades"][user_id] = grade_text
-
-                    except (NoSuchElementException, StaleElementReferenceException):
-                        continue
-
-            except (NoSuchElementException, StaleElementReferenceException):
-                # Keine User-Zeile, überspringe
+        # Debug-Logging: Zeige Stichprobe der extrahierten Daten
+        total_grades = sum(len(a.get("grades", {})) for a in result.values())
+        non_empty = sum(1 for a in result.values() for g in a.get("grades", {}).values() if g and g != "-")
+        logger.info(f"  Grader-Report: {len(result)} Aktivitäten, {total_grades} Grade-Einträge, {non_empty} mit Bewertung")
+        # Zeige erste nicht-leere Note als Beispiel
+        for aid, adata in result.items():
+            for uid, grade in adata.get("grades", {}).items():
+                if grade and grade != "-":
+                    logger.info(f"  Beispiel: Aktivität {aid} ({adata.get('type')}), User {uid}: '{grade}'")
+                    break
+            else:
                 continue
+            break
+
+        return result
 
     except Exception as e:
-        logger.error(f"Fehler beim Extrahieren der Benutzerdaten: {e}")
-
-    return quizzes
+        logger.error(f"Fehler bei JavaScript-Extraktion des Grader-Reports: {e}")
+        return {}
 
 
 def get_singleview_grades(driver, course_id, item_id, base_url, waittime):
@@ -999,7 +1035,8 @@ _all_thread_drivers = []
 _driver_lock = threading.Lock()
 
 def get_thread_driver(isheadless, username=None, password=None, base_url=None, course_id=None, waittime=10):
-    """Get or create a WebDriver instance for the current thread"""
+    """Get or create a WebDriver instance for the current thread.
+    Thread-Driver werden wiederverwendet wenn der Thread bereits eingeloggt ist."""
     if not hasattr(thread_local, 'driver'):
         try:
             thread_local.driver = create_webdriver(headless=isheadless)
@@ -1011,7 +1048,7 @@ def get_thread_driver(isheadless, username=None, password=None, base_url=None, c
             logger.error(f"Fehler beim Erstellen des WebDrivers: {e}")
             return None
 
-    # Login und sesskey für jeden Thread
+    # Login nur wenn noch nicht eingeloggt
     if not thread_local.logged_in and username and password:
         try:
             thread_local.driver.get(f"{base_url}?course={course_id}")
@@ -1373,6 +1410,7 @@ def main(test_mode=False):
         logger.error("Sesskey konnte nicht extrahiert werden. Überprüfe den Login-Prozess.")
         driver.quit()
         return
+
     timer.stop()
 
     timer.start("Gruppen & Optionen laden")
@@ -1438,121 +1476,107 @@ def main(test_mode=False):
             category_entry[activity_type].append(activity)
 
 
-    timer.start("Assignments verarbeiten (parallel)")
-    logger.info(f"Analysiere Status Assignments ({len(activities['assignments'])} Stück)")
-    print(f"PROGRESS|assignments|0|{len(activities['assignments'])}")
-    sys.stdout.flush()
-    assignments_status = {}
-    assignments_groups = {}
+    # Geteilter ThreadPool für alle parallelen Phasen (Threads + Browser werden wiederverwendet)
+    shared_executor = ThreadPoolExecutor(max_workers=2)
 
-    # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Assignments
-    max_workers = min(2, len(activities["assignments"]))  # Maximal 2 parallel für Stabilität
+    try:
+        timer.start("Assignments verarbeiten (parallel)")
+        logger.info(f"Analysiere Status Assignments ({len(activities['assignments'])} Stück)")
+        print(f"PROGRESS|assignments|0|{len(activities['assignments'])}")
+        sys.stdout.flush()
+        assignments_status = {}
+        assignments_groups = {}
 
-    if activities["assignments"]:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Erstelle Future-Tasks für alle Assignments
+        if activities["assignments"]:
             future_to_assignment = {
-                executor.submit(process_assignment_parallel, assignment, isheadless, waittime, username, password, base_url, course_id, idx, len(activities["assignments"])): assignment
+                shared_executor.submit(process_assignment_parallel, assignment, isheadless, waittime, username, password, base_url, course_id, idx, len(activities["assignments"])): assignment
                 for idx, assignment in enumerate(activities["assignments"])
             }
-
-            # Sammle die Ergebnisse
             for future in as_completed(future_to_assignment):
                 assignment_id, status, groups = future.result()
                 assignments_status[assignment_id] = status
                 assignments_groups[assignment_id] = groups
 
-    # Ergebnis-Logging für Assignments
-    total_assignment_users = sum(len(s) for s in assignments_status.values())
-    assignments_missing_grade = 0
-    assignments_missing_time = 0
-    for aid, statuses in assignments_status.items():
-        for s in statuses:
-            if not s.get("grade") or s["grade"] in ["Keine Bewertung", "-", ""]:
-                assignments_missing_grade += 1
-            if not s.get("submission_time"):
-                assignments_missing_time += 1
-    timer.stop({
-        "assignments": len(assignments_status),
-        "user_einträge": total_assignment_users,
-        "ohne_bewertung": assignments_missing_grade,
-        "ohne_zeitstempel": assignments_missing_time,
-    })
+        # Ergebnis-Logging für Assignments
+        total_assignment_users = sum(len(s) for s in assignments_status.values())
+        assignments_missing_grade = 0
+        assignments_missing_time = 0
+        for aid, statuses in assignments_status.items():
+            for s in statuses:
+                if not s.get("grade") or s["grade"] in ["Keine Bewertung", "-", ""]:
+                    assignments_missing_grade += 1
+                if not s.get("submission_time"):
+                    assignments_missing_time += 1
+        timer.stop({
+            "assignments": len(assignments_status),
+            "user_einträge": total_assignment_users,
+            "ohne_bewertung": assignments_missing_grade,
+            "ohne_zeitstempel": assignments_missing_time,
+        })
 
-    # Füge die "groups"-Informationen zu den Assignment-Objekten in activities_by_category hinzu
-    logger.info("Aktualisiere Gruppierungsinformationen in activities_by_category...")
-    for category in activities_by_category:
-        if "assignments" in category:
-            for assignment in category["assignments"]:
-                assignment_id = assignment["id"]
-                if assignment_id in assignments_groups:
-                    assignment["groups"] = assignments_groups[assignment_id]
-                else:
-                    assignment["groups"] = "all"  # Standard-Fallback
+        # Füge die "groups"-Informationen zu den Assignment-Objekten in activities_by_category hinzu
+        logger.info("Aktualisiere Gruppierungsinformationen in activities_by_category...")
+        for category in activities_by_category:
+            if "assignments" in category:
+                for assignment in category["assignments"]:
+                    assignment_id = assignment["id"]
+                    if assignment_id in assignments_groups:
+                        assignment["groups"] = assignments_groups[assignment_id]
+                    else:
+                        assignment["groups"] = "all"  # Standard-Fallback
 
-    # Note: user_status is handled by dashboard_backend.py using existing user.activities data
-    # No need to duplicate data structure here
+        timer.start("Checklisten verarbeiten (parallel)")
+        logger.info(f"Analysiere Status Checkliste ({len(activities['checklists'])} Stück)")
+        print(f"PROGRESS|checklists|0|{len(activities['checklists'])}")
+        sys.stdout.flush()
+        checklist_progress = {}
 
-    timer.start("Checklisten verarbeiten (parallel)")
-    logger.info(f"Analysiere Status Checkliste ({len(activities['checklists'])} Stück)")
-    print(f"PROGRESS|checklists|0|{len(activities['checklists'])}")
-    sys.stdout.flush()
-    checklist_progress = {}
-
-    # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Checklists
-    max_workers = min(2, len(activities["checklists"]))
-
-    if activities["checklists"]:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Erstelle Future-Tasks für alle Checklists
+        if activities["checklists"]:
             future_to_checklist = {
-                executor.submit(process_checklist_parallel, checklist, isheadless, username, password, base_url, course_id, idx, len(activities["checklists"])): checklist
+                shared_executor.submit(process_checklist_parallel, checklist, isheadless, username, password, base_url, course_id, idx, len(activities["checklists"])): checklist
                 for idx, checklist in enumerate(activities["checklists"])
             }
-
-            # Sammle die Ergebnisse
             for future in as_completed(future_to_checklist):
                 checklist_id, progress = future.result()
                 checklist_progress[checklist_id] = progress
 
-    # Ergebnis-Logging für Checklisten
-    checklists_empty_req = sum(1 for cp in checklist_progress.values() if not cp.get("required_progress"))
-    checklists_empty_all = sum(1 for cp in checklist_progress.values() if not cp.get("all_progress"))
-    timer.stop({
-        "checklisten": len(checklist_progress),
-        "ohne_required": checklists_empty_req,
-        "ohne_all": checklists_empty_all,
-    })
+        # Ergebnis-Logging für Checklisten
+        checklists_empty_req = sum(1 for cp in checklist_progress.values() if not cp.get("required_progress"))
+        checklists_empty_all = sum(1 for cp in checklist_progress.values() if not cp.get("all_progress"))
+        timer.stop({
+            "checklisten": len(checklist_progress),
+            "ohne_required": checklists_empty_req,
+            "ohne_all": checklists_empty_all,
+        })
 
-    timer.start("Quiz Submission Times (parallel)")
-    logger.info(f"Analysiere Quiz Submission Times ({len(activities['quizzes'])} Stück)")
-    print(f"PROGRESS|quizzes|0|{len(activities['quizzes'])}")
-    sys.stdout.flush()
-    quiz_submission_times = {}
+        timer.start("Quiz Submission Times (parallel)")
+        logger.info(f"Analysiere Quiz Submission Times ({len(activities['quizzes'])} Stück)")
+        print(f"PROGRESS|quizzes|0|{len(activities['quizzes'])}")
+        sys.stdout.flush()
+        quiz_submission_times = {}
 
-    # Bestimme die Anzahl der Worker-Threads basierend auf der Anzahl der Quizzes
-    max_workers = min(2, len(activities["quizzes"]))
-
-    if activities["quizzes"]:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Erstelle Future-Tasks für alle Quizzes
+        if activities["quizzes"]:
             future_to_quiz = {
-                executor.submit(process_quiz_parallel, quiz, isheadless, waittime, username, password, base_url, course_id, idx, len(activities["quizzes"])): quiz
+                shared_executor.submit(process_quiz_parallel, quiz, isheadless, waittime, username, password, base_url, course_id, idx, len(activities["quizzes"])): quiz
                 for idx, quiz in enumerate(activities["quizzes"])
             }
-
-            # Sammle die Ergebnisse
             for future in as_completed(future_to_quiz):
                 quiz_id, submission_times = future.result()
                 quiz_submission_times[quiz_id] = submission_times
 
-    total_quiz_times = sum(len(st) for st in quiz_submission_times.values())
-    quizzes_without_times = sum(1 for st in quiz_submission_times.values() if not st)
-    timer.stop({
-        "quizzes": len(quiz_submission_times),
-        "submission_times_gesamt": total_quiz_times,
-        "quizzes_ohne_times": quizzes_without_times,
-    })
+        total_quiz_times = sum(len(st) for st in quiz_submission_times.values())
+        quizzes_without_times = sum(1 for st in quiz_submission_times.values() if not st)
+        timer.stop({
+            "quizzes": len(quiz_submission_times),
+            "submission_times_gesamt": total_quiz_times,
+            "quizzes_ohne_times": quizzes_without_times,
+        })
+
+    finally:
+        shared_executor.shutdown(wait=True)
+        # Thread-Driver sofort aufräumen um Speicher freizugeben vor dem Grader-Report
+        cleanup_thread_drivers()
+        logger.info("Thread-Driver aufgeräumt (Speicher freigegeben)")
 
     logger.info("Quiz-Bewertungen werden aus Grader-Report extrahiert (siehe unten bei Gruppen-Verarbeitung)")
 
@@ -1564,16 +1588,20 @@ def main(test_mode=False):
         "activitysections": activitysection_options
     }
 
-    timer.start("Gruppen-User laden")
-    for group in group_options:
-        if group["value"] == "0":
-            continue  # Überspringe Gruppe 0
-        group_data = {
-            "name": group["name"],
-            "value": group["value"],
-            "users": get_user_ids_from_group(driver, group["value"], base_url, course_id)
-        }
-        data["groups"].append(group_data)
+    timer.start("Gruppen-User laden (parallel)")
+    # Erstelle requests.Session mit Selenium-Cookies für schnelleres Laden
+    http_session = create_requests_session_from_driver(driver)
+    filtered_groups = [g for g in group_options if g["value"] != "0"]
+
+    def _load_group(group):
+        users = get_user_ids_from_group_fast(http_session, group["value"], base_url, course_id)
+        return {"name": group["name"], "value": group["value"], "users": users}
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        group_futures = {executor.submit(_load_group, g): g for g in filtered_groups}
+        for future in as_completed(group_futures):
+            data["groups"].append(future.result())
+
     total_users = sum(len(g["users"]) for g in data["groups"])
     timer.stop({"gruppen": len(data["groups"]), "user_gesamt": total_users})
 
