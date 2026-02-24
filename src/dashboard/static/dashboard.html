@@ -112,6 +112,19 @@
             </nav>
         </div>
 
+        <!-- Letzte Abgaben je Gruppe (außerhalb homeTab, damit sie immer korrekt ein-/ausgeblendet wird) -->
+        <div class="stats-group" id="recentSubmissionsSection">
+            <div class="stats-group-title">
+                <svg width="20" height="20" aria-hidden="true">
+                    <use href="#icon-current-week"></use>
+                </svg>
+                <span>Letzte Abgaben je Gruppe</span>
+            </div>
+            <div class="config-section">
+                <div id="recentSubmissionsTable"></div>
+            </div>
+        </div>
+
         <!-- Übersicht Tab -->
         <div id="homeTab">
             <!-- Schulwochen-Auswahl (nur bei Gesamt-Tab relevant) -->
@@ -242,6 +255,7 @@
                     <div id="groupHalbjahresnotenTable"></div>
                 </div>
             </div>
+
         </div>
 
         <!-- Checklisten Tab -->

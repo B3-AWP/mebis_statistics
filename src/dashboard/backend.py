@@ -661,6 +661,37 @@ def get_data():
             'debug': flask_config['debug']
         }
 
+        # Export-Datum aus Dateinamen extrahieren (output_YYYYMMDD_HHMMSS.json)
+        import datetime, re as _re
+        export_date = None
+        if latest_file:
+            _m = _re.search(r'(\d{8})_\d{6}', os.path.basename(latest_file))
+            if _m:
+                try:
+                    ds = _m.group(1)
+                    export_date = datetime.date(int(ds[:4]), int(ds[4:6]), int(ds[6:8]))
+                except ValueError:
+                    pass
+        if export_date is None:
+            export_date = datetime.date.today()
+
+        # Letzte Abgaben je Gruppe berechnen
+        mitarbeitsnote_cfg = config_manager.get_mitarbeitsnote_config()
+        manual_grade_ids = config_manager.get_manual_grade_item_ids()
+        recent_days = config_manager.get_recent_submission_days()
+        inactive_threshold = config_manager.get_inactive_threshold_days()
+        recent_submissions = build_recent_submissions(
+            groups_data=groups_data,
+            raw_groups=data.get('groups', []),
+            manual_grade_item_ids=manual_grade_ids,
+            mitarbeitsnote_config=mitarbeitsnote_cfg,
+            recent_submission_days=recent_days,
+            assignment_details=assignment_details,
+            reference_date=export_date,
+            categories=activities_with_status,
+            inactive_threshold_days=inactive_threshold,
+        )
+
         # Response erstellen
         response_data = {
             'groups': groups_data,
@@ -672,11 +703,13 @@ def get_data():
             'ignored_groups': list(ignored_groups),
             'grade_mapping': grade_mapping,
             'max_schoolweeks': config_manager.get_max_schoolweeks(),
-            'mitarbeitsnote_config': config_manager.get_mitarbeitsnote_config(),
-            'manual_grade_item_ids': config_manager.get_manual_grade_item_ids(),
+            'mitarbeitsnote_config': mitarbeitsnote_cfg,
+            'manual_grade_item_ids': manual_grade_ids,
             'course_id': config_manager.get_course_id(),
             'last_updated': latest_file,
-            'environment': environment_settings
+            'environment': environment_settings,
+            'recent_submissions': recent_submissions,
+            'recent_submission_days': recent_days,
         }
 
         logger.info(f"API response created successfully with {len(groups_data)} groups")
@@ -904,6 +937,241 @@ def calculate_group_averages(users_data):
     group_data['checklists']['avg_all_progress_timed'] = group_data['checklists']['avg_all_progress']
 
     return group_data
+
+def count_school_days_since(submission_time_str, track_schedules, today=None):
+    """
+    Zählt vergangene Schularbeitstage seit submission_time_str anhand der TRACK_SCHEDULES.
+
+    Args:
+        submission_time_str: ISO-Datumsstring der Abgabe (z.B. "2025-12-10T14:30:00")
+        track_schedules: Liste von {"week": N, "start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+        today: Referenzdatum (datetime.date), Standard: heute
+
+    Returns:
+        int: Anzahl vergangener Schularbeitstage seit der Abgabe
+    """
+    import datetime
+    if today is None:
+        today = datetime.date.today()
+
+    if not submission_time_str:
+        return None
+
+    try:
+        sub_date = datetime.date.fromisoformat(submission_time_str[:10])
+    except (ValueError, TypeError):
+        return None
+
+    school_days = 0
+    for week in track_schedules:
+        try:
+            week_start = datetime.date.fromisoformat(week['start'])
+            week_end = datetime.date.fromisoformat(week['end'])
+        except (KeyError, ValueError):
+            continue
+
+        # Schulwoche muss ganz oder teilweise nach der Abgabe und bis heute liegen
+        if week_end <= sub_date:
+            continue
+        if week_start > today:
+            break
+
+        # Zähle Tage in [max(week_start, sub_date+1), min(week_end, today)]
+        count_from = max(week_start, sub_date + datetime.timedelta(days=1))
+        count_to = min(week_end, today)
+
+        if count_from > count_to:
+            continue
+
+        # Nur Werktage (Mo-Fr) zählen – Schulwochen sind Mon-Fr, aber sicherheitshalber prüfen
+        current = count_from
+        while current <= count_to:
+            if current.weekday() < 5:  # 0=Mo, 4=Fr
+                school_days += 1
+            current += datetime.timedelta(days=1)
+
+    return school_days
+
+
+def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
+                              mitarbeitsnote_config, recent_submission_days,
+                              assignment_details=None, reference_date=None,
+                              categories=None, inactive_threshold_days=14):
+    """
+    Aggregiert Abgaben je Gruppe für die "Letzte Abgaben"-Ansicht.
+
+    Alle Zeitberechnungen erfolgen relativ zu reference_date (= Export-Datum),
+    nicht zum aktuellen Datum.
+
+    Args:
+        groups_data:              Dict der verarbeiteten Gruppen.
+        raw_groups:               Rohdaten-Gruppen aus dem Export-JSON.
+        manual_grade_item_ids:    Mapping item_id -> Titel für manuelle Bewertungen.
+        mitarbeitsnote_config:    Konfiguration mit class_to_track und track_schedules.
+        recent_submission_days:   Zeitfenster in Kalendertagen für angezeigte Abgaben
+                                  (RECENT_SUBMISSION_DAYS).
+        assignment_details:       Dict mit Titelinformationen je Aktivitäts-ID.
+        reference_date:           Referenzdatum (= Export-Datum) für alle Berechnungen.
+        categories:               Aktivitätskategorien; wird genutzt um Pflichtaufgaben
+                                  zu identifizieren.
+        inactive_threshold_days:  Ab wie vielen Schultagen ohne Abgabe eine Gruppe als
+                                  inaktiv gilt (INACTIVE_THRESHOLD_DAYS).
+
+    Liefert pro Gruppe:
+        recent_submissions:       Abgaben innerhalb der letzten recent_submission_days
+                                  Kalendertage; jede Abgabe enthält school_days_ago
+                                  (Schultage Mo-Fr, Ferien ausgeblendet) und
+                                  calendar_days_ago (einfache Kalenderdifferenz).
+        last_submission_*:        Letzte bekannte Abgabe (ggf. älter als Schwelle).
+        school_days_since:        Schultage (Mo-Fr innerhalb der Schulwochen) seit der
+                                  letzten bekannten Abgabe.
+        calendar_days_since:      Kalendertage seit der letzten bekannten Abgabe.
+        inactive:                 True wenn school_days_since > inactive_threshold_days.
+        no_submissions:           True wenn die Gruppe überhaupt keine Abgaben hat.
+    """
+    import datetime
+
+    class_to_track = (mitarbeitsnote_config or {}).get('class_to_track') or {}
+    track_schedules_map = (mitarbeitsnote_config or {}).get('track_schedules') or {}
+    ref_date = reference_date or datetime.date.today()
+    details = assignment_details or {}
+
+    raw_group_by_name = {g.get('name'): g for g in raw_groups}
+
+    # Pflicht-Kategorie-ID ermitteln
+    pflicht_cat_id = None
+    if categories:
+        for cat in categories:
+            if 'Pflichtaufgaben' in cat.get('category_name', ''):
+                pflicht_cat_id = cat.get('id')
+                break
+
+    def _school_days(submission_time_str, track_schedules):
+        """Schularbeitstage (Mo–Fr) seit Abgabe innerhalb der Schulwochen, relativ zu ref_date."""
+        if track_schedules:
+            return count_school_days_since(submission_time_str, track_schedules, ref_date)
+        return None  # Kein Fallback auf Schultage ohne Schedule
+
+    def _calendar_days(submission_time_str):
+        """Kalendertage seit Abgabe (einfache Differenz, unabhängig vom Schulplan)."""
+        try:
+            sub_date = datetime.date.fromisoformat(submission_time_str[:10])
+            return (ref_date - sub_date).days
+        except (ValueError, TypeError):
+            return None
+
+    def _title_for(act_id, act_obj):
+        """Titel via assignment_details nachschlagen; Fallback auf Objekt-Feld."""
+        t = details.get(str(act_id), {}).get('title')
+        if t:
+            return t
+        return act_obj.get('title') or '?'
+
+    result = {}
+
+    for group_name in groups_data:
+        # Zuerst exakten Namen probieren, dann Klassen-Prefix ("IFA12A - Team 1" → "IFA12A")
+        track_name = class_to_track.get(group_name) or class_to_track.get(group_name.split(' ')[0])
+        track_schedules = track_schedules_map.get(track_name, []) if track_name else []
+
+        # Alle Abgaben dieser Gruppe sammeln
+        all_submissions = []
+        raw_group = raw_group_by_name.get(group_name, {})
+
+        for user in raw_group.get('users', []):
+            activities = user.get('activities', {})
+
+            for act in activities.get('assignments', []):
+                st = act.get('status', {}).get('submission_time')
+                if st:
+                    act_id = act.get('id', '')
+                    cat_id = act.get('category_id')
+                    all_submissions.append({
+                        'time': st,
+                        'title': _title_for(act_id, act),
+                        '_key': str(act_id) if act_id else None,
+                        'is_pflicht': (pflicht_cat_id is not None and cat_id == pflicht_cat_id),
+                    })
+
+            for act in activities.get('quizzes', []):
+                st = act.get('status', {}).get('submission_time')
+                if st:
+                    act_id = act.get('id', '')
+                    cat_id = act.get('category_id')
+                    all_submissions.append({
+                        'time': st,
+                        'title': _title_for(act_id, act),
+                        '_key': str(act_id) if act_id else None,
+                        'is_pflicht': (pflicht_cat_id is not None and cat_id == pflicht_cat_id),
+                    })
+
+            for mg in activities.get('manual_grades', []):
+                st = mg.get('submission_time')
+                if st:
+                    item_id = str(mg.get('item_id', ''))
+                    title = manual_grade_item_ids.get(item_id, mg.get('title', 'Manuelle Bewertung'))
+                    all_submissions.append({
+                        'time': st,
+                        'title': title,
+                        '_key': f'mg_{item_id}' if item_id else None,
+                        'is_pflicht': False,
+                    })
+
+        # Nach Zeit absteigend sortieren
+        all_submissions.sort(key=lambda x: x['time'], reverse=True)
+
+        # Deduplizieren: pro Aktivität (Schlüssel = ID oder Titel) nur neueste Abgabe
+        seen_keys = set()
+        deduped = []
+        for sub in all_submissions:
+            key = sub.get('_key') or sub['title']
+            if key not in seen_keys:
+                seen_keys.add(key)
+                entry_clean = {k: v for k, v in sub.items() if k != '_key'}
+                deduped.append(entry_clean)
+        all_submissions = deduped
+
+        no_submissions = not all_submissions
+
+        # Letzte bekannte Abgabe
+        last = all_submissions[0] if all_submissions else None
+        school_days_since = _school_days(last['time'], track_schedules) if last else None
+        calendar_days_since = _calendar_days(last['time']) if last else None
+
+        # Schwellenwert-Prüfung: Kalendertage (RECENT_SUBMISSION_DAYS)
+        def _within_threshold(sub_time):
+            cd = _calendar_days(sub_time)
+            return cd is not None and cd <= recent_submission_days
+
+        # Abgaben innerhalb des Zeitfensters
+        recent_submissions = []
+        for sub in all_submissions:
+            sd = _school_days(sub['time'], track_schedules)
+            cd = _calendar_days(sub['time'])
+            if _within_threshold(sub['time']):
+                recent_submissions.append({
+                    **sub,
+                    'school_days_ago': sd,
+                    'calendar_days_ago': cd,
+                })
+            else:
+                break  # Liste ist absteigend – ältere passen nie mehr
+
+        # Inaktiv: keine Abgabe innerhalb von INACTIVE_THRESHOLD_DAYS Schultagen
+        inactive = no_submissions or (school_days_since is None) or (school_days_since > inactive_threshold_days)
+
+        result[group_name] = {
+            'recent_submissions': recent_submissions,
+            'last_submission_time': last['time'] if last else None,
+            'last_submission_title': last['title'] if last else None,
+            'school_days_since': school_days_since,
+            'calendar_days_since': calendar_days_since,
+            'inactive': inactive,
+            'no_submissions': no_submissions,
+        }
+
+    return result
+
 
 def create_structured_tables(groups_data, categories):
     """Erstellt strukturierte Daten für die Tabellen-Ansichten"""
