@@ -36,6 +36,12 @@ function showTab(tabName) {
         }
     });
 
+    // Letzte-Abgaben-Sektion nur bei Übersicht-Tab anzeigen
+    const recentSection = document.getElementById('recentSubmissionsSection');
+    if (recentSection) {
+        recentSection.style.display = tabName === 'home' ? '' : 'none';
+    }
+
     // Gewählten Tab anzeigen
     const tabElement = document.getElementById(tabName + 'Tab');
     if (tabElement) {
@@ -582,6 +588,7 @@ function updateDashboard() {
     const groupStats = calculateGroupStats(selectedUsers);
 
     updateOverviewStats(groupStats, selectedUsers);
+    generateRecentSubmissionsTable();
 }
 
 // Ausgewählte Benutzer basierend auf aktueller Gruppierung und Gruppe
@@ -1740,6 +1747,113 @@ function generateGroupProgressTable(users) {
     setTimeout(() => wrapTableWithScrollContainer('groupProgressTable'), 50);
     setTimeout(() => wrapTableWithScrollContainer('groupHalbjahresnotenTable'), 50);
 }
+// Letzte Abgaben je Gruppe anzeigen
+function generateRecentSubmissionsTable() {
+    const container = document.getElementById('recentSubmissionsTable');
+    const section = document.getElementById('recentSubmissionsSection');
+    if (!container || !section) return;
+
+    const recentData = dashboardData && dashboardData.recent_submissions;
+
+    if (!recentData || Object.keys(recentData).length === 0) {
+        section.style.display = 'none';
+        return;
+    }
+
+    // Filtere auf aktuelle Gruppierung / Gruppe
+    let groupNames = Object.keys(recentData);
+    if (currentGrouping !== 'all') {
+        groupNames = groupNames.filter(name => name.split(' ')[0] === currentGrouping);
+    }
+    if (currentGroup !== 'all') {
+        groupNames = groupNames.filter(name => name === currentGroup);
+    }
+
+    if (groupNames.length === 0) {
+        section.style.display = 'none';
+        return;
+    }
+
+    // Sortierung: alphabetisch nach Gruppenname
+    groupNames.sort((a, b) => a.localeCompare(b, 'de'));
+
+    const fmtDate = iso => {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+
+    let html = `<table class="info-table dashboard-table" id="recentSubmissionsDataTable">
+        <thead><tr>
+            <th>Gruppe</th>
+            <th>Abgabedatum</th>
+            <th>Aufgabe</th>
+            <th style="text-align:center;">Kalendertage</th>
+            <th style="text-align:center;">Schularbeitstage</th>
+            <th>Status</th>
+        </tr></thead><tbody>`;
+
+    for (const groupName of groupNames) {
+        const entry = recentData[groupName];
+        const noSubs = entry.no_submissions;
+        const inactive = entry.inactive;
+        const recent = entry.recent_submissions || [];
+
+        let statusHtml, groupRowClass;
+        if (noSubs) {
+            statusHtml = '<span class="badge badge-danger">Keine Abgaben</span>';
+            groupRowClass = 'recent-group-header recent-no-subs';
+        } else if (inactive) {
+            const calD = entry.calendar_days_since ?? '?';
+            const schD = entry.school_days_since != null ? entry.school_days_since : '?';
+            statusHtml = `<span class="badge badge-warning">Inaktiv (${calD} Kal. / ${schD} Schultage)</span>`;
+            groupRowClass = 'recent-group-header recent-inactive';
+        } else {
+            statusHtml = `<span class="badge badge-success">Aktiv (${recent.length})</span>`;
+            groupRowClass = 'recent-group-header recent-active';
+        }
+
+        if (recent.length > 0) {
+            const buildPflichtBadge = isPflicht => isPflicht
+                ? '<span class="badge badge-warning" style="margin-left:5px;font-size:0.75em;">Pflicht</span>'
+                : '<span class="badge badge-secondary" style="margin-left:5px;font-size:0.75em;">Freiwillig</span>';
+
+            const first = recent[0];
+            html += `<tr class="${groupRowClass}">
+                <td rowspan="${recent.length}"><strong>${groupName}</strong></td>
+                <td>${fmtDate(first.time)}</td>
+                <td>${first.title}${buildPflichtBadge(first.is_pflicht)}</td>
+                <td style="text-align:center;">${first.calendar_days_ago ?? '—'}</td>
+                <td style="text-align:center;">${first.school_days_ago ?? '—'}</td>
+                <td rowspan="${recent.length}">${statusHtml}</td>
+            </tr>`;
+            for (let i = 1; i < recent.length; i++) {
+                const sub = recent[i];
+                html += `<tr class="recent-sub-row">
+                    <td>${fmtDate(sub.time)}</td>
+                    <td>${sub.title}${buildPflichtBadge(sub.is_pflicht)}</td>
+                    <td style="text-align:center;">${sub.calendar_days_ago ?? '—'}</td>
+                    <td style="text-align:center;">${sub.school_days_ago ?? '—'}</td>
+                </tr>`;
+            }
+        } else {
+            // Inaktiv: letzte bekannte Abgabe anzeigen
+            html += `<tr class="${groupRowClass}">
+                <td><strong>${groupName}</strong></td>
+                <td>${fmtDate(entry.last_submission_time)}</td>
+                <td>${entry.last_submission_title || '—'}</td>
+                <td style="text-align:center;">${entry.calendar_days_since ?? '—'}</td>
+                <td style="text-align:center;">${entry.school_days_since ?? '—'}</td>
+                <td>${statusHtml}</td>
+            </tr>`;
+        }
+    }
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+    section.style.display = '';
+}
+
 // Progress Ring aktualisieren
 function updateProgressRing(ringId, percentage) {
     const ring = document.getElementById(ringId);

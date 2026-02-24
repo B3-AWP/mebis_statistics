@@ -222,6 +222,24 @@ class ConfigManager:
         """
         return self._get_int('MAX_SCHOOLWEEKS', 9)
 
+    def get_recent_submission_days(self) -> int:
+        """
+        Holt den Schwellenwert für die Anzeige der letzten Abgaben in Kalendertagen.
+
+        Returns:
+            Anzahl der Kalendertage (Standard: 5)
+        """
+        return self._get_int('RECENT_SUBMISSION_DAYS', 5)
+
+    def get_inactive_threshold_days(self) -> int:
+        """
+        Holt den Schwellenwert ab dem eine Gruppe als inaktiv gilt, in Schultagen.
+
+        Returns:
+            Anzahl der Schultage (Standard: 14)
+        """
+        return self._get_int('INACTIVE_THRESHOLD_DAYS', 14)
+
     def get_mitarbeitsnote_config(self) -> Dict[str, Any]:
         """
         Holt Mitarbeitsnoten-Konfiguration aus Environment Variables.

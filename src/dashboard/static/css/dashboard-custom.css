@@ -782,3 +782,55 @@
         font-size: 0.55rem;
     }
 }
+
+/* ============================================================
+   Letzte Abgaben – Status-Badges und Zeilen-Hervorhebung
+   ============================================================ */
+.badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.badge-success {
+    background: #d4edda;
+    color: #155724;
+}
+
+.badge-warning {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.badge-danger {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.badge-secondary {
+    background: #e2e3e5;
+    color: #383d41;
+}
+
+#recentSubmissionsDataTable tr.recent-inactive td {
+    background-color: #fff8f0;
+}
+
+#recentSubmissionsDataTable tr.recent-no-subs td {
+    background-color: #fff0f0;
+}
+
+#recentSubmissionsDataTable tr.recent-active td {
+    background-color: #f0fff4;
+}
+
+/* Ausrichtung Abgabedatum und Aufgabe */
+#recentSubmissionsDataTable th:nth-child(2),
+#recentSubmissionsDataTable td:nth-child(2),
+#recentSubmissionsDataTable th:nth-child(3),
+#recentSubmissionsDataTable td:nth-child(3) {
+    text-align: left;
+}
