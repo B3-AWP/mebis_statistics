@@ -1748,6 +1748,19 @@ function generateGroupProgressTable(users) {
     setTimeout(() => wrapTableWithScrollContainer('groupHalbjahresnotenTable'), 50);
 }
 // Letzte Abgaben je Gruppe anzeigen
+let recentSortCol = 0;
+let recentSortDir = 'asc';
+
+function sortRecentSubmissions(colIndex) {
+    if (recentSortCol === colIndex) {
+        recentSortDir = recentSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        recentSortCol = colIndex;
+        recentSortDir = 'asc';
+    }
+    generateRecentSubmissionsTable();
+}
+
 function generateRecentSubmissionsTable() {
     const container = document.getElementById('recentSubmissionsTable');
     const section = document.getElementById('recentSubmissionsSection');
@@ -1774,8 +1787,34 @@ function generateRecentSubmissionsTable() {
         return;
     }
 
-    // Sortierung: alphabetisch nach Gruppenname
-    groupNames.sort((a, b) => a.localeCompare(b, 'de'));
+    // Sortierwert je Spalte für eine Gruppe ermitteln
+    const getSortKey = (name) => {
+        const e = recentData[name];
+        const recent = e.recent_submissions || [];
+        const lastTime = recent[0]?.time || e.last_submission_time || '';
+        const lastTitle = recent[0]?.title || e.last_submission_title || '';
+        switch (recentSortCol) {
+            case 0: return name.toLowerCase();
+            case 1: return lastTime;
+            case 2: return lastTitle.toLowerCase();
+            case 3: return e.calendar_days_since ?? Infinity;
+            case 4: return e.school_days_since ?? Infinity;
+            case 5: return e.no_submissions ? 2 : e.inactive ? 1 : 0;
+            default: return name.toLowerCase();
+        }
+    };
+
+    groupNames.sort((a, b) => {
+        const ka = getSortKey(a);
+        const kb = getSortKey(b);
+        let cmp = 0;
+        if (typeof ka === 'number') {
+            cmp = ka - kb;
+        } else {
+            cmp = ka < kb ? -1 : ka > kb ? 1 : 0;
+        }
+        return recentSortDir === 'asc' ? cmp : -cmp;
+    });
 
     const fmtDate = iso => {
         if (!iso) return '—';
@@ -1783,15 +1822,19 @@ function generateRecentSubmissionsTable() {
         return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     };
 
+    const colLabels = ['Gruppe', 'Abgabedatum', 'Aufgabe', 'Kalendertage', 'Schularbeitstage', 'Status'];
+    const centerCols = new Set([3, 4]);
+
+    const thList = colLabels.map((label, i) => {
+        const align = centerCols.has(i) ? ' style="text-align:center;"' : '';
+        const sortClass = i === recentSortCol
+            ? ` sort-${recentSortDir}`
+            : '';
+        return `<th class="sortable-header${sortClass}"${align} onclick="sortRecentSubmissions(${i})">${label}</th>`;
+    }).join('');
+
     let html = `<table class="info-table dashboard-table" id="recentSubmissionsDataTable">
-        <thead><tr>
-            <th>Gruppe</th>
-            <th>Abgabedatum</th>
-            <th>Aufgabe</th>
-            <th style="text-align:center;">Kalendertage</th>
-            <th style="text-align:center;">Schularbeitstage</th>
-            <th>Status</th>
-        </tr></thead><tbody>`;
+        <thead><tr>${thList}</tr></thead><tbody>`;
 
     for (const groupName of groupNames) {
         const entry = recentData[groupName];
@@ -1813,11 +1856,11 @@ function generateRecentSubmissionsTable() {
             groupRowClass = 'recent-group-header recent-active';
         }
 
-        if (recent.length > 0) {
-            const buildPflichtBadge = isPflicht => isPflicht
-                ? '<span class="badge badge-warning" style="margin-left:5px;font-size:0.75em;">Pflicht</span>'
-                : '<span class="badge badge-secondary" style="margin-left:5px;font-size:0.75em;">Freiwillig</span>';
+        const buildPflichtBadge = isPflicht => isPflicht
+            ? '<span class="badge badge-warning" style="margin-left:5px;font-size:0.75em;">Pflicht</span>'
+            : '<span class="badge badge-secondary" style="margin-left:5px;font-size:0.75em;">Freiwillig</span>';
 
+        if (recent.length > 0) {
             const first = recent[0];
             html += `<tr class="${groupRowClass}">
                 <td rowspan="${recent.length}"><strong>${groupName}</strong></td>
