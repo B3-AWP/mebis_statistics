@@ -292,6 +292,14 @@ def convert_grade_to_ihk(grade_str):
     if grade_str in star_mapping:
         return star_mapping[grade_str]
 
+    # Prozent-Noten (z.B. "54 %" oder "54%")
+    if '%' in grade_str:
+        try:
+            percentage = float(grade_str.replace('%', '').replace(' ', ''))
+            return points_to_ihk_grade(percentage)
+        except (ValueError, TypeError):
+            pass
+
     # Punkte-basierte Noten (z.B. "80 / 100")
     if '/' in grade_str:
         try:
@@ -1093,13 +1101,18 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
                 if st and status_val != 'Nicht eingereicht':
                     act_id = act.get('id', '')
                     cat_id = act.get('category_id')
+                    act_details = details.get(str(act_id), {})
+                    grade_val = (status_obj.get('grade') or status_obj.get('rating') or status_obj.get('score') or '-')
                     all_submissions.append({
                         'time': st,
                         'title': _title_for(act_id, act),
                         '_key': str(act_id) if act_id else None,
+                        '_status': status_val,
                         'is_pflicht': (pflicht_cat_id is not None and cat_id == pflicht_cat_id),
-                        '_grade': status_obj.get('grade', '-'),
-                        'category_name': details.get(str(act_id), {}).get('category_name', ''),
+                        '_grade': grade_val,
+                        'category_name': act_details.get('category_name', ''),
+                        'url': act_details.get('url'),
+                        'activity_type': 'assignment',
                     })
 
             for act in activities.get('quizzes', []):
@@ -1109,13 +1122,17 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
                 if st and status_val != 'Nicht eingereicht':
                     act_id = act.get('id', '')
                     cat_id = act.get('category_id')
+                    act_details = details.get(str(act_id), {})
                     all_submissions.append({
                         'time': st,
                         'title': _title_for(act_id, act),
                         '_key': str(act_id) if act_id else None,
+                        '_status': status_val,
                         'is_pflicht': (pflicht_cat_id is not None and cat_id == pflicht_cat_id),
                         '_grade': status_obj.get('grade', '-'),
-                        'category_name': details.get(str(act_id), {}).get('category_name', ''),
+                        'category_name': act_details.get('category_name', ''),
+                        'url': act_details.get('url'),
+                        'activity_type': 'quiz',
                     })
 
             for mg in activities.get('manual_grades', []):
@@ -1127,9 +1144,12 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
                         'time': st,
                         'title': title,
                         '_key': f'mg_{item_id}' if item_id else None,
+                        '_status': '',
                         'is_pflicht': False,
                         '_grade': mg.get('grade', '-'),
                         'category_name': 'Manuelle Bewertung',
+                        'url': None,
+                        'activity_type': 'manual',
                     })
 
         # Nach Zeit absteigend sortieren
@@ -1137,6 +1157,7 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
 
         # Deduplizieren: pro Aktivität neueste Abgabe behalten, Noten aller Schüler sammeln
         grades_by_key = {}
+        statuses_by_key = {}
         first_by_key = {}
         key_order = []
         for sub in all_submissions:
@@ -1145,9 +1166,13 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
                 first_by_key[key] = sub
                 key_order.append(key)
                 grades_by_key[key] = []
+                statuses_by_key[key] = []
             g = sub.get('_grade', '-')
             if g and g not in ('-', 'Nicht bewertet', 'Keine Bewertung', 'Nicht benotet'):
                 grades_by_key[key].append(g)
+            s = sub.get('_status', '')
+            if s:
+                statuses_by_key[key].append(s)
 
         deduped = []
         for key in key_order:
@@ -1165,6 +1190,7 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
                     grade_display = grades[0]
             entry = {k: v for k, v in sub.items() if not k.startswith('_')}
             entry['grade_display'] = grade_display
+            entry['is_bewertbar'] = 'Zur Bewertung abgegeben' in statuses_by_key.get(key, [])
             deduped.append(entry)
         all_submissions = deduped
 
@@ -1199,10 +1225,14 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
 
         result[group_name] = {
             'recent_submissions': recent_submissions,
+            'group_id': raw_group.get('value'),
             'last_submission_time': last['time'] if last else None,
             'last_submission_title': last['title'] if last else None,
             'last_submission_grade': last.get('grade_display') if last else None,
             'last_submission_category': last.get('category_name') if last else None,
+            'last_submission_url': last.get('url') if last else None,
+            'last_submission_type': last.get('activity_type') if last else None,
+            'last_submission_bewertbar': last.get('is_bewertbar', False) if last else False,
             'school_days_since': school_days_since,
             'calendar_days_since': calendar_days_since,
             'inactive': inactive,

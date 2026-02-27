@@ -1863,6 +1863,19 @@ function generateRecentSubmissionsTable() {
             groupRowClass = 'recent-group-header recent-active';
         }
 
+        const groupId = entry.group_id;
+        const fmtBewertbar = (sub, url, type, isBewertbar, gradeDisplay) => {
+            const showBewertbar = type === 'assignment' && gradeDisplay == null;
+            if (showBewertbar && url && groupId) {
+                const href = url.includes('?') ? `${url}&group=${groupId}` : `${url}?group=${groupId}`;
+                return `<a href="${href}" target="_blank" class="status-text-warning">bewertbar</a>`;
+            }
+            if (showBewertbar) {
+                return '<span class="status-text-warning">bewertbar</span>';
+            }
+            return fmtGrade(gradeDisplay);
+        };
+
         if (recent.length > 0) {
             const first = recent[0];
             html += `<tr class="${groupRowClass}">
@@ -1870,7 +1883,7 @@ function generateRecentSubmissionsTable() {
                 <td>${fmtDate(first.time)}</td>
                 <td>${first.title}</td>
                 <td>${first.category_name || '—'}</td>
-                <td style="text-align:center;">${fmtGrade(first.grade_display)}</td>
+                <td style="text-align:center;">${fmtBewertbar(first, first.url, first.activity_type, first.is_bewertbar, first.grade_display)}</td>
                 <td style="text-align:center;">${first.calendar_days_ago ?? '—'}</td>
                 <td style="text-align:center;">${first.school_days_ago ?? '—'}</td>
                 <td rowspan="${recent.length}">${statusHtml}</td>
@@ -1881,7 +1894,7 @@ function generateRecentSubmissionsTable() {
                     <td>${fmtDate(sub.time)}</td>
                     <td>${sub.title}</td>
                     <td>${sub.category_name || '—'}</td>
-                    <td style="text-align:center;">${fmtGrade(sub.grade_display)}</td>
+                    <td style="text-align:center;">${fmtBewertbar(sub, sub.url, sub.activity_type, sub.is_bewertbar, sub.grade_display)}</td>
                     <td style="text-align:center;">${sub.calendar_days_ago ?? '—'}</td>
                     <td style="text-align:center;">${sub.school_days_ago ?? '—'}</td>
                 </tr>`;
@@ -1893,7 +1906,7 @@ function generateRecentSubmissionsTable() {
                 <td>${fmtDate(entry.last_submission_time)}</td>
                 <td>${entry.last_submission_title || '—'}</td>
                 <td>${entry.last_submission_category || '—'}</td>
-                <td style="text-align:center;">${fmtGrade(entry.last_submission_grade)}</td>
+                <td style="text-align:center;">${fmtBewertbar(null, entry.last_submission_url, entry.last_submission_type, entry.last_submission_bewertbar, entry.last_submission_grade)}</td>
                 <td style="text-align:center;">${entry.calendar_days_since ?? '—'}</td>
                 <td style="text-align:center;">${entry.school_days_since ?? '—'}</td>
                 <td>${statusHtml}</td>
