@@ -1078,12 +1078,19 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
         all_submissions = []
         raw_group = raw_group_by_name.get(group_name, {})
 
+        # Nutzer-Whitelist aus gefilterten groups_data (excluded_names bereits entfernt)
+        valid_user_names = {u['name'] for u in groups_data.get(group_name, {}).get('users', [])}
+
         for user in raw_group.get('users', []):
+            if valid_user_names and user.get('name') not in valid_user_names:
+                continue
             activities = user.get('activities', {})
 
             for act in activities.get('assignments', []):
-                st = act.get('status', {}).get('submission_time')
-                if st:
+                status_obj = act.get('status', {})
+                st = status_obj.get('submission_time')
+                status_val = status_obj.get('status', 'Nicht eingereicht')
+                if st and status_val != 'Nicht eingereicht':
                     act_id = act.get('id', '')
                     cat_id = act.get('category_id')
                     all_submissions.append({
@@ -1091,11 +1098,15 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
                         'title': _title_for(act_id, act),
                         '_key': str(act_id) if act_id else None,
                         'is_pflicht': (pflicht_cat_id is not None and cat_id == pflicht_cat_id),
+                        '_grade': status_obj.get('grade', '-'),
+                        'category_name': details.get(str(act_id), {}).get('category_name', ''),
                     })
 
             for act in activities.get('quizzes', []):
-                st = act.get('status', {}).get('submission_time')
-                if st:
+                status_obj = act.get('status', {})
+                st = status_obj.get('submission_time')
+                status_val = status_obj.get('status', 'Nicht eingereicht')
+                if st and status_val != 'Nicht eingereicht':
                     act_id = act.get('id', '')
                     cat_id = act.get('category_id')
                     all_submissions.append({
@@ -1103,6 +1114,8 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
                         'title': _title_for(act_id, act),
                         '_key': str(act_id) if act_id else None,
                         'is_pflicht': (pflicht_cat_id is not None and cat_id == pflicht_cat_id),
+                        '_grade': status_obj.get('grade', '-'),
+                        'category_name': details.get(str(act_id), {}).get('category_name', ''),
                     })
 
             for mg in activities.get('manual_grades', []):
@@ -1115,20 +1128,44 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
                         'title': title,
                         '_key': f'mg_{item_id}' if item_id else None,
                         'is_pflicht': False,
+                        '_grade': mg.get('grade', '-'),
+                        'category_name': 'Manuelle Bewertung',
                     })
 
         # Nach Zeit absteigend sortieren
         all_submissions.sort(key=lambda x: x['time'], reverse=True)
 
-        # Deduplizieren: pro Aktivität (Schlüssel = ID oder Titel) nur neueste Abgabe
-        seen_keys = set()
-        deduped = []
+        # Deduplizieren: pro Aktivität neueste Abgabe behalten, Noten aller Schüler sammeln
+        grades_by_key = {}
+        first_by_key = {}
+        key_order = []
         for sub in all_submissions:
             key = sub.get('_key') or sub['title']
-            if key not in seen_keys:
-                seen_keys.add(key)
-                entry_clean = {k: v for k, v in sub.items() if k != '_key'}
-                deduped.append(entry_clean)
+            if key not in first_by_key:
+                first_by_key[key] = sub
+                key_order.append(key)
+                grades_by_key[key] = []
+            g = sub.get('_grade', '-')
+            if g and g not in ('-', 'Nicht bewertet', 'Keine Bewertung', 'Nicht benotet'):
+                grades_by_key[key].append(g)
+
+        deduped = []
+        for key in key_order:
+            sub = first_by_key[key]
+            grades = grades_by_key[key]
+            if not grades:
+                grade_display = None
+            elif len(set(grades)) == 1:
+                grade_display = grades[0]
+            else:
+                numeric = [n for n in (convert_grade_to_ihk(g) for g in grades) if n is not None]
+                if numeric:
+                    grade_display = f'∅ {round(sum(numeric) / len(numeric), 1)}'
+                else:
+                    grade_display = grades[0]
+            entry = {k: v for k, v in sub.items() if not k.startswith('_')}
+            entry['grade_display'] = grade_display
+            deduped.append(entry)
         all_submissions = deduped
 
         no_submissions = not all_submissions
@@ -1164,6 +1201,8 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
             'recent_submissions': recent_submissions,
             'last_submission_time': last['time'] if last else None,
             'last_submission_title': last['title'] if last else None,
+            'last_submission_grade': last.get('grade_display') if last else None,
+            'last_submission_category': last.get('category_name') if last else None,
             'school_days_since': school_days_since,
             'calendar_days_since': calendar_days_since,
             'inactive': inactive,

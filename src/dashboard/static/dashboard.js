@@ -1748,15 +1748,16 @@ function generateGroupProgressTable(users) {
     setTimeout(() => wrapTableWithScrollContainer('groupHalbjahresnotenTable'), 50);
 }
 // Letzte Abgaben je Gruppe anzeigen
-let recentSortCol = 0;
-let recentSortDir = 'asc';
+// Standardsortierung: Status (inaktive zuerst), sekundär alphabetisch
+let recentSortCol = 7;
+let recentSortDir = 'desc';
 
 function sortRecentSubmissions(colIndex) {
     if (recentSortCol === colIndex) {
         recentSortDir = recentSortDir === 'asc' ? 'desc' : 'asc';
     } else {
         recentSortCol = colIndex;
-        recentSortDir = 'asc';
+        recentSortDir = colIndex === 7 ? 'desc' : 'asc';
     }
     generateRecentSubmissionsTable();
 }
@@ -1787,7 +1788,7 @@ function generateRecentSubmissionsTable() {
         return;
     }
 
-    // Sortierwert je Spalte für eine Gruppe ermitteln
+    // Spalten: 0=Gruppe, 1=Abgabedatum, 2=Aufgabe, 3=Kategorie, 4=Bewertung, 5=Kalendertage, 6=Schularbeitstage, 7=Status
     const getSortKey = (name) => {
         const e = recentData[name];
         const recent = e.recent_submissions || [];
@@ -1797,9 +1798,11 @@ function generateRecentSubmissionsTable() {
             case 0: return name.toLowerCase();
             case 1: return lastTime;
             case 2: return lastTitle.toLowerCase();
-            case 3: return e.calendar_days_since ?? Infinity;
-            case 4: return e.school_days_since ?? Infinity;
-            case 5: return e.no_submissions ? 2 : e.inactive ? 1 : 0;
+            case 3: return (recent[0]?.category_name || e.last_submission_category || '').toLowerCase();
+            case 4: return (recent[0]?.grade_display || e.last_submission_grade || '').toString().toLowerCase();
+            case 5: return e.calendar_days_since ?? Infinity;
+            case 6: return e.school_days_since ?? Infinity;
+            case 7: return e.no_submissions ? 2 : e.inactive ? 1 : 0;
             default: return name.toLowerCase();
         }
     };
@@ -1813,23 +1816,27 @@ function generateRecentSubmissionsTable() {
         } else {
             cmp = ka < kb ? -1 : ka > kb ? 1 : 0;
         }
-        return recentSortDir === 'asc' ? cmp : -cmp;
+        if (cmp !== 0) return recentSortDir === 'asc' ? cmp : -cmp;
+        // Sekundärsortierung bei Gleichstand: alphabetisch nach Gruppenname
+        return a.localeCompare(b, 'de');
     });
 
+    // Timezone-sicheres Datum: ISO-String direkt parsen
     const fmtDate = iso => {
         if (!iso) return '—';
-        const d = new Date(iso);
-        return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const parts = iso.substring(0, 10).split('-');
+        if (parts.length !== 3) return iso;
+        return `${parts[2]}.${parts[1]}.${parts[0]}`;
     };
 
-    const colLabels = ['Gruppe', 'Abgabedatum', 'Aufgabe', 'Kalendertage', 'Schularbeitstage', 'Status'];
-    const centerCols = new Set([3, 4]);
+    const fmtGrade = g => (g != null) ? g : '—';
+
+    const colLabels = ['Gruppe', 'Abgabedatum', 'Aufgabe', 'Kategorie', 'Bewertung', 'Tage', 'Schultage', 'Status'];
+    const centerCols = new Set([4, 5, 6]);
 
     const thList = colLabels.map((label, i) => {
         const align = centerCols.has(i) ? ' style="text-align:center;"' : '';
-        const sortClass = i === recentSortCol
-            ? ` sort-${recentSortDir}`
-            : '';
+        const sortClass = i === recentSortCol ? ` sort-${recentSortDir}` : '';
         return `<th class="sortable-header${sortClass}"${align} onclick="sortRecentSubmissions(${i})">${label}</th>`;
     }).join('');
 
@@ -1849,23 +1856,21 @@ function generateRecentSubmissionsTable() {
         } else if (inactive) {
             const calD = entry.calendar_days_since ?? '?';
             const schD = entry.school_days_since != null ? entry.school_days_since : '?';
-            statusHtml = `<span class="badge badge-warning">Inaktiv (${calD} Kal. / ${schD} Schultage)</span>`;
+            statusHtml = `<span class="badge badge-warning">Inaktiv<br>(${calD} Kal. / ${schD} Schultage)</span>`;
             groupRowClass = 'recent-group-header recent-inactive';
         } else {
             statusHtml = `<span class="badge badge-success">Aktiv (${recent.length})</span>`;
             groupRowClass = 'recent-group-header recent-active';
         }
 
-        const buildPflichtBadge = isPflicht => isPflicht
-            ? '<span class="badge badge-warning" style="margin-left:5px;font-size:0.75em;">Pflicht</span>'
-            : '<span class="badge badge-secondary" style="margin-left:5px;font-size:0.75em;">Freiwillig</span>';
-
         if (recent.length > 0) {
             const first = recent[0];
             html += `<tr class="${groupRowClass}">
                 <td rowspan="${recent.length}"><strong>${groupName}</strong></td>
                 <td>${fmtDate(first.time)}</td>
-                <td>${first.title}${buildPflichtBadge(first.is_pflicht)}</td>
+                <td>${first.title}</td>
+                <td>${first.category_name || '—'}</td>
+                <td style="text-align:center;">${fmtGrade(first.grade_display)}</td>
                 <td style="text-align:center;">${first.calendar_days_ago ?? '—'}</td>
                 <td style="text-align:center;">${first.school_days_ago ?? '—'}</td>
                 <td rowspan="${recent.length}">${statusHtml}</td>
@@ -1874,17 +1879,21 @@ function generateRecentSubmissionsTable() {
                 const sub = recent[i];
                 html += `<tr class="recent-sub-row">
                     <td>${fmtDate(sub.time)}</td>
-                    <td>${sub.title}${buildPflichtBadge(sub.is_pflicht)}</td>
+                    <td>${sub.title}</td>
+                    <td>${sub.category_name || '—'}</td>
+                    <td style="text-align:center;">${fmtGrade(sub.grade_display)}</td>
                     <td style="text-align:center;">${sub.calendar_days_ago ?? '—'}</td>
                     <td style="text-align:center;">${sub.school_days_ago ?? '—'}</td>
                 </tr>`;
             }
         } else {
-            // Inaktiv: letzte bekannte Abgabe anzeigen
+            // Inaktiv/keine aktuellen Abgaben: letzte bekannte Abgabe anzeigen
             html += `<tr class="${groupRowClass}">
                 <td><strong>${groupName}</strong></td>
                 <td>${fmtDate(entry.last_submission_time)}</td>
                 <td>${entry.last_submission_title || '—'}</td>
+                <td>${entry.last_submission_category || '—'}</td>
+                <td style="text-align:center;">${fmtGrade(entry.last_submission_grade)}</td>
                 <td style="text-align:center;">${entry.calendar_days_since ?? '—'}</td>
                 <td style="text-align:center;">${entry.school_days_since ?? '—'}</td>
                 <td>${statusHtml}</td>

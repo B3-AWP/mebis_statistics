@@ -22,7 +22,7 @@
 
 .dashboard-table td {
     padding: 6px 4px !important;
-    text-align: center;
+    /* text-align: center; */
     vertical-align: middle;
 }
 
@@ -831,6 +831,8 @@
 #recentSubmissionsDataTable th:nth-child(2),
 #recentSubmissionsDataTable td:nth-child(2),
 #recentSubmissionsDataTable th:nth-child(3),
-#recentSubmissionsDataTable td:nth-child(3) {
+#recentSubmissionsDataTable td:nth-child(3)
+#recentSubmissionsDataTable th:nth-child(4),
+#recentSubmissionsDataTable td:nth-child(4)  {
     text-align: left;
 }
