@@ -1494,7 +1494,7 @@ function calculateMitarbeitsnote2Prognose(user, groupName, weekOverride) {
 
 // Hilfsfunktion: Rendert eine Prozentzelle mit Farbe und Fallback
 // points: optional {actual, expected} – zeigt "(actual / expected)" als Sub-Label
-function renderPctCell(value, cssClass, points = null) {
+function renderPctCell(value, cssClass, points = null, decimals = 1) {
     if (value === null || value === undefined) {
         return `<td class="text-center" style="color:#6C757D;">–</td>`;
     }
@@ -1502,15 +1502,19 @@ function renderPctCell(value, cssClass, points = null) {
     const pointsStr = points !== null
         ? `<span class="cell-points">${Math.round(points.actual)} / ${Math.round(points.expected)}</span>`
         : '';
-    return `<td class="progress-cell ${cssClass}" style="--progress-width: ${Math.min(capped, 100)}%;">${value.toFixed(1)}%${pointsStr}</td>`;
+    return `<td class="progress-cell ${cssClass}" style="--progress-width: ${Math.min(capped, 100)}%;">${value.toFixed(decimals)}%${pointsStr}</td>`;
 }
 
 // Hilfsfunktion: Rendert eine Notenzelle
-function renderGradeCell(grade) {
+// overall: optionaler Gesamtprozentwert, der als Sub-Label angezeigt wird
+function renderGradeCell(grade, overall = null) {
     if (grade === null || grade === undefined) {
         return `<td class="text-center" style="color:#6C757D;">–</td>`;
     }
-    return `<td class="text-center text-bold" style="color: ${getGradeColor(grade)};">${grade.toFixed(1)}</td>`;
+    const overallStr = overall !== null
+        ? `<br>${overall.toFixed(1)}%`
+        : '';
+    return `<td class="text-center text-bold" style="color: ${getGradeColor(grade)};">${grade.toFixed(1)}${overallStr}</td>`;
 }
 
 // Generiert die Halbjahresnotenabschnitte unterhalb der Gesamtfortschritts-Tabelle
@@ -1581,22 +1585,22 @@ function generateHalbjahresnotenTable(users, mode = 'both') {
             html += `<td class="person-name"><strong>${user.name}</strong></td>`;
             if (ma1.quantitaetIsActual) {
                 // Manueller Wert (volle Deckkraft) – Punkte werden rückberechnet angezeigt
-                html += renderPctCell(ma1.quantitaet, 'progress-color-info', ma1.quantitaetPoints);
+                html += renderPctCell(ma1.quantitaet, 'progress-color-info', ma1.quantitaetPoints, 0);
             } else {
                 // Berechneter Wert (leicht transparent als Hinweis)
                 const qPts = ma1.quantitaetPoints;
                 const qSub = qPts ? `<span class="cell-points">${Math.round(qPts.actual)} / ${Math.round(qPts.expected)}</span>` : '';
-                html += `<td class="progress-cell progress-color-info" style="opacity:0.65;" title="Berechneter Wert (noch keine tatsächliche Note)">${ma1.quantitaet !== null ? ma1.quantitaet.toFixed(1) + '%' : '–'}${qSub}</td>`;
+                html += `<td class="progress-cell progress-color-info" style="opacity:0.65;" title="Berechneter Wert (noch keine tatsächliche Note)">${ma1.quantitaet !== null ? ma1.quantitaet.toFixed(0) + '%' : '–'}${qSub}</td>`;
             }
             if (ma1.qualitaetIsActual) {
-                html += renderPctCell(ma1.qualitaet, 'progress-color-warning');
+                html += renderPctCell(ma1.qualitaet, 'progress-color-warning', null, 0);
             } else {
-                html += `<td class="progress-cell progress-color-warning" style="opacity:0.65;" title="Berechneter Wert (noch keine tatsächliche Note)">${ma1.qualitaet !== null ? ma1.qualitaet.toFixed(1) + '%' : '–'}</td>`;
+                html += `<td class="progress-cell progress-color-warning" style="opacity:0.65;" title="Berechneter Wert (noch keine tatsächliche Note)">${ma1.qualitaet !== null ? ma1.qualitaet.toFixed(0) + '%' : '–'}</td>`;
             }
-            if (showReviewTalk1) html += renderPctCell(ma1.reviewTalk, 'progress-color-secondary');
+            if (showReviewTalk1) html += renderPctCell(ma1.reviewTalk, 'progress-color-secondary', null, 0);
             if (hasActualMA1) {
                 if (ma1.actualMA1Grade !== null) {
-                    html += renderPctCell(ma1.actualMA1Grade, 'progress-color-success');
+                    html += renderPctCell(ma1.actualMA1Grade, 'progress-color-success', null, 0);
                 } else {
                     html += `<td class="text-center" style="color:#6C757D;">–</td>`;
                 }
@@ -1634,11 +1638,11 @@ function generateHalbjahresnotenTable(users, mode = 'both') {
             }
             html += `<tr>`;
             html += `<td class="person-name"><strong>${user.name}</strong></td>`;
-            html += renderPctCell(ma2.quantitaet, 'progress-color-info', ma2.quantitaetPoints);
-            html += renderPctCell(ma2.qualitaet, 'progress-color-warning');
-            if (showReviewTalk2) html += renderPctCell(ma2.reviewTalk2, 'progress-color-secondary');
-            if (showCodeReview) html += renderPctCell(ma2.codeReview, 'progress-color-success');
-            html += renderGradeCell(ma2.grade);
+            html += renderPctCell(ma2.quantitaet, 'progress-color-info', ma2.quantitaetPoints, 0);
+            html += renderPctCell(ma2.qualitaet, 'progress-color-warning', null, 0);
+            if (showReviewTalk2) html += renderPctCell(ma2.reviewTalk2, 'progress-color-secondary', null, 0);
+            if (showCodeReview) html += renderPctCell(ma2.codeReview, 'progress-color-success', null, 0);
+            html += renderGradeCell(ma2.grade, ma2.overall);
             html += `</tr>`;
         });
 
@@ -1719,16 +1723,16 @@ function generateGroupProgressTable(users) {
         let pflichtGradeText = '-';
         let pflichtGradeColor = '#6C757D';
         if (pflichtGradeResult && pflichtGradeResult.grade !== null) {
-            pflichtGradeText = `${pflichtGradeResult.grade.toFixed(0)}<br>(${pflichtGradeResult.percent.toFixed(1)}%, N=${pflichtGradeResult.count})`;
+            pflichtGradeText = `${pflichtGradeResult.grade.toFixed(0)}<br>(${pflichtGradeResult.percent.toFixed(0)}%, N=${pflichtGradeResult.count})`;
             pflichtGradeColor = getGradeColor(pflichtGradeResult.grade);
         }
 
         html += '<tr>';
         html += `<td class="person-name"><strong>${user.name}</strong></td>`;
         const pflichtSub = pflichtPoints ? `<span class="cell-points">${Math.round(pflichtPoints.actual)} / ${Math.round(pflichtPoints.expected)}</span>` : '';
-        html += `<td class="progress-cell progress-color-info" style="--progress-width: ${displayPflichtProgress}%;">${displayPflichtProgress.toFixed(1)}%${pflichtSub}</td>`;
+        html += `<td class="progress-cell progress-color-info" style="--progress-width: ${displayPflichtProgress}%;">${displayPflichtProgress.toFixed(0)}%${pflichtSub}</td>`;
         html += `<td class="text-center text-bold">${gradeText}</td>`;
-        html += `<td class="progress-cell progress-color-secondary" style="--progress-width: ${displayGesamtProgress}%;">${displayGesamtProgress.toFixed(1)}%</td>`;
+        html += `<td class="progress-cell progress-color-secondary" style="--progress-width: ${displayGesamtProgress}%;">${displayGesamtProgress.toFixed(0)}%</td>`;
         html += `<td class="progress-cell progress-color-warning" style="--progress-width: ${user.assignments.percent_submitted}%;">${user.assignments.submitted_count}</td>`;
         html += `<td class="text-center text-bold" style="color: ${pflichtGradeColor};" title="Durchschnitt aus ${pflichtGradeResult ? pflichtGradeResult.count : 0} bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
         html += '</tr>';
