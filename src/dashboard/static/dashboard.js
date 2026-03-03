@@ -1466,7 +1466,7 @@ function calculateMitarbeitsnote2Prognose(user, groupName, weekOverride) {
     // Komponente 3: Review-Talk 2
     const reviewTalk2Id = prognosisAssignments.reviewTalk2 || null;
     const reviewTalk2 = reviewTalk2Id
-        ? findAssignmentOrQuizGradeForUser(reviewTalk2Id, user.name, referenztermin)
+        ? findAssignmentOrQuizGradeForUser(reviewTalk2Id, user.name, null)
         : null;
 
     // Komponente 4: Code-Review
