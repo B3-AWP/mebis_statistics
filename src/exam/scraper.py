@@ -312,26 +312,27 @@ class QuizScraper:
 
             # Parse HTML
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            table = soup.find('table', class_='generaltable')
+            table = soup.find('table', class_='course-overview-table')
 
             if not table:
-                self.logger.warning("Quiz table not found")
+                self.logger.warning(f"Quiz table not found at URL: {quiz_index_url}")
                 return quizzes
 
             rows = table.find('tbody').find_all('tr')
 
             for row in rows:
                 try:
-                    # Überspringe Divider-Zeilen
-                    if 'tabledivider' in str(row):
+                    # Quiz-ID aus Row-Attribut
+                    quiz_id = row.get('data-mdl-overview-cmid')
+                    if not quiz_id:
                         continue
 
-                    # Name-Spalte (c1)
-                    name_cell = row.find('td', class_='c1')
+                    # Name-Spalte
+                    name_cell = row.find('td', attrs={'data-mdl-overview-item': 'name'})
                     if not name_cell:
                         continue
 
-                    link = name_cell.find('a')
+                    link = name_cell.find('a', class_='activityname')
                     if not link:
                         continue
 
@@ -341,17 +342,17 @@ class QuizScraper:
                     if '(Leistungsnachweis)' not in quiz_name:
                         continue
 
-                    # Quiz-ID aus URL extrahieren
-                    href = link.get('href', '')
-                    quiz_id_match = re.search(r'id=(\d+)', href)
-                    if not quiz_id_match:
-                        continue
-
-                    quiz_id = quiz_id_match.group(1)
-
-                    # Deadline (c2)
-                    deadline_cell = row.find('td', class_='c2')
-                    deadline = deadline_cell.get_text(strip=True) if deadline_cell else 'Kein Abgabedatum'
+                    # Deadline
+                    deadline_cell = row.find('td', attrs={'data-mdl-overview-item': 'duedate'})
+                    deadline = 'Kein Abgabedatum'
+                    if deadline_cell:
+                        date_span = deadline_cell.find('span', class_='date')
+                        if date_span:
+                            deadline = date_span.get_text(strip=True)
+                        else:
+                            text = deadline_cell.get_text(strip=True)
+                            if text and text != '-':
+                                deadline = text
 
                     quizzes.append({
                         'quiz_id': quiz_id,
