@@ -476,6 +476,191 @@ def static_files(filename):
     """Serviert statische Dateien"""
     return send_from_directory(app.static_folder, filename)
 
+def _process_dashboard_data(data, source_label=None):
+    """
+    Verarbeitet rohe JSON-Exportdaten und gibt ein fertiges Response-Dict zurück.
+
+    Args:
+        data: Geladenes JSON-Dict
+        source_label: Anzeigename der Quelle (Dateipfad oder Dateiname)
+
+    Returns:
+        dict: Response-Dict für jsonify
+    """
+    import datetime, re as _re
+
+    logger = data_logger
+
+    excluded_names = load_excluded_names()
+    ignored_groups = load_ignored_groups()
+
+    logger.info("=" * 80)
+    logger.info(f"EXCLUDED NAMES: {len(excluded_names)} names loaded")
+    logger.info(f"Excluded names list: {sorted(list(excluded_names))}")
+    logger.info("=" * 80)
+
+    try:
+        grade_mapping = config_manager.get_grade_mapping()
+    except Exception as e:
+        logger.error(f"Error loading grade_mapping: {e}")
+        grade_mapping = {}
+
+    assignment_details = get_assignment_details(data.get('activities_by_category', []))
+
+    groups_data = {}
+    for group in data.get('groups', []):
+        group_name = group.get('name', 'Unknown')
+        if group_name in ignored_groups:
+            continue
+
+        all_users_in_group = [user.get('name') for user in group.get('users', [])]
+        logger.info(f"Group '{group_name}' has {len(all_users_in_group)} users before filtering")
+
+        group_users = []
+        excluded_count = 0
+        for user in group.get('users', []):
+            user_name = user.get('name', '')
+            if user_name in excluded_names:
+                logger.info(f"  ✗ Excluding user '{user_name}' from group '{group_name}'")
+                excluded_count += 1
+            else:
+                group_users.append(user)
+
+        if excluded_count > 0:
+            logger.info(f"Group '{group_name}': Excluded {excluded_count} users, {len(group_users)} remaining")
+
+        if group_users:
+            groups_data[group_name] = {
+                'name': group_name,
+                'value': group.get('value'),
+                'users': []
+            }
+            for user in group_users:
+                try:
+                    user['group'] = group_name
+                    user_progress = calculate_user_progress(
+                        user, assignment_details, data.get('activities_by_category', []), 10, 40
+                    )
+                    groups_data[group_name]['users'].append(user_progress)
+                except Exception as e:
+                    logger.warning(f"Error processing user {user.get('name', 'Unknown')}: {e}")
+                    groups_data[group_name]['users'].append(create_fallback_user(user, group_name))
+
+    for group_name, group_data in groups_data.items():
+        group_data.update(calculate_group_averages(group_data['users']))
+
+    all_users = []
+    for group_data in groups_data.values():
+        all_users.extend(group_data['users'])
+    overall_stats = calculate_group_averages(all_users)
+
+    structured_data = create_structured_tables(groups_data, data.get('activities_by_category', []))
+
+    pflichtaufgaben_category = None
+    other_categories = []
+    for category in data.get('activities_by_category', []):
+        if 'Pflichtaufgaben' in category.get('category_name', ''):
+            pflichtaufgaben_category = category
+        else:
+            other_categories.append(category)
+    activities_ordered = ([pflichtaufgaben_category] + other_categories) if pflichtaufgaben_category else data.get('activities_by_category', [])
+
+    def add_user_status_to_activities(activities, data, groups_data, excluded_names):
+        for category in activities:
+            for assignment in category.get('assignments', []):
+                assignment['user_status'] = []
+                assignment_id = assignment.get('id')
+                for group in data.get('groups', []):
+                    gname = group.get('name', '')
+                    if gname in ignored_groups:
+                        continue
+                    for user in group.get('users', []):
+                        if user.get('name') in excluded_names:
+                            continue
+                        status = find_user_assignment_status(user, assignment_id)
+                        assignment['user_status'].append({
+                            'user_name': user.get('name', ''),
+                            'user_id': user.get('id', ''),
+                            'status': status.get('status', 'Nicht eingereicht'),
+                            'grade': status.get('grade', '-'),
+                            'submission_time': status.get('submission_time', None)
+                        })
+            for quiz in category.get('quizzes', []):
+                quiz['user_status'] = []
+                quiz_id = quiz.get('id')
+                for group in data.get('groups', []):
+                    gname = group.get('name', '')
+                    if gname in ignored_groups:
+                        continue
+                    for user in group.get('users', []):
+                        if user.get('name') in excluded_names:
+                            continue
+                        status = find_user_assignment_status(user, quiz_id)
+                        quiz['user_status'].append({
+                            'user_name': user.get('name', ''),
+                            'user_id': user.get('id', ''),
+                            'status': status.get('status', 'Nicht eingereicht'),
+                            'grade': status.get('grade', '-'),
+                            'submission_time': status.get('submission_time', None)
+                        })
+        return activities
+
+    activities_with_status = add_user_status_to_activities(activities_ordered, data, groups_data, excluded_names)
+
+    flask_config = config_manager.get_flask_config()
+    environment_settings = {'mode': flask_config['env'], 'debug': flask_config['debug']}
+
+    export_date = None
+    if source_label:
+        _m = _re.search(r'(\d{8})_\d{6}', os.path.basename(source_label))
+        if _m:
+            try:
+                ds = _m.group(1)
+                export_date = datetime.date(int(ds[:4]), int(ds[4:6]), int(ds[6:8]))
+            except ValueError:
+                pass
+    if export_date is None:
+        export_date = datetime.date.today()
+
+    mitarbeitsnote_cfg = config_manager.get_mitarbeitsnote_config()
+    manual_grade_ids = config_manager.get_manual_grade_item_ids()
+    recent_days = config_manager.get_recent_submission_days()
+    inactive_threshold = config_manager.get_inactive_threshold_days()
+    recent_submissions = build_recent_submissions(
+        groups_data=groups_data,
+        raw_groups=data.get('groups', []),
+        manual_grade_item_ids=manual_grade_ids,
+        mitarbeitsnote_config=mitarbeitsnote_cfg,
+        recent_submission_days=recent_days,
+        assignment_details=assignment_details,
+        reference_date=export_date,
+        categories=activities_with_status,
+        inactive_threshold_days=inactive_threshold,
+    )
+
+    response_data = {
+        'groups': groups_data,
+        'overall_stats': overall_stats,
+        'assignment_details': assignment_details,
+        'categories': activities_with_status,
+        'activities_by_category': activities_with_status,
+        'structured_tables': structured_data,
+        'ignored_groups': list(ignored_groups),
+        'grade_mapping': grade_mapping,
+        'max_schoolweeks': config_manager.get_max_schoolweeks(),
+        'mitarbeitsnote_config': mitarbeitsnote_cfg,
+        'manual_grade_item_ids': manual_grade_ids,
+        'course_id': config_manager.get_course_id(),
+        'last_updated': source_label,
+        'environment': environment_settings,
+        'recent_submissions': recent_submissions,
+        'recent_submission_days': recent_days,
+    }
+
+    logger.info(f"Response created successfully with {len(groups_data)} groups")
+    return response_data
+
+
 @app.route('/api/data')
 def get_data():
     """
@@ -485,244 +670,18 @@ def get_data():
     logger.info("API endpoint /api/data called")
 
     try:
-        # Neueste JSON-Datei finden
         latest_file = find_latest_file()
         if not latest_file:
             logger.error("No export file found")
             return jsonify({'error': 'Keine Export-Datei gefunden'}), 404
 
-        # Daten laden
         data = load_json_data(latest_file)
         if not data:
             logger.error("Failed to load JSON data")
             return jsonify({'error': 'Fehler beim Laden der Daten'}), 500
 
-        # Hilfsdaten laden
-        excluded_names = load_excluded_names()
-        ignored_groups = load_ignored_groups()
+        response_data = _process_dashboard_data(data, source_label=latest_file)
 
-        # Log excluded names for debugging
-        logger.info(f"=" * 80)
-        logger.info(f"EXCLUDED NAMES: {len(excluded_names)} names loaded")
-        logger.info(f"Excluded names list: {sorted(list(excluded_names))}")
-        logger.info(f"=" * 80)
-
-        # Grade Mapping laden
-        try:
-            grade_mapping = config_manager.get_grade_mapping()
-            logger.info(f"Grade mapping loaded: {len(grade_mapping)} entries - {grade_mapping}")
-        except Exception as e:
-            logger.error(f"Error loading grade_mapping: {e}")
-            grade_mapping = {}
-
-        # Assignment Details erstellen
-        assignment_details = get_assignment_details(data.get('activities_by_category', []))
-
-        # Benutzer nach Gruppen organisieren
-        groups_data = {}
-
-        for group in data.get('groups', []):
-            group_name = group.get('name', 'Unknown')
-
-            # Überspringe ignorierte Gruppen
-            if group_name in ignored_groups:
-                logger.debug(f"Skipping ignored group: {group_name}")
-                continue
-
-            # Log names before filtering
-            all_users_in_group = [user.get('name') for user in group.get('users', [])]
-            logger.info(f"Group '{group_name}' has {len(all_users_in_group)} users before filtering")
-
-            group_users = []
-            excluded_count = 0
-            for user in group.get('users', []):
-                user_name = user.get('name', '')
-                if user_name in excluded_names:
-                    logger.info(f"  ✗ Excluding user '{user_name}' from group '{group_name}'")
-                    excluded_count += 1
-                else:
-                    group_users.append(user)
-
-            if excluded_count > 0:
-                logger.info(f"Group '{group_name}': Excluded {excluded_count} users, {len(group_users)} remaining")
-
-            if group_users:  # Nur Gruppen mit Benutzern
-                groups_data[group_name] = {
-                    'name': group_name,
-                    'value': group.get('value'),  # Add group ID for URL parameters
-                    'users': []
-                }
-
-                for user in group_users:
-                    try:
-                        # Setze die Gruppe für jeden Benutzer
-                        user['group'] = group_name
-                        user_progress = calculate_user_progress(
-                            user, assignment_details, data.get('activities_by_category', []), 10, 40
-                        )
-                        groups_data[group_name]['users'].append(user_progress)
-                    except Exception as e:
-                        logger.warning(f"Error processing user {user.get('name', 'Unknown')}: {e}")
-                        # Füge einen Fallback-Benutzer hinzu
-                        groups_data[group_name]['users'].append(create_fallback_user(user, group_name))
-
-        # Statistiken berechnen
-        for group_name, group_data in groups_data.items():
-            group_stats = calculate_group_averages(group_data['users'])
-            group_data.update(group_stats)
-
-        # Gesamtstatistiken
-        all_users = []
-        for group_data in groups_data.values():
-            all_users.extend(group_data['users'])
-        overall_stats = calculate_group_averages(all_users)
-
-        # Strukturierte Daten für Tabellen erstellen
-        structured_data = create_structured_tables(groups_data, data.get('activities_by_category', []))
-
-        # Debug: Prüfe zentrale Leistungsnachweise in jeder Gruppe
-        for group_name, group_data in structured_data.items():
-            zentral_data = group_data.get('zentrale_leistungsnachweise', {})
-            zentral_rows = zentral_data.get('rows', [])
-            logger.debug(f"Group '{group_name}' has {len(zentral_rows)} zentrale Leistungsnachweise")
-
-        # Reorder activities_by_category to put "Pflichtaufgaben" first
-        activities_ordered = []
-        pflichtaufgaben_category = None
-        other_categories = []
-
-        for category in data.get('activities_by_category', []):
-            if 'Pflichtaufgaben' in category.get('category_name', ''):
-                pflichtaufgaben_category = category
-            else:
-                other_categories.append(category)
-
-        if pflichtaufgaben_category:
-            activities_ordered = [pflichtaufgaben_category] + other_categories
-        else:
-            activities_ordered = data.get('activities_by_category', [])
-
-        # Add user_status to activities for frontend
-        def add_user_status_to_activities(activities, data, groups_data, excluded_names):
-            for category in activities:
-                # Add user_status to assignments
-                for assignment in category.get('assignments', []):
-                    assignment['user_status'] = []
-                    assignment_id = assignment.get('id')
-
-                    # Find user grades for this assignment from original JSON data
-                    for group in data.get('groups', []):
-                        group_name = group.get('name', '')
-                        # Skip users from ignored groups
-                        if group_name in ignored_groups:
-                            continue
-
-                        group_users = group.get('users', [])
-                        for user in group_users:
-                            # Skip excluded users
-                            if user.get('name') in excluded_names:
-                                continue
-
-                            status = find_user_assignment_status(user, assignment_id)
-                            assignment['user_status'].append({
-                                'user_name': user.get('name', ''),
-                                'user_id': user.get('id', ''),
-                                'status': status.get('status', 'Nicht eingereicht'),
-                                'grade': status.get('grade', '-'),
-                                'submission_time': status.get('submission_time', None)
-                            })
-
-                # Add user_status to quizzes
-                for quiz in category.get('quizzes', []):
-                    quiz['user_status'] = []
-                    quiz_id = quiz.get('id')
-
-                    # Find user grades for this quiz from original JSON data
-                    for group in data.get('groups', []):
-                        group_name = group.get('name', '')
-                        # Skip users from ignored groups
-                        if group_name in ignored_groups:
-                            continue
-
-                        group_users = group.get('users', [])
-                        for user in group_users:
-                            # Skip excluded users
-                            if user.get('name') in excluded_names:
-                                continue
-
-                            status = find_user_assignment_status(user, quiz_id)
-                            quiz['user_status'].append({
-                                'user_name': user.get('name', ''),
-                                'user_id': user.get('id', ''),
-                                'status': status.get('status', 'Nicht eingereicht'),
-                                'grade': status.get('grade', '-'),
-                                'submission_time': status.get('submission_time', None)
-                            })
-            return activities
-
-        activities_with_status = add_user_status_to_activities(activities_ordered, data, groups_data, excluded_names)
-
-        # Environment-Settings für Frontend
-        flask_config = config_manager.get_flask_config()
-        environment_settings = {
-            'mode': flask_config['env'],
-            'debug': flask_config['debug']
-        }
-
-        # Export-Datum aus Dateinamen extrahieren (output_YYYYMMDD_HHMMSS.json)
-        import datetime, re as _re
-        export_date = None
-        if latest_file:
-            _m = _re.search(r'(\d{8})_\d{6}', os.path.basename(latest_file))
-            if _m:
-                try:
-                    ds = _m.group(1)
-                    export_date = datetime.date(int(ds[:4]), int(ds[4:6]), int(ds[6:8]))
-                except ValueError:
-                    pass
-        if export_date is None:
-            export_date = datetime.date.today()
-
-        # Letzte Abgaben je Gruppe berechnen
-        mitarbeitsnote_cfg = config_manager.get_mitarbeitsnote_config()
-        manual_grade_ids = config_manager.get_manual_grade_item_ids()
-        recent_days = config_manager.get_recent_submission_days()
-        inactive_threshold = config_manager.get_inactive_threshold_days()
-        recent_submissions = build_recent_submissions(
-            groups_data=groups_data,
-            raw_groups=data.get('groups', []),
-            manual_grade_item_ids=manual_grade_ids,
-            mitarbeitsnote_config=mitarbeitsnote_cfg,
-            recent_submission_days=recent_days,
-            assignment_details=assignment_details,
-            reference_date=export_date,
-            categories=activities_with_status,
-            inactive_threshold_days=inactive_threshold,
-        )
-
-        # Response erstellen
-        response_data = {
-            'groups': groups_data,
-            'overall_stats': overall_stats,
-            'assignment_details': assignment_details,
-            'categories': activities_with_status,
-            'activities_by_category': activities_with_status,  # Korrekte Frontend-Erwartung
-            'structured_tables': structured_data,
-            'ignored_groups': list(ignored_groups),
-            'grade_mapping': grade_mapping,
-            'max_schoolweeks': config_manager.get_max_schoolweeks(),
-            'mitarbeitsnote_config': mitarbeitsnote_cfg,
-            'manual_grade_item_ids': manual_grade_ids,
-            'course_id': config_manager.get_course_id(),
-            'last_updated': latest_file,
-            'environment': environment_settings,
-            'recent_submissions': recent_submissions,
-            'recent_submission_days': recent_days,
-        }
-
-        logger.info(f"API response created successfully with {len(groups_data)} groups")
-
-        # JSON-Serialization test
         import json
         json_test = json.dumps(response_data, default=str, ensure_ascii=False)
         logger.debug(f"JSON serialization successful, size: {len(json_test)} characters")
@@ -731,6 +690,39 @@ def get_data():
 
     except Exception as e:
         logger.error(f"Unexpected error in get_data: {e}", exc_info=True)
+        return jsonify({'error': 'Unerwarteter Server-Fehler'}), 500
+
+
+@app.route('/api/load-file', methods=['POST'])
+def load_file():
+    """
+    API-Endpoint zum manuellen Laden einer JSON-Exportdatei (Upload vom Browser)
+    """
+    logger = api_logger
+    logger.info("API endpoint /api/load-file called")
+
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'Keine Datei übermittelt'}), 400
+
+        uploaded = request.files['file']
+        if not uploaded.filename:
+            return jsonify({'error': 'Kein Dateiname'}), 400
+        if not uploaded.filename.lower().endswith('.json'):
+            return jsonify({'error': 'Nur JSON-Dateien erlaubt'}), 400
+
+        try:
+            data = json.load(uploaded.stream)
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in uploaded file: {e}")
+            return jsonify({'error': f'Ungültiges JSON-Format: {e}'}), 400
+
+        response_data = _process_dashboard_data(data, source_label=uploaded.filename)
+        json.dumps(response_data, default=str, ensure_ascii=False)  # Serialization check
+        return jsonify(response_data)
+
+    except Exception as e:
+        logger.error(f"Unexpected error in load_file: {e}", exc_info=True)
         return jsonify({'error': 'Unerwarteter Server-Fehler'}), 500
 
 def create_fallback_user(user, group_name):

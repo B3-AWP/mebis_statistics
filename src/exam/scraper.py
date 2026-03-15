@@ -530,7 +530,11 @@ class QuizScraper:
                     # Abschluss-Zeit (c7 - "Beendet")
                     finished_cell = row.find('td', class_='c7')
                     finished_time_raw = finished_cell.get_text(strip=True) if finished_cell else None
-                    finished_time = parse_german_datetime(finished_time_raw) if finished_time_raw else None
+                    finished_time_str = parse_german_datetime(finished_time_raw) if finished_time_raw else None
+                    try:
+                        finished_time = datetime.fromisoformat(finished_time_str) if finished_time_str else None
+                    except (ValueError, TypeError):
+                        finished_time = None
 
                     # Datumsfilter: Überspringe Versuche vor since_date
                     if since_date and finished_time:

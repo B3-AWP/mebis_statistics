@@ -281,6 +281,79 @@ async function startExportAndReload() {
         });
     }
 }
+function applyDashboardData(data) {
+    dashboardData = data;
+    window.dashboardData = dashboardData;
+
+    dashboardLogger.debug('DATA', 'grade_mapping exists', { exists: !!dashboardData.grade_mapping });
+    if (dashboardData.grade_mapping) {
+        gradeMapping = dashboardData.grade_mapping;
+        window.gradeMapping = gradeMapping;
+        dashboardLogger.info('DATA', 'Grade mapping loaded successfully', gradeMapping);
+    } else {
+        dashboardLogger.error('DATA', 'No grade_mapping found in backend response', {
+            availableKeys: Object.keys(dashboardData)
+        });
+    }
+
+    if (dashboardData.max_schoolweeks) {
+        maxSchoolweeks = dashboardData.max_schoolweeks;
+        window.maxSchoolweeks = maxSchoolweeks;
+        dashboardLogger.info('DATA', `Max schoolweeks loaded: ${maxSchoolweeks}`);
+    } else {
+        dashboardLogger.warn('DATA', `No max_schoolweeks found, using default: ${maxSchoolweeks}`);
+    }
+
+    if (dashboardData.mitarbeitsnote_config) {
+        mitarbeitsnoteConfig = dashboardData.mitarbeitsnote_config;
+        window.mitarbeitsnoteConfig = mitarbeitsnoteConfig;
+        dashboardLogger.info('DATA', 'Mitarbeitsnote config loaded', mitarbeitsnoteConfig);
+    }
+
+    if (dashboardData.manual_grade_item_ids) {
+        manualGradeItemIds = dashboardData.manual_grade_item_ids;
+        dashboardLogger.info('DATA', 'Manual grade item IDs loaded', manualGradeItemIds);
+    }
+
+    if (dashboardData.course_id) {
+        courseId = dashboardData.course_id;
+        dashboardLogger.info('DATA', `Course ID loaded: ${courseId}`);
+    } else {
+        dashboardLogger.warn('DATA', 'No course_id found in backend response');
+    }
+
+    const slider = document.getElementById('referenceWeekSlider');
+    if (slider) {
+        slider.max = maxSchoolweeks;
+        slider.value = maxSchoolweeks;
+        const maxLabel = document.querySelector('.slider-value.max');
+        if (maxLabel) maxLabel.textContent = maxSchoolweeks;
+    }
+
+    dashboardLogger.info('DATA', 'Dashboard data loaded', {
+        hasActivitiesByCategory: !!dashboardData.activities_by_category,
+        categoriesCount: dashboardData.activities_by_category ? dashboardData.activities_by_category.length : 'undefined',
+        sampleCategory: dashboardData.activities_by_category ? dashboardData.activities_by_category[0] : 'none'
+    });
+
+    if (dashboardData.activities_by_category && dashboardData.activities_by_category.length > 0) {
+        const firstCategory = dashboardData.activities_by_category[0];
+        dashboardLogger.debug('DATA', 'First category assignments', {
+            assignmentCount: firstCategory.assignments ? firstCategory.assignments.length : 'undefined',
+            sampleAssignment: firstCategory.assignments && firstCategory.assignments.length > 0 ? firstCategory.assignments[0] : 'none'
+        });
+    }
+
+    if (dashboardData.environment) {
+        dashboardLogger.setBackendEnvironment(dashboardData.environment);
+    }
+
+    displayFileInfo(dashboardData.last_updated);
+    populateGroupSelectors();
+    populateCategoryFilter();
+    updateDashboard();
+}
+
 async function loadData() {
     showLoading(true);
 
@@ -290,101 +363,42 @@ async function loadData() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        dashboardData = await response.json();
-        window.dashboardData = dashboardData; // Sync to window
-
-        // Load grade mapping from backend
-        dashboardLogger.debug('DATA', 'Checking for grade_mapping in response');
-        dashboardLogger.debug('DATA', 'grade_mapping exists', { exists: !!dashboardData.grade_mapping });
-
-        if (dashboardData.grade_mapping) {
-            gradeMapping = dashboardData.grade_mapping;
-            window.gradeMapping = gradeMapping; // Sync to window
-            dashboardLogger.info('DATA', 'Grade mapping loaded successfully', gradeMapping);
-        } else {
-            dashboardLogger.error('DATA', 'No grade_mapping found in backend response', {
-                availableKeys: Object.keys(dashboardData)
-            });
-        }
-
-        // Load max_schoolweeks from backend
-        if (dashboardData.max_schoolweeks) {
-            maxSchoolweeks = dashboardData.max_schoolweeks;
-            window.maxSchoolweeks = maxSchoolweeks; // Sync to window
-            dashboardLogger.info('DATA', `Max schoolweeks loaded: ${maxSchoolweeks}`);
-        } else {
-            dashboardLogger.warn('DATA', `No max_schoolweeks found, using default: ${maxSchoolweeks}`);
-        }
-
-        // Load mitarbeitsnote_config from backend
-        if (dashboardData.mitarbeitsnote_config) {
-            mitarbeitsnoteConfig = dashboardData.mitarbeitsnote_config;
-            window.mitarbeitsnoteConfig = mitarbeitsnoteConfig;
-            dashboardLogger.info('DATA', 'Mitarbeitsnote config loaded', mitarbeitsnoteConfig);
-        }
-
-        // Load manual_grade_item_ids from backend
-        if (dashboardData.manual_grade_item_ids) {
-            manualGradeItemIds = dashboardData.manual_grade_item_ids;
-            dashboardLogger.info('DATA', 'Manual grade item IDs loaded', manualGradeItemIds);
-        }
-
-        // Load course_id from backend
-        if (dashboardData.course_id) {
-            courseId = dashboardData.course_id;
-            dashboardLogger.info('DATA', `Course ID loaded: ${courseId}`);
-        } else {
-            dashboardLogger.warn('DATA', 'No course_id found in backend response');
-        }
-
-        // Update Slider max value and labels
-        const slider = document.getElementById('referenceWeekSlider');
-        if (slider) {
-            slider.max = maxSchoolweeks;
-            slider.value = maxSchoolweeks; // Setze auf Maximum
-            const maxLabel = document.querySelector('.slider-value.max');
-            if (maxLabel) {
-                maxLabel.textContent = maxSchoolweeks;
-            }
-        }
-
-        // Debug: JSON-Struktur analysieren
-        dashboardLogger.info('DATA', 'Dashboard data loaded', {
-            hasActivitiesByCategory: !!dashboardData.activities_by_category,
-            categoriesCount: dashboardData.activities_by_category ? dashboardData.activities_by_category.length : 'undefined',
-            sampleCategory: dashboardData.activities_by_category ? dashboardData.activities_by_category[0] : 'none'
-        });
-
-        if (dashboardData.activities_by_category && dashboardData.activities_by_category.length > 0) {
-            const firstCategory = dashboardData.activities_by_category[0];
-            dashboardLogger.debug('DATA', 'First category assignments', {
-                assignmentCount: firstCategory.assignments ? firstCategory.assignments.length : 'undefined',
-                sampleAssignment: firstCategory.assignments && firstCategory.assignments.length > 0 ? firstCategory.assignments[0] : 'none'
-            });
-        }
-
-        // Environment-Settings vom Backend laden
-        if (dashboardData.environment) {
-            dashboardLogger.setBackendEnvironment(dashboardData.environment);
-        }
-
-        // Datei-Info anzeigen
-        displayFileInfo(dashboardData.last_updated);
-
-        // Gruppen-Dropdown füllen
-        populateGroupSelectors();
-
-        // Kategorie-Filter füllen
-        populateCategoryFilter();
-
-        // Dashboard aktualisieren
-        updateDashboard();
-
+        const data = await response.json();
+        applyDashboardData(data);
         showLoading(false);
 
     } catch (error) {
         dashboardLogger.error('API', 'Fehler beim Laden der Daten', error);
         showError('Fehler beim Laden der Daten: ' + error.message);
+        showLoading(false);
+    }
+}
+
+async function loadFromFile(input) {
+    if (!input.files || !input.files[0]) return;
+
+    const file = input.files[0];
+    input.value = ''; // Reset so same file can be selected again
+
+    showLoading(true);
+
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('/api/load-file', { method: 'POST', body: formData });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ error: response.statusText }));
+            throw new Error(err.error || response.statusText);
+        }
+
+        const data = await response.json();
+        applyDashboardData(data);
+        showLoading(false);
+
+    } catch (error) {
+        dashboardLogger.error('API', 'Fehler beim Laden der Datei', error);
+        showError('Fehler beim Laden der Datei: ' + error.message);
         showLoading(false);
     }
 }

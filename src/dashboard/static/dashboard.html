@@ -102,6 +102,14 @@
 
                
 
+                <input type="file" id="filePickerInput" accept=".json" style="display:none" onchange="loadFromFile(this)">
+                <button class="nav-btn" onclick="document.getElementById('filePickerInput').click()" title="JSON-Datei manuell laden">
+                    <svg class="icon" width="18" height="18" aria-hidden="true">
+                        <use href="#icon-folder-open"></use>
+                    </svg>
+                    <span class="tab-text">Datei laden</span>
+                </button>
+
                 <button id="refreshBtn" class="nav-btn" onclick="startExportAndReload()">
                     <svg class="icon" width="18" height="18" aria-hidden="true">
                         <use href="#icon-refresh"></use>
@@ -496,6 +504,11 @@
             <polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M10 13h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             <path d="M10 17h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </symbol>
+
+        <symbol id="icon-folder-open" viewBox="0 0 24 24">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 10h20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </symbol>
 
         <symbol id="icon-csv" viewBox="0 0 24 24">
