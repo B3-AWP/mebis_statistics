@@ -679,11 +679,16 @@ class ReportGenerator:
             item['title']: item for item in self._get_lnw_items(prev_data)
         }
 
+        # Testgruppe im Diff-Report ausblenden
+        diff_students = [e for e in all_students if e['klasse'] != 'Testgruppe']
+
         # Lookup: uid → user_dict aus dem vorherigen Export
         prev_user_map: Dict[str, Dict] = {}
         for group in prev_data.get('groups', []):
             group_name = group.get('name', '')
             if any(pat in group_name for pat in IGNORED_GROUP_PATTERNS):
+                continue
+            if extract_group_prefix(group_name) == 'Testgruppe':
                 continue
             if not extract_group_prefix(group_name):
                 continue
@@ -721,7 +726,7 @@ class ReportGenerator:
             header = ['Name', 'Klasse', 'Bewertung jetzt', 'Bewertung alt', 'Datum jetzt', 'Datum alt']
             section_rows = [header]
 
-            for entry in all_students:
+            for entry in diff_students:
                 user = entry['user']
                 klasse = entry['klasse']
                 uid = str(user.get('id', ''))
@@ -780,7 +785,7 @@ class ReportGenerator:
             )
             section_rows = [['Name', 'Klasse', 'Bewertung jetzt', 'Bewertung alt', 'Datum jetzt', 'Datum alt']]
 
-            for entry in all_students:
+            for entry in diff_students:
                 user = entry['user']
                 klasse = entry['klasse']
                 uid = str(user.get('id', ''))
