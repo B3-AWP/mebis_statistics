@@ -68,6 +68,9 @@ class ReportGenerator:
         self.export_date = datetime.now().strftime('%Y%m%d')
         self.export_date_display = datetime.now().strftime('%d.%m.%Y')
         self.exclude_names = self._load_exclude_names()
+        ma_config = config_manager.get_mitarbeitsnote_config() or {}
+        self._class_to_track: Dict[str, str] = ma_config.get('class_to_track') or {}
+        self._referenztermine: Dict[str, str] = ma_config.get('referenztermin_mitarbeitsnote1') or {}
 
     def _load_exclude_names(self) -> set:
         """Lädt ausgeschlossene Namen aus config/exclude_names.txt"""
@@ -76,6 +79,24 @@ class ReportGenerator:
             return set()
         with open(path, 'r', encoding='utf-8') as f:
             return {line.strip() for line in f if line.strip()}
+
+    def _get_referenztermin_for_klasse(self, klasse: str) -> Optional[str]:
+        """Gibt das REFERENZTERMIN_MITARBEITSNOTE1-Datum für eine Klasse zurück.
+
+        Bestimmt die Schiene via CLASS_TO_TRACK (exakt oder Präfix-Match)
+        und gibt das ISO-Datum der Schiene zurück, oder None wenn nicht konfiguriert.
+        """
+        if not self._class_to_track or not self._referenztermine:
+            return None
+        track = self._class_to_track.get(klasse)
+        if not track:
+            for key, val in self._class_to_track.items():
+                if klasse.startswith(key):
+                    track = val
+                    break
+        if not track:
+            return None
+        return self._referenztermine.get(track)
 
     # ------------------------------------------------------------------ #
     #  Datenladen                                                          #
@@ -389,10 +410,17 @@ class ReportGenerator:
     def _pflicht_table(self, pflichtaufgaben_items: Dict[str, Dict],
                        all_assign_status_by_id: Dict[str, Dict],
                        all_quiz_status_by_id: Dict[str, Dict],
-                       styles: Dict) -> Table:
-        """Erstellt die Pflichtaufgaben-Tabelle (A→Z nach Titel sortiert)"""
+                       styles: Dict,
+                       cutoff_date: Optional[str] = None) -> Table:
+        """Erstellt die Pflichtaufgaben-Tabelle (A→Z nach Titel sortiert).
+
+        cutoff_date: ISO-Datum-String. Wenn gesetzt, werden nur Aufgaben mit
+        submission_time NACH diesem Datum angezeigt (nicht abgegebene werden ausgeblendet).
+        """
         col_w = [CONTENT_WIDTH * 0.50, CONTENT_WIDTH * 0.17, CONTENT_WIDTH * 0.33]
         rows = [['Aufgabe', 'Abgabedatum', 'Bewertung']]
+
+        cutoff = datetime.fromisoformat(cutoff_date).date() if cutoff_date else None
 
         sorted_items = sorted(pflichtaufgaben_items.items(), key=lambda x: x[1]['title'])
 
@@ -403,12 +431,22 @@ class ReportGenerator:
             if item_type == 'quiz':
                 status = all_quiz_status_by_id.get(item_id)
                 if not self._is_quiz_submitted(status):
+                    if cutoff:
+                        continue  # nicht abgegeben → bei Datumsfilter ausblenden
                     rows.append([
                         Paragraph(title, styles['cell']),
                         Paragraph('nicht abgegeben', styles['cell_missing']), '—',
                     ])
                 else:
-                    sub_time = self._format_submission_time(status.get('submission_time')) or '—'
+                    raw_time = status.get('submission_time')
+                    if cutoff and raw_time:
+                        try:
+                            sub_date = datetime.fromisoformat(raw_time).date()
+                            if sub_date <= cutoff:
+                                continue  # vor/am Referenztermin → ausblenden
+                        except (ValueError, TypeError):
+                            pass
+                    sub_time = self._format_submission_time(raw_time) or '—'
                     grade = status.get('grade', '-') or '-'
                     bewertung = grade if grade != '-' else 'Bewertung offen'
                     rows.append([Paragraph(title, styles['cell']), sub_time, bewertung])
@@ -416,21 +454,36 @@ class ReportGenerator:
             else:  # assignment
                 status = all_assign_status_by_id.get(item_id)
                 if not status:
+                    if cutoff:
+                        continue
                     rows.append([
                         Paragraph(title, styles['cell']),
                         Paragraph('nicht abgegeben', styles['cell_missing']), '—',
                     ])
                     continue
-                sub_time = self._format_submission_time(status.get('submission_time'))
-                if not sub_time:
+                raw_time = status.get('submission_time')
+                if not raw_time:
+                    if cutoff:
+                        continue
                     rows.append([
                         Paragraph(title, styles['cell']),
                         Paragraph('nicht abgegeben', styles['cell_missing']), '—',
                     ])
                 else:
+                    if cutoff:
+                        try:
+                            sub_date = datetime.fromisoformat(raw_time).date()
+                            if sub_date <= cutoff:
+                                continue  # vor/am Referenztermin → ausblenden
+                        except (ValueError, TypeError):
+                            pass
+                    sub_time = self._format_submission_time(raw_time)
                     grade_val = status.get('grade', '')
                     bewertung = grade_val if (status.get('status2') == 'Bewertet' and grade_val) else 'Bewertung offen'
                     rows.append([Paragraph(title, styles['cell']), sub_time, bewertung])
+
+        if len(rows) == 1:
+            rows.append([Paragraph('Keine Einträge nach dem Referenztermin.' if cutoff else 'Keine Pflichtaufgaben vorhanden.', styles['cell_missing']), '', ''])
 
         return self._styled_table(rows, col_w)
 
@@ -463,7 +516,8 @@ class ReportGenerator:
 
     def _generate_pdf(self, student: Dict, klasse: str,
                       pflichtaufgaben_items: Dict[str, Dict],
-                      lnw_items: List[Dict]) -> bytes:
+                      lnw_items: List[Dict],
+                      cutoff_date: Optional[str] = None) -> bytes:
         """Generiert den PDF-Inhalt für einen Schüler"""
         buffer = io.BytesIO()
         user_name = student.get('name', 'Unbekannt')
@@ -505,8 +559,12 @@ class ReportGenerator:
         elements.append(Spacer(1, 1 * mm))
 
         # --- Pflichtaufgaben ---
-        elements.append(Paragraph("Pflichtaufgaben", styles['section']))
-        elements.append(self._pflicht_table(pflichtaufgaben_items, all_assign_status, all_quiz_status, styles))
+        section_title = "Pflichtaufgaben"
+        if cutoff_date:
+            cutoff_display = datetime.fromisoformat(cutoff_date).strftime('%d.%m.%Y')
+            section_title += f" (nach {cutoff_display})"
+        elements.append(Paragraph(section_title, styles['section']))
+        elements.append(self._pflicht_table(pflichtaufgaben_items, all_assign_status, all_quiz_status, styles, cutoff_date))
 
         # --- Leistungsnachweise ---
         elements.append(Paragraph("Leistungsnachweise", styles['section']))
@@ -550,8 +608,13 @@ class ReportGenerator:
         return sorted(seen.values(), key=sort_key)
 
     def _pflichtaufgabe_overview_table(self, item_id: str, item_type: str,
-                                       students: List[Dict], styles: Dict) -> Table:
-        """Tabelle aller Schüler für eine Pflichtaufgabe"""
+                                       students: List[Dict], styles: Dict,
+                                       cutoff_by_klasse: Optional[Dict[str, str]] = None) -> Table:
+        """Tabelle aller Schüler für eine Pflichtaufgabe.
+
+        cutoff_by_klasse: optionales Dict {klasse: ISO-Datum}. Wenn gesetzt, werden
+        pro Schüler nur Einträge mit submission_time NACH dem Cutoff seiner Klasse angezeigt.
+        """
         col_w = [CONTENT_WIDTH * 0.38, CONTENT_WIDTH * 0.28,
                  CONTENT_WIDTH * 0.20, CONTENT_WIDTH * 0.14]
         rows = [['Name', 'Bewertung', 'Datum', 'Klasse']]
@@ -563,16 +626,28 @@ class ReportGenerator:
             display_name = f"{vorname} {nachname}".strip()
             activities = user.get('activities', {})
 
+            cutoff_str = (cutoff_by_klasse or {}).get(klasse)
+            cutoff = datetime.fromisoformat(cutoff_str).date() if cutoff_str else None
+
             if item_type == 'quiz':
                 all_quiz = {q['id']: q.get('status', {}) for q in activities.get('quizzes', [])}
                 status = all_quiz.get(item_id)
                 if not self._is_quiz_submitted(status):
+                    if cutoff:
+                        continue  # nicht abgegeben → bei Datumsfilter ausblenden
                     rows.append([
                         Paragraph(display_name, styles['cell']), '—',
                         Paragraph('nicht abgegeben', styles['cell_missing']), klasse,
                     ])
                 else:
-                    sub_time = self._format_submission_time(status.get('submission_time')) or '—'
+                    raw_time = status.get('submission_time')
+                    if cutoff and raw_time:
+                        try:
+                            if datetime.fromisoformat(raw_time).date() <= cutoff:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+                    sub_time = self._format_submission_time(raw_time) or '—'
                     grade = status.get('grade', '-') or '-'
                     bewertung = grade if grade != '-' else 'Bewertung offen'
                     rows.append([Paragraph(display_name, styles['cell']), bewertung, sub_time, klasse])
@@ -580,25 +655,46 @@ class ReportGenerator:
             else:  # assignment
                 all_assign = {a['id']: a.get('status', {}) for a in activities.get('assignments', [])}
                 status = all_assign.get(item_id)
-                if not status or not status.get('submission_time'):
+                raw_time = status.get('submission_time') if status else None
+                if not status or not raw_time:
+                    if cutoff:
+                        continue
                     rows.append([
                         Paragraph(display_name, styles['cell']), '—',
                         Paragraph('nicht abgegeben', styles['cell_missing']), klasse,
                     ])
                 else:
-                    sub_time = self._format_submission_time(status['submission_time'])
+                    if cutoff:
+                        try:
+                            if datetime.fromisoformat(raw_time).date() <= cutoff:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+                    sub_time = self._format_submission_time(raw_time)
                     grade_val = status.get('grade', '')
                     bewertung = grade_val if (status.get('status2') == 'Bewertet' and grade_val) else 'Bewertung offen'
                     rows.append([Paragraph(display_name, styles['cell']), bewertung, sub_time, klasse])
 
+        if len(rows) == 1:
+            rows.append([Paragraph('Keine Einträge nach dem Referenztermin.', styles['cell_missing']), '', '', ''])
+
         return self._styled_table(rows, col_w)
 
     def run_pflichtaufgaben(self, pflichtaufgaben_items: Dict[str, Dict],
-                            all_students: List[Dict]):
+                            all_students: List[Dict],
+                            cutoff_date_override: Optional[str] = None):
         """Generiert pro Pflichtaufgabe einen Bericht mit allen Schülern (A→Z)"""
 
         output_dir = os.path.join(self.output_base, 'pflichtaufgaben')
         os.makedirs(output_dir, exist_ok=True)
+
+        # Cutoff pro Klasse: Override hat Vorrang, sonst per-Klasse aus CLASS_TO_TRACK
+        all_klassen = {entry['klasse'] for entry in all_students}
+        if cutoff_date_override:
+            cutoff_by_klasse = {k: cutoff_date_override for k in all_klassen}
+        else:
+            cutoff_by_klasse = {k: self._get_referenztermin_for_klasse(k) for k in all_klassen}
+            cutoff_by_klasse = {k: v for k, v in cutoff_by_klasse.items() if v}
 
         total_pdfs = 0
         total_errors = 0
@@ -633,7 +729,7 @@ class ReportGenerator:
                                   style=TableStyle([('LINEABOVE', (0, 0), (-1, -1), 1.2, COLOR_SECTION)]))
                 elements.append(separator)
                 elements.append(Spacer(1, 1 * mm))
-                elements.append(self._pflichtaufgabe_overview_table(item_id, item_type, all_students, styles))
+                elements.append(self._pflichtaufgabe_overview_table(item_id, item_type, all_students, styles, cutoff_by_klasse or None))
 
                 doc.build(elements, onFirstPage=self._page_footer, onLaterPages=self._page_footer)
                 with open(filepath, 'wb') as f:
@@ -921,8 +1017,12 @@ class ReportGenerator:
     #  Hauptmethode                                                        #
     # ------------------------------------------------------------------ #
 
-    def run(self):
-        """Generiert alle Berichte (Schüler-Übersichten + Pflichtaufgaben-Reports)"""
+    def run(self, cutoff_date_override: Optional[str] = None):
+        """Generiert alle Berichte (Schüler-Übersichten + Pflichtaufgaben-Reports).
+
+        cutoff_date_override: ISO-Datum (z.B. "2025-12-10"). Überschreibt den
+        per-Klasse berechneten Referenztermin aus CLASS_TO_TRACK für alle Klassen.
+        """
         export_data = self._load_latest_export()
 
         pflichtaufgaben_items = self._get_pflichtaufgaben_items(export_data)
@@ -942,7 +1042,8 @@ class ReportGenerator:
             output_dir = os.path.join(self.output_base, klasse)
             os.makedirs(output_dir, exist_ok=True)
 
-            logger.info(f"\n{klasse}: {len(students)} Schüler")
+            cutoff_date = cutoff_date_override or self._get_referenztermin_for_klasse(klasse)
+            logger.info(f"\n{klasse}: {len(students)} Schüler" + (f" (Referenztermin: {cutoff_date})" if cutoff_date else ""))
 
             for student in sorted(students, key=lambda s: s.get('name', '')):
                 user_name = student.get('name', '')
@@ -955,6 +1056,7 @@ class ReportGenerator:
                         student, klasse,
                         pflichtaufgaben_items,
                         lnw_items,
+                        cutoff_date,
                     )
                     with open(filepath, 'wb') as f:
                         f.write(pdf_bytes)
@@ -971,7 +1073,7 @@ class ReportGenerator:
         logger.info("\n--- Pflichtaufgaben-Reports ---")
         all_students = self._get_all_students(export_data)
         logger.info(f"{len(all_students)} Schüler gesamt")
-        self.run_pflichtaufgaben(pflichtaufgaben_items, all_students)
+        self.run_pflichtaufgaben(pflichtaufgaben_items, all_students, cutoff_date_override)
 
         # --- LNW Änderungsbericht ---
         logger.info("\n--- LNW Änderungsbericht ---")

@@ -148,6 +148,11 @@ scripts\export_data.cmd
 
 Dies lädt alle Daten aus Mebis und speichert sie als JSON-Datei im konfigurierten `EXPORT_FOLDER` (Standard: `data/export`).
 
+**Abgabedatum-Ermittlung (Priorität):**
+1. Feedback-Datum aus dem Singleview-Bewertungsbericht (wenn eingetragen)
+2. „Zuletzt geändert (Abgabe)"-Datum der Bewertungsseite
+3. Bewertungshistorie (Fallback für manuell eingetragene Noten)
+
 ⚠️ **Ohne diesen Schritt kann das Dashboard nicht gestartet werden!**
 
 ### 2. Dashboard starten

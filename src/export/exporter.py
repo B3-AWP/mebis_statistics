@@ -35,6 +35,9 @@ from config.logger_config import get_logger
 
 logger = get_logger('exporter')
 
+# Checklisten-Export deaktivieren (True = exportieren, False = überspringen)
+EXPORT_CHECKLISTS = False
+
 # TensorFlow-Logstufe auf ERROR setzen
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -164,6 +167,8 @@ def parse_german_datetime(datetime_str):
         formats = [
             "%A, %d. %B %Y, %H:%M",  # "Tuesday, 23. September 2025, 07:46"
             "%d. %B %Y %H:%M",        # "24. September 2025 08:12" (nach Normalisierung auch für Quiz-Format)
+            "%d.%m.%Y %H:%M",         # "09.01.2026 14:30" (Singleview-Format mit Zeit)
+            "%d.%m.%Y",               # "09.01.2026" (Singleview-Format ohne Zeit)
         ]
 
         for fmt in formats:
@@ -1115,6 +1120,81 @@ def get_grade_history_time(driver, course_id, grade_item_id, user_id, waittime=1
         return None
 
 
+def get_singleview_feedback_dates(driver, course_id, grade_item_id, waittime):
+    """
+    Liest Feedback-Datumsangaben aus der Singleview-Seite für ein Assignment.
+    itemid = grade_item_id (BewertungsID), nicht die Assignment-Modul-ID.
+    Gibt ein Dict {user_id: feedback_date_iso} zurück.
+    Nur Einträge mit tatsächlichem Datum werden aufgenommen.
+    """
+    url = (
+        f"https://lernplattform.bycs.de/grade/report/singleview/index.php"
+        f"?id={course_id}&userid=0&itemid={grade_item_id}&item=grade&page=0&perpage=0"
+    )
+    try:
+        driver.get(url)
+        WebDriverWait(driver, waittime).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table#singleview-grades"))
+        )
+    except TimeoutException:
+        logger.warning(f"Singleview-Tabelle für grade_item_id {grade_item_id} nicht gefunden.")
+        return {}
+
+    feedback_dates = {}
+    try:
+        rows = driver.find_elements(By.CSS_SELECTOR, "table#singleview-grades tbody tr")
+        logger.info(f"  Singleview: {len(rows)} Zeilen für grade_item_id {grade_item_id}")
+
+        for row in rows:
+            # UserID aus dem ersten User-Link in der Zeile (Spalte c0)
+            try:
+                user_link = row.find_element(By.CSS_SELECTOR, "a[href*='user/view.php?id=']")
+                href = user_link.get_attribute("href") or ""
+                uid_match = re.search(r'user/view\.php\?id=(\d+)', href)
+                if not uid_match:
+                    continue
+                user_id = uid_match.group(1)
+            except NoSuchElementException:
+                continue
+
+            # Feedback-Text aus Spalte c4:
+            # Moodle rendert den Wert je nach Modus als textarea, input oder sichtbaren Text
+            feedback_text = None
+            try:
+                feedback_cell = row.find_element(By.CSS_SELECTOR, "td.cell.c4")
+                # 1. Versuch: sichtbarer Text (read-only Ansicht)
+                feedback_text = feedback_cell.text.strip()
+                # 2. Versuch: textarea-Inhalt (edit-Modus)
+                if not feedback_text:
+                    try:
+                        ta = feedback_cell.find_element(By.TAG_NAME, "textarea")
+                        feedback_text = ta.get_attribute("value") or ""
+                    except NoSuchElementException:
+                        pass
+                # 3. Versuch: input-Wert
+                if not feedback_text:
+                    try:
+                        inp = feedback_cell.find_element(By.CSS_SELECTOR, "input[type='text']")
+                        feedback_text = inp.get_attribute("value") or ""
+                    except NoSuchElementException:
+                        pass
+            except NoSuchElementException:
+                continue
+
+            if not feedback_text:
+                continue
+
+            feedback_date = parse_german_datetime(feedback_text.strip())
+            if feedback_date:
+                feedback_dates[user_id] = feedback_date
+
+    except Exception as e:
+        logger.error(f"Fehler beim Parsen der Singleview für grade_item_id {grade_item_id}: {e}")
+
+    logger.info(f"  Singleview: {len(feedback_dates)} Feedback-Daten extrahiert")
+    return feedback_dates
+
+
 def process_assignment_parallel(assignment, isheadless, waittime, username, password, base_url, course_id, index, total):
     """Process a single assignment in parallel"""
     try:
@@ -1139,9 +1219,23 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
         # Extrahiere Status
         status = get_assignment_status(driver, assignment_url, waittime)
 
-        # Fallback: Datum aus Bewertungshistorie für Einträge mit Bewertung aber ohne Abgabezeit
-        # (passiert bei manuell im Notenbuch eingetragenen Bewertungen)
         grade_item_id = assignment.get("grade_item_id")
+
+        # Priorität 1: Feedback-Datum aus Singleview überschreibt submission_time
+        # itemid = grade_item_id (BewertungsID), nicht assignment_id
+        if grade_item_id:
+            feedback_dates = get_singleview_feedback_dates(driver, course_id, grade_item_id, waittime)
+            feedback_count = 0
+            for entry in status:
+                fd = feedback_dates.get(entry["user_id"])
+                if fd:
+                    entry["submission_time"] = fd
+                    feedback_count += 1
+            if feedback_count:
+                logger.info(f"  Datum aus Feedback (Singleview) gesetzt: {feedback_count} Einträge")
+
+        # Priorität 2 (Fallback): Datum aus Bewertungshistorie für Einträge mit Bewertung aber ohne Abgabezeit
+        # (passiert bei manuell im Notenbuch eingetragenen Bewertungen)
         if grade_item_id:
             missing_time_count = 0
             for entry in status:
@@ -1238,6 +1332,19 @@ def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_u
         sys.stdout.flush()
         start_time = time.time()
         submission_times = get_quiz_submission_times(driver, quiz_url, waittime)
+
+        # Fallback: Singleview-Feedback-Datum für User ohne submission_time
+        grade_item_id = quiz.get("grade_item_id")
+        if grade_item_id:
+            feedback_dates = get_singleview_feedback_dates(driver, course_id, grade_item_id, waittime)
+            fallback_count = 0
+            for user_id, feedback_date in feedback_dates.items():
+                if user_id not in submission_times:
+                    submission_times[user_id] = feedback_date
+                    fallback_count += 1
+            if fallback_count:
+                logger.info(f"  Datum aus Singleview-Feedback ergänzt: {fallback_count} Einträge")
+
         duration = time.time() - start_time
         logger.info(f"  Abgeschlossen in {duration:.1f}s | {len(submission_times)} submission_times gefunden")
         return quiz_id, submission_times
@@ -1437,10 +1544,18 @@ def main(test_mode=False):
             if original_count > test_limit:
                 logger.info(f"[TESTMODUS] {act_type}: {original_count} -> {len(activities[act_type])} (limitiert)")
 
+    # Checklisten-Export überspringen wenn deaktiviert
+    if not EXPORT_CHECKLISTS:
+        activities["checklists"] = []
+        logger.info("Checklisten-Export deaktiviert (EXPORT_CHECKLISTS=False) – wird übersprungen")
+
     # Ermittle den Pflicht-Status aller Checklisten (vor der Kategorisierung)
-    timer.start("Checklisten Pflicht-Status")
-    checklists_mandatory = get_checklists_mandatory_status(driver, course_id)
-    timer.stop({"checklisten": len(checklists_mandatory)})
+    if EXPORT_CHECKLISTS:
+        timer.start("Checklisten Pflicht-Status")
+        checklists_mandatory = get_checklists_mandatory_status(driver, course_id)
+        timer.stop({"checklisten": len(checklists_mandatory)})
+    else:
+        checklists_mandatory = {}
 
     # Erfasse alle Kategorieninformationen in einem einzigen Aufruf
     timer.start("Kategorien laden")
