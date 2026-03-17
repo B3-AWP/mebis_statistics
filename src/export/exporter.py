@@ -179,12 +179,12 @@ def parse_german_datetime(datetime_str):
                 continue
 
         # Wenn kein Format passt
-        logger.warning(f"Fehler beim Parsen der Zeitangabe '{datetime_str}': Kein passendes Format gefunden")
-        return datetime_str
+        logger.warning(f"Kein Datumsformat erkannt für '{datetime_str}' – wird ignoriert")
+        return None
 
     except Exception as e:
         logger.warning(f"Fehler beim Parsen der Zeitangabe '{datetime_str}': {e}")
-        return datetime_str  # Fallback: ursprünglichen Text zurückgeben
+        return None
 
 def create_webdriver(headless=False):
     options = Options()

@@ -771,34 +771,31 @@ function getTotalCounts() {
 
 // Übersichts-Statistiken aktualisieren
 function updateOverviewStats(groupStats, users) {
-    // Durchschnittlicher Checklisten-Fortschritt für die ausgewählte Woche (Gesamt-Card)
-    const currentProgressType = document.querySelector('input[name="progressType"]:checked')?.value || 'pflicht';
-    const cardSelectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 10);
-
-    let cardAvgRequiredProgress = 0;
-    let cardAvgAllProgress = 0;
+    // Pflichtaufgaben-Fortschritt zeitproportional zum gewählten Referenztermin (Gesamt-Card)
+    const cardSelectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || maxSchoolweeks);
     const validUsers = users.filter(user => user && user.name);
 
+    let cardAvgProgress = 0;
+    let validCount = 0;
     validUsers.forEach(user => {
-        const actualProgress = calculateActualProgressForWeek(user, cardSelectedWeek, 10, currentGroup);
-        cardAvgRequiredProgress += actualProgress.pflichtProgress;
-        cardAvgAllProgress += actualProgress.gesamtProgress;
+        const result = calculatePflichtaufgabenProgressGesamt(user, cardSelectedWeek);
+        if (result !== null) {
+            cardAvgProgress += result.value;
+            validCount++;
+        }
     });
 
-    if (validUsers.length > 0) {
-        cardAvgRequiredProgress = cardAvgRequiredProgress / validUsers.length;
-        cardAvgAllProgress = cardAvgAllProgress / validUsers.length;
+    if (validCount > 0) {
+        cardAvgProgress = cardAvgProgress / validCount;
     }
-
-    const progressValue = currentProgressType === 'pflicht' ? cardAvgRequiredProgress : cardAvgAllProgress;
 
     const avgCompletionEl = document.getElementById('avgCompletionText');
     const avgCompletionBar = document.getElementById('avgCompletionBar');
-    if (avgCompletionEl) avgCompletionEl.textContent = progressValue.toFixed(1) + '%';
-    if (avgCompletionBar) avgCompletionBar.style.width = progressValue + '%';
+    if (avgCompletionEl) avgCompletionEl.textContent = cardAvgProgress.toFixed(1) + '%';
+    if (avgCompletionBar) avgCompletionBar.style.width = Math.min(cardAvgProgress, 100) + '%';
 
     const avgGradeElement = document.getElementById('avgGradeText');
-    if (avgGradeElement) avgGradeElement.textContent = calculateGradeFromPflichtProgress(cardAvgRequiredProgress);
+    if (avgGradeElement) avgGradeElement.textContent = calculateGradeFromPflichtProgress(cardAvgProgress);
 
     // Durchschnittsnote Pflichtaufgaben
     const pflichtAvgGradeElement = document.getElementById('pflichtAverageGrade');
@@ -1454,6 +1451,35 @@ function calculateQuantitaetMA2(user, groupName, currentWeek) {
     return { value, actual: completed2HJ, expected: denominator, uebertrag };
 }
 
+// Berechnet den Gesamtfortschritt für alle Pflichtaufgaben (Assignments + Quizzes).
+// Nenner = totalPflicht × (selectedWeek / maxSchoolweeks), zeitproportional zum Referenztermin.
+function calculatePflichtaufgabenProgressGesamt(user, selectedWeek) {
+    if (!dashboardData || !dashboardData.activities_by_category) return null;
+
+    let totalPflicht = 0;
+    let completedGesamt = 0;
+    for (const category of dashboardData.activities_by_category) {
+        if (!category.category_name || !category.category_name.includes('Pflichtaufgaben')) continue;
+        const allActivities = (category.assignments || []).concat(category.quizzes || []);
+        for (const activity of allActivities) {
+            totalPflicht++;
+            const userStatus = (activity.user_status || []).find(s => s.user_name === user.name);
+            const hasGrade = userStatus && userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
+            const hasSubmission = userStatus && userStatus.submission_time;
+            if (hasGrade || hasSubmission) {
+                completedGesamt++;
+            }
+        }
+    }
+    if (totalPflicht === 0) return null;
+
+    const denominator = Math.round(totalPflicht * selectedWeek / maxSchoolweeks);
+    if (denominator <= 0) return null;
+
+    const value = Math.round((completedGesamt / denominator) * 100 * 10) / 10;
+    return { value, actual: completedGesamt, expected: denominator, total: totalPflicht };
+}
+
 // Berechnet die Prognose der 2. Halbjahresnote für einen Benutzer
 // weekOverride: optionaler Wochenwert (z.B. vom Slider); falls nicht angegeben, wird die aktuelle Woche aus dem Stundenplan ermittelt
 // Rückgabe: {quantitaet, qualitaet, reviewTalk2, codeReview, overall, grade, componentCount}
@@ -1726,17 +1752,11 @@ function generateGroupProgressTable(users) {
 
 
     users.forEach(user => {
-        // Berechne tatsächliche Prozentsätze basierend nur auf Checklisten bis zur ausgewählten Woche
-        // Hole den aktuellen Wochenwert vom Slider
-        const selectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 10);
-        const actualProgress = calculateActualProgressForWeek(user, selectedWeek, 10);
-        const displayPflichtProgress = actualProgress.pflichtProgress;
-        const displayGesamtProgress = actualProgress.gesamtProgress;
-        const pflichtPoints = (actualProgress.rawPflichtPercent !== null && actualProgress.rawExpectedPflicht !== null)
-            ? { actual: actualProgress.rawPflichtPercent, expected: actualProgress.rawExpectedPflicht }
-            : null;
-
-
+        const selectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || maxSchoolweeks);
+        const pflichtResult = calculatePflichtaufgabenProgressGesamt(user, selectedWeek);
+        const displayPflichtProgress = pflichtResult ? pflichtResult.value : 0;
+        const displayGesamtProgress = displayPflichtProgress;
+        const pflichtPoints = pflichtResult ? { actual: pflichtResult.actual, expected: pflichtResult.expected } : null;
 
         // Berechne Note basierend auf Pflicht %
         const gradeText = calculateGradeFromPflichtProgress(displayPflichtProgress);
