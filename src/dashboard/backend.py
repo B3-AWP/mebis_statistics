@@ -745,7 +745,21 @@ def _process_course_data(data, plan, kurs, source_label=None):
     if export_date is None:
         export_date = datetime.date.today()
 
-    mitarbeitsnote_cfg = config_manager.get_mitarbeitsnote_config()
+    # Schienen und Wochenkalender kommen aus plan.json; aus der .env
+    # stammen nur noch die kursspezifischen Aufgaben-IDs.
+    mitarbeitsnote_cfg = config_manager.get_mitarbeitsnote_config() or {}
+    mitarbeitsnote_cfg['class_to_track'] = dict(plan.klassen_zu_schiene)
+    mitarbeitsnote_cfg['track_schedules'] = {
+        name: [
+            {
+                'week': w['woche'],
+                'start': w['start'].isoformat() if w['start'] else None,
+                'end': w['ende'].isoformat() if w['ende'] else None,
+            }
+            for w in schiene['schulwochen']
+        ]
+        for name, schiene in plan.schienen.items()
+    }
     manual_grade_ids = config_manager.get_manual_grade_item_ids()
     recent_days = config_manager.get_recent_submission_days()
     inactive_threshold = config_manager.get_inactive_threshold_days()

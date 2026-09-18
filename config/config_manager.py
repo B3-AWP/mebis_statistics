@@ -237,15 +237,6 @@ class ConfigManager:
                     result[item_id.strip()] = title.strip()
         return result
 
-    def get_max_schoolweeks(self) -> int:
-        """
-        Holt maximale Anzahl der Schulwochen aus Environment Variable.
-
-        Returns:
-            Maximale Anzahl der Schulwochen (Standard: 9)
-        """
-        return self._get_int('MAX_SCHOOLWEEKS', 9)
-
     def get_recent_submission_days(self) -> int:
         """
         Holt den Schwellenwert für die Anzeige der letzten Abgaben in Kalendertagen.
@@ -281,12 +272,12 @@ class ConfigManager:
                     logger.warning(f"Invalid JSON for {key}: {e}")
             return None
 
+        # class_to_track und track_schedules kommen seit 2026/27 aus
+        # plan.json und werden vom Backend ergaenzt; hier stehen nur noch
+        # die kursspezifischen Aufgaben-IDs.
         return {
-            'class_to_track': parse_json_env('CLASS_TO_TRACK'),
-            'mitarbeitsnote1_reference_week': self._get_int('MITARBEITSNOTE1_REFERENCE_WEEK', 4),
             'referenztermin_mitarbeitsnote1': parse_json_env('REFERENZTERMIN_MITARBEITSNOTE1'),
             'prognosis_assignments': parse_json_env('PROGNOSIS_ASSIGNMENTS'),
-            'track_schedules': parse_json_env('TRACK_SCHEDULES'),
         }
 
     def _get_int(self, env_var: str, default: int) -> int:

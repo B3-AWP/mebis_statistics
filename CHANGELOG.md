@@ -2,6 +2,89 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [Unreleased] - 2026-09-18 — Kursstruktur 2026/27
+
+Umfassendes Refactoring auf die neue Kursstruktur. Details und offene
+Punkte: [REFACTORING_PLAN.md](REFACTORING_PLAN.md).
+
+### 💥 Breaking Changes
+
+- **Exportformat `schema: 2`.** Ein Export enthält mehrere Kurse unter
+  `kurse`, die Gruppen stehen kursübergreifend auf oberster Ebene.
+  Altformate werden **abgelehnt**, nicht migriert — neues Schuljahr,
+  neue Schüler, neuer Kurs.
+- **`plan.json` ist Pflicht.** Ohne die Planungsdatei startet weder
+  Export noch Dashboard.
+- **Entfallene `.env`-Variablen:** `MEBIS_COURSE_ID`, `CLASS_TO_TRACK`,
+  `TRACK_SCHEDULES`, `MAX_SCHOOLWEEKS`, `MITARBEITSNOTE1_REFERENCE_WEEK`.
+  Sie stehen jetzt in `plan.json`.
+- **`MANUAL_GRADE_ITEM_IDS` und `PROGNOSIS_ASSIGNMENTS` sind neu zu
+  befüllen** — die Item-IDs sind kursspezifisch, die Werte des Vorjahres
+  gelten nicht mehr.
+
+### 🚀 Neue Struktur
+
+#### Halbjahre sind Kurse, keine Notenstufen
+Bisher bedeutete „1./2. Halbjahr" *1. Mitarbeitsnote* bzw. *Prognose der
+2.*; getrennt wurde über die Referenzwoche innerhalb **eines** Kurses.
+Jetzt sind es zwei Moodle-Kurse (2491549, 2491870) mit je eigener
+Aufgabenliste. Die gesamte `soll1HJ`/`soll2HJ`-Arithmetik samt Übertrag
+entfällt ersatzlos.
+
+Das 2. Halbjahr ist bis **11.01.2027** gesperrt: Der Exporter überspringt
+es, das Dashboard zeigt den Tab deaktiviert mit Freischaltdatum.
+
+#### Quantität ist stundengewichtet
+```
+Ist   = Σ Stunden abgegebener Aufgaben / Σ Stunden aller Aufgaben
+Soll  = Σ Stunden der Blockwochen 1..w / Σ Stunden aller Wochen
+Delta = (Ist − Soll) × Σ Stunden gesamt        → in Unterrichtsstunden
+```
+Eine 10-Stunden-Aufgabe wiegt fünfmal so viel wie ein 2-Stunden-Quiz.
+Das Soll folgt dem Wochenkalender (Woche 1 hat 10 Stunden, die übrigen
+14) statt einer linearen Näherung. **Qualität bleibt ungewichtet** — eine
+gut gemachte kleine Aufgabe ist so viel wert wie eine gut gemachte große.
+
+Die Formeln sind aus `js/bilanz.js` des Schüler-Dashboards portiert und
+gegen dieselbe `plan.json` auf identische Werte geprüft.
+
+#### Eine Mitarbeitsnote statt zwei
+`calculateMitarbeitsnote()` ersetzt `calculateMitarbeitsnote1()` und
+`calculateMitarbeitsnote2Prognose()`. Neu ist die Delta-Spalte in
+Unterrichtsstunden.
+
+#### Keine Team-Ebene
+Gruppen sind jetzt Klassen (`IFA12A` statt `IFA12A - Team 3`). Die
+Gruppierungs-Navigation und `currentGrouping` entfallen.
+
+#### Pflichtaufgaben über `plan.json`
+Eine Aufgabe ist genau dann Pflichtaufgabe, wenn ihre `cmid` im Plan
+steht — nicht mehr über den Kategorienamen. Nur so kommt man an das
+`stunden`-Feld. Damit bestimmt der Plan den Nenner: Eine Aufgabe, die in
+Moodle fehlt, bleibt darin und gilt als nicht begonnen.
+
+### 🔧 Änderungen im Detail
+
+- **Neu:** `src/common/plan_loader.py` — lädt und validiert `plan.json`,
+  portiert die Rechenfunktionen aus `js/bilanz.js`
+- **Neu:** `tests/test_plan_loader.py` — 27 Tests, davon 7 gegen die
+  echte `plan.json` mit den Sollwerten der JS-Implementierung
+- **Neu:** `.env`-Variable `PLAN_JSON_PATH` (Default: Nachbar-Repo)
+- `exporter.py`: `export_course()` je Kurs, `main()` iteriert; ein
+  Validierungsfehler überspringt nur den betroffenen Kurs
+- `backend.py`: Kursschleife, Plan in `/api/data`, stundengewichtete
+  Kennzahlen je Person
+- `dashboard.js`: Kurs-Scope-Ebene, Wochen-Slider folgt dem Halbjahr
+- `report_generator.py`: flache Sicht über alle Kurse
+- `exam/scraper.py`: Kurs aus `plan.json` statt `MEBIS_COURSE_ID`
+
+### ⚠️ Vor dem ersten Lauf zu erledigen
+
+1. `MANUAL_GRADE_ITEM_IDS` für Kurs 2491549 eintragen (Notenbuch)
+2. `PROGNOSIS_ASSIGNMENTS` eintragen, falls Review-Talk/Code-Review genutzt
+3. `EXPORT_FOLDER` zeigt auf `Exports_2026_27` — Ordner anlegen
+4. Offen: Klasse **IFA12E** fehlt in `plan.json` (dort nur IFA12A–D)
+
 ## [Unreleased] - 2026-03-16 (2)
 
 ### 🚀 Neue Features
