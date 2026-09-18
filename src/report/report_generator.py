@@ -30,6 +30,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from src.common.group_utils import extract_group_prefix
+from src.common.plan_loader import PlanFehler, get_plan
 from config.logger_config import get_logger
 from config.config_manager import config_manager
 
@@ -69,8 +70,15 @@ class ReportGenerator:
         self.export_date_display = datetime.now().strftime('%d.%m.%Y')
         self.exclude_names = self._load_exclude_names()
         ma_config = config_manager.get_mitarbeitsnote_config() or {}
-        self._class_to_track: Dict[str, str] = ma_config.get('class_to_track') or {}
         self._referenztermine: Dict[str, str] = ma_config.get('referenztermin_mitarbeitsnote1') or {}
+
+        # Stammdaten: Kurse, Pflichtaufgaben, Stunden, Schienenzuordnung
+        try:
+            self.plan = get_plan()
+            self._class_to_track: Dict[str, str] = dict(self.plan.klassen_zu_schiene)
+        except PlanFehler as e:
+            logger.error(f"Planungsdatei nicht ladbar: {e}")
+            raise
 
     def _load_exclude_names(self) -> set:
         """Lädt ausgeschlossene Namen aus config/exclude_names.txt"""
@@ -118,7 +126,35 @@ class ReportGenerator:
         except (IndexError, ValueError):
             pass  # Fallback: datetime.now() aus __init__ bleibt erhalten
         with open(latest, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            return self._flatten_export(json.load(f), basename)
+
+    def _flatten_export(self, data: Dict, quelle: str) -> Dict:
+        """
+        Fasst die Kurse eines Exports (Schema 2) zu einer flachen Sicht zusammen.
+
+        Die Berichte betrachten das Schuljahr als Ganzes; die Trennung nach
+        Halbjahren interessiert hier nicht. Kategorien und manuelle
+        Bewertungselemente werden ueber alle Kurse zusammengefuehrt, die
+        Gruppen stehen ohnehin schon kursuebergreifend oben.
+        """
+        schema = data.get('schema')
+        if schema != 2:
+            raise ValueError(
+                f"Export '{quelle}' hat Schema {schema!r}, erwartet wird 2. "
+                f"Altformate aus dem Vorjahr werden nicht mehr gelesen."
+            )
+
+        flach = {
+            'groups': data.get('groups', []),
+            'activities_by_category': [],
+            'manual_grade_items': {},
+            'exported_at': data.get('exported_at'),
+            'schuljahr': data.get('schuljahr'),
+        }
+        for course_id, kurs in (data.get('kurse') or {}).items():
+            flach['activities_by_category'].extend(kurs.get('activities_by_category', []))
+            flach['manual_grade_items'].update(kurs.get('manual_grade_items', {}))
+        return flach
 
     def _load_second_export(self) -> Optional[Tuple[Dict, str, str]]:
         """Lädt die zweit-neueste output_*.json für den Diff-Report.
@@ -139,7 +175,7 @@ class ReportGenerator:
             date_raw = 'unbekannt'
             date_display = '—'
         with open(prev_file, 'r', encoding='utf-8') as f:
-            return json.load(f), date_raw, date_display
+            return self._flatten_export(json.load(f), basename), date_raw, date_display
 
     def _get_pflichtaufgaben_items(self, export_data: Dict) -> Dict[str, Dict]:
         """
@@ -149,11 +185,14 @@ class ReportGenerator:
         """
         items = {}
         for cat in export_data.get('activities_by_category', []):
-            if 'Pflicht' in cat.get('category_name', ''):
-                for a in cat.get('assignments', []):
-                    items[a['id']] = {'title': html.unescape(a['title']), 'type': 'assignment'}
-                for q in cat.get('quizzes', []):
-                    items[q['id']] = {'title': html.unescape(q['title']), 'type': 'quiz'}
+            for a in cat.get('assignments', []):
+                if self.plan.ist_pflichtaufgabe(a['id']):
+                    items[a['id']] = {'title': html.unescape(a['title']), 'type': 'assignment',
+                                      'stunden': self.plan.get_stunden(a['id'])}
+            for q in cat.get('quizzes', []):
+                if self.plan.ist_pflichtaufgabe(q['id']):
+                    items[q['id']] = {'title': html.unescape(q['title']), 'type': 'quiz',
+                                      'stunden': self.plan.get_stunden(q['id'])}
         return items
 
     def _get_lnw_items(self, export_data: Dict) -> List[Dict]:

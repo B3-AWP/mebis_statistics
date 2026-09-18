@@ -37,6 +37,7 @@ from src.export.exporter import (
 )
 from src.exam.utils import QuizParser, ImageDownloader
 from src.common.group_utils import extract_group_prefix
+from src.common.plan_loader import PlanFehler, get_plan
 from config.config_manager import config_manager
 from config.logger_config import get_logger
 
@@ -231,13 +232,16 @@ def select_items_interactive(items: List[Dict], item_name: str = "Item") -> List
 class QuizScraper:
     """Scraper für Mebis Leistungsnachweise"""
 
-    def __init__(self, headless: bool = True, waittime: int = 10):
+    def __init__(self, headless: bool = True, waittime: int = 10,
+                 course_id: Optional[str] = None):
         """
         Initialisiert den Scraper
 
         Args:
             headless: Headless-Modus für Browser
             waittime: Wartezeit für Selenium
+            course_id: Moodle-Kurs-ID; ohne Angabe der erste offene Kurs
+                       aus plan.json (gesperrte Kurse liefern keine Daten)
         """
         self.headless = headless
         self.waittime = waittime
@@ -250,7 +254,23 @@ class QuizScraper:
         credentials = config_manager.get_login_credentials()
         self.username = credentials['username']
         self.password = credentials['password']
-        self.course_id = config_manager.get_course_id()
+        if course_id:
+            self.course_id = str(course_id)
+        else:
+            # Kurse stehen seit 2026/27 in plan.json. Gesperrte Kurse
+            # ueberspringen wir — ihr Abruf liefert nur eine Fehlerseite.
+            try:
+                offene = get_plan().get_kurse(nur_offene=True)
+            except PlanFehler as e:
+                raise RuntimeError(f"Planungsdatei nicht ladbar: {e}")
+            if not offene:
+                raise RuntimeError("Kein offener Kurs in plan.json — nichts zu scrapen.")
+            self.course_id = offene[0]['moodle_course_id']
+            if len(offene) > 1:
+                self.logger.info(
+                    f"Mehrere offene Kurse; verwende {offene[0]['titel']} "
+                    f"(ID {self.course_id}). Andere per course_id waehlbar."
+                )
 
         # Output-Verzeichnisse (absolute Pfade vom Projekt-Root)
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
