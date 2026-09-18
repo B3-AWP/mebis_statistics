@@ -17,7 +17,7 @@ function openCsvExportModal() {
         currentWeek: window.currentWeek,
         maxSchoolweeks: window.maxSchoolweeks,
         currentGroup: window.currentGroup,
-        currentGrouping: window.currentGrouping
+        currentHalbjahr: window.currentHalbjahr
     });
 
     // Sync slider with current week
@@ -46,7 +46,7 @@ function openCsvExportModal() {
     const groupDisplay = document.getElementById('csvGroupDisplay');
 
     if (groupingDisplay) {
-        groupingDisplay.textContent = window.currentGrouping === 'all' ? 'Alle Gruppierungen' : window.currentGrouping;
+        groupingDisplay.textContent = window.currentGroup === 'all' ? 'Alle Klassen' : window.currentGroup;
     }
     if (groupDisplay) {
         groupDisplay.textContent = window.currentGroup === 'all' ? 'Alle Gruppen' : window.currentGroup;
@@ -427,16 +427,8 @@ function validateCsvExport() {
 function getAllUsersAcrossGroups() {
     const users = [];
 
-    // Get all groups
-    let groups = Object.keys(window.dashboardData.groups).filter(g => g !== 'all');
-
-    // Filter by current grouping if not "all"
-    if (window.currentGrouping !== 'all') {
-        groups = groups.filter(groupName => {
-            const prefix = extractGroupingPrefix(groupName);
-            return prefix === window.currentGrouping;
-        });
-    }
+    // Alle Klassen (seit 2026/27 keine Team-Ebene mehr)
+    const groups = Object.keys(window.dashboardData.groups).filter(g => g !== 'all');
 
     // Collect users from each group
     groups.forEach(groupName => {
@@ -456,59 +448,45 @@ function getAllUsersAcrossGroups() {
 }
 
 function buildHjConfig(users, group) {
-    if (!window.mitarbeitsnoteConfig) return null;
-
-    // Bestimme Gruppe für Track-Ermittlung
+    // Bestimme Klasse fuer die Schienen-Ermittlung
     const sampleGroup = (window.currentGroup !== 'all')
         ? window.currentGroup
         : (users.length > 0 ? users[0]._groupName : null);
     if (!sampleGroup) return null;
 
     const track = getTrackForGroup(sampleGroup);
-    if (!track) return null;
-
-    const refWeek = window.mitarbeitsnoteConfig.mitarbeitsnote1_reference_week || 4;
     const sliderWeek = parseInt(document.getElementById('csvWeekSlider')?.value || 0);
     const autoWeek = getCurrentReferenceWeekForTrack(track);
     const currentWeek = sliderWeek > 0 ? sliderWeek : autoWeek;
 
-    const prognosisAssignments = window.mitarbeitsnoteConfig.prognosis_assignments || {};
-    const showReviewTalk1 = !!(prognosisAssignments.reviewTalk1);
-    const showReviewTalks = !!(prognosisAssignments.reviewTalk2 || prognosisAssignments.reviewTalk3);
+    const prognosisAssignments = (window.mitarbeitsnoteConfig
+        && window.mitarbeitsnoteConfig.prognosis_assignments) || {};
+    const showReviewTalk = !!(prognosisAssignments.reviewTalk || prognosisAssignments.reviewTalk1);
     const showCodeReview = !!(prognosisAssignments.codeReview);
 
-    // Prüfe ob tatsächliche Notenbuch-Werte vorhanden
-    const ma1Id = getManualItemIdByTitle('1. Mitarbeitsnote');
-    const hasActualMA1 = ma1Id && users.some(u => getManualGradeValue(u, ma1Id) !== null);
-    const eingereichtId = getManualItemIdByTitle('Eingereichte Aufgaben');
-    const hasEingereicht = eingereichtId && users.some(u => getManualGradeValue(u, eingereichtId) !== null);
+    const noteId = getManualItemIdByTitle('Mitarbeitsnote') || getManualItemIdByTitle('1. Mitarbeitsnote');
+    const hasActualNote = noteId && users.some(u => getManualGradeValue(u, noteId) !== null);
 
-    const referenztermin = window.mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1
-        ? window.mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1[track]
-        : null;
-    const codeReviewId = prognosisAssignments.codeReview || null;
+    // Titel des aktiven Halbjahres fuer die Spaltenbeschriftung
+    const kurs = (typeof getCourse === 'function' && window.currentHalbjahr
+                  && window.currentHalbjahr !== 'gesamt')
+        ? getCourse(window.currentHalbjahr) : null;
 
     return {
         track,
-        refWeek,
         currentWeek,
-        showReviewTalk1,
-        showReviewTalks,
+        zeitraum: kurs ? kurs.titel : 'Schuljahr',
+        showReviewTalk,
         showCodeReview,
-        hasActualMA1,
-        hasEingereicht,
-        ma1Id,
-        eingereichtId,
-        referenztermin,
-        codeReviewId,
-        show1hj: currentWeek >= refWeek,
-        show2hj: currentWeek >= refWeek
+        hasActualNote,
+        noteId,
+        codeReviewId: prognosisAssignments.codeReview || null
     };
 }
 
 function collectCsvData(selectedWeek) {
     const group = window.currentGroup === 'all' ? 'Alle Gruppen' : window.currentGroup;
-    const grouping = window.currentGrouping === 'all' ? 'Alle Gruppierungen' : window.currentGrouping;
+    const grouping = window.currentGroup === 'all' ? 'Alle Klassen' : window.currentGroup;
 
     // Get users
     let users = [];
@@ -677,24 +655,17 @@ function buildCsvHeaders(data) {
         headers.push(exam.assignment_title || 'Unbekannter LNW');
     });
 
-    // Halbjahresnotenspalten
+    // Mitarbeitsnoten-Spalten des aktiven Halbjahres
     const hj = data.hjConfig;
-    if (hj && hj.show1hj) {
-        headers.push('1.HJ Quantität (%)');
-        headers.push('1.HJ Qualität (%)');
-        if (hj.showReviewTalk1) headers.push('1.HJ Review-Talk 1 (%)');
-        if (hj.showCodeReview) headers.push('1.HJ Code-Review (%)');
-        if (hj.hasActualMA1) headers.push('1.HJ 1. Mitarbeitsnote (%)');
-        if (hj.hasEingereicht) headers.push('1.HJ Eingereichte Aufgaben');
-        headers.push('1.HJ Ø 1. Mitarbeitsnote');
-    }
-    if (hj && hj.show2hj) {
-        headers.push('2.HJ Eingereichte Aufgaben');
-        headers.push('2.HJ Quantität (%)');
-        headers.push('2.HJ Qualität (%)');
-        if (hj.showReviewTalks) headers.push('2.HJ Review-Talks (2,3) (%)');
-        if (hj.showCodeReview) headers.push('2.HJ Code-Review (%)');
-        headers.push('2.HJ 2. Mitarbeitsnote Prognose');
+    if (hj) {
+        const p = hj.zeitraum ? `${hj.zeitraum} ` : '';
+        headers.push(`${p}Quantität (%)`);
+        headers.push(`${p}Delta (Std.)`);
+        headers.push(`${p}Qualität (%)`);
+        if (hj.showReviewTalk) headers.push(`${p}Review-Talk (%)`);
+        if (hj.showCodeReview) headers.push(`${p}Code-Review (%)`);
+        if (hj.hasActualNote) headers.push(`${p}Notenbuch (%)`);
+        headers.push(`${p}Ø Mitarbeitsnote`);
     }
 
     return headers;
@@ -896,54 +867,18 @@ function buildUserRow(user, data) {
         row.push(grade);
     });
 
-    // Halbjahresnotenspalten
+    // Mitarbeitsnote des aktiven Halbjahres
     const hj = data.hjConfig;
-
-    // Code-Review einmalig ermitteln und nach Halbjahr aufteilen
-    let codeReview1HJ = null;
-    let codeReview2HJ = null;
-    if (hj && hj.showCodeReview && hj.codeReviewId) {
-        const crResult = getCodeReviewGradeWithDate(hj.codeReviewId, user.name);
-        if (crResult) {
-            const cutoff = hj.referenztermin ? new Date(hj.referenztermin) : null;
-            if (cutoff && crResult.submissionDate && crResult.submissionDate <= cutoff) {
-                codeReview1HJ = crResult.percent;
-            } else {
-                codeReview2HJ = crResult.percent;
-            }
-        }
-    }
-
-    if (hj && hj.show1hj) {
-        const ma1 = calculateMitarbeitsnote1(user, userGroup);
-        row.push(formatHjValue(ma1?.quantitaet));
-        row.push(formatHjValue(ma1?.qualitaet));
-        if (hj.showReviewTalk1) row.push(formatHjValue(ma1?.reviewTalk));
-        if (hj.showCodeReview) row.push(formatHjValue(codeReview1HJ));
-        if (hj.hasActualMA1) row.push(formatHjValue(ma1?.actualMA1Grade));
-        if (hj.hasEingereicht) {
-            const eingereichtVal = hj.eingereichtId ? getManualGradeValue(user, hj.eingereichtId) : null;
-            row.push(eingereichtVal !== null ? Math.round(eingereichtVal).toString() : '');
-        }
-        // Ø 1. Mitarbeitsnote (IHK-Note)
-        row.push(formatHjGrade(ma1?.grade));
-    }
-    if (hj && hj.show2hj) {
-        // Eingereichte Aufgaben 2.HJ = Gesamt eingereicht - Eingereichte 1.HJ (aus Notenbuch)
-        const gesamtEingereicht = user.assignments?.submitted_count || 0;
-        const eingereicht1HJ = hj.eingereichtId ? getManualGradeValue(user, hj.eingereichtId) : null;
-        const eingereicht2HJ = eingereicht1HJ !== null
-            ? Math.max(0, gesamtEingereicht - Math.round(eingereicht1HJ))
-            : '';
-        row.push(eingereicht2HJ !== '' ? eingereicht2HJ.toString() : '');
-
-        const ma2 = calculateMitarbeitsnote2Prognose(user, userGroup, hj.currentWeek);
-        row.push(formatHjValue(ma2?.quantitaet));
-        row.push(formatHjValue(ma2?.qualitaet));
-        if (hj.showReviewTalks) row.push(formatHjValue(ma2?.reviewTalks));
-        if (hj.showCodeReview) row.push(formatHjValue(codeReview2HJ));
-        // 2. Mitarbeitsnote Prognose (IHK-Note)
-        row.push(formatHjGrade(ma2?.grade));
+    if (hj) {
+        const ma = calculateMitarbeitsnote(user, userGroup, hj.currentWeek);
+        row.push(formatHjValue(ma?.quantitaet));
+        row.push(ma && ma.deltaStunden !== null && ma.deltaStunden !== undefined
+            ? ma.deltaStunden.toFixed(1).replace('.', ',') : '');
+        row.push(formatHjValue(ma?.qualitaet));
+        if (hj.showReviewTalk) row.push(formatHjValue(ma?.reviewTalk));
+        if (hj.showCodeReview) row.push(formatHjValue(ma?.codeReview));
+        if (hj.hasActualNote) row.push(formatHjValue(ma?.actualGrade));
+        row.push(formatHjGrade(ma?.grade));
     }
 
     return row;

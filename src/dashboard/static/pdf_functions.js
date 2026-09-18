@@ -78,12 +78,9 @@ function loadPersonsList() {
         return;
     }
     if (currentGroup === "all") {
-        let groups = Object.keys(dashboardData.groups).filter(g => g !== "all");
-        if (currentGrouping !== "all") {
-            groups = groups.filter(groupName => groupName.startsWith(currentGrouping));
-        }
+        const groups = Object.keys(dashboardData.groups).filter(g => g !== "all");
         if (groups.length === 0) {
-            personsList.innerHTML = "<p style='color: #999; text-align: center; padding: 20px;'>Keine Gruppen in dieser Gruppierung</p>";
+            personsList.innerHTML = "<p style='color: #999; text-align: center; padding: 20px;'>Keine Klassen vorhanden</p>";
             return;
         }
         groups.forEach(groupName => {
@@ -200,10 +197,10 @@ async function generatePdfReview() {
             reviewDate: reviewDate,
             absentPersons: absentPersons,
             disabledGroups: disabledGroups,
-            grouping: currentGrouping,
             group: currentGroup,
+            halbjahr: typeof currentHalbjahr !== "undefined" ? currentHalbjahr : null,
             week: pdfWeek,
-            maxWeeks: dashboardData && dashboardData.max_schoolweeks ? dashboardData.max_schoolweeks : 9,
+            maxWeeks: typeof maxSchoolweeks !== "undefined" ? maxSchoolweeks : 9,
             exportDate: dashboardData && dashboardData.last_updated ? dashboardData.last_updated : "",
             groupData: dashboardData && dashboardData.groups ? dashboardData.groups[currentGroup] : null,
             structuredTables: dashboardData && dashboardData.structured_tables ? dashboardData.structured_tables[currentGroup] : null
@@ -216,15 +213,12 @@ async function generatePdfReview() {
             let filteredStructuredTables = {};
             Object.keys(dashboardData.groups).forEach(groupName => {
                 if (groupName === "all") return;
-                if (currentGrouping !== "all" && !groupName.startsWith(currentGrouping)) {
-                    return;
-                }
                 filteredGroups[groupName] = dashboardData.groups[groupName];
                 if (dashboardData.structured_tables && dashboardData.structured_tables[groupName]) {
                     filteredStructuredTables[groupName] = dashboardData.structured_tables[groupName];
                 }
             });
-            console.log(`Filtered groups by grouping '${currentGrouping}':`, Object.keys(filteredGroups));
+            console.log("Alle Klassen:", Object.keys(filteredGroups));
             pdfData.allGroups = filteredGroups;
             pdfData.allStructuredTables = filteredStructuredTables;
             pdfData.isAllGroups = true;
@@ -250,7 +244,7 @@ async function generatePdfReview() {
         const a = document.createElement("a");
         a.href = url;
         const filename = currentGroup === "all"
-            ? `Code_Review_${currentGrouping}_Review${reviewNr}.pdf`
+            ? `Code_Review_Alle_Review${reviewNr}.pdf`
             : `Code_Review_${currentGroup}_Review${reviewNr}.pdf`;
         a.download = filename;
         document.body.appendChild(a);

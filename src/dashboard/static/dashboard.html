@@ -27,32 +27,15 @@
     <div class="relative-container">
         <!-- Grouping Selection Tabs -->
         <div class="card-container">
-            <nav class="grouping-nav-container">
-                <div class="grouping-nav-left">
-                    <svg width="20" height="20" class="grouping-nav-icon" aria-hidden="true">
-                        <use href="#icon-target"></use>
-                    </svg>
-                    <span class="grouping-nav-label">Gruppierung:</span>
-                    <button class="grouping-nav-btn active" id="groupingAll" onclick="selectGrouping('all')">
-                        <span class="grouping-tab-text">Alle Gruppierungen</span>
-                    </button>
-                    <div id="groupingTabs" class="grouping-tabs-dynamic">
-                        <!-- Grouping tabs will be populated dynamically -->
-                    </div>
-                </div>
-            </nav>
-        </div>
-
-        <!-- Group Selection Tabs -->
-        <div class="card-container">
+        <!-- Klassen-Auswahl (seit 2026/27 keine Team-Ebene mehr) -->
             <nav class="group-nav-container">
                 <div class="group-nav-left">
                     <svg width="20" height="20" class="group-nav-icon" aria-hidden="true">
                         <use href="#icon-target"></use>
                     </svg>
-                    <span class="group-nav-label">Gruppe:</span>
+                    <span class="group-nav-label">Klasse:</span>
                     <button class="group-nav-btn active" id="groupAll" onclick="selectGroup('all')">
-                        <span class="group-tab-text">Alle Gruppen</span>
+                        <span class="group-tab-text">Alle Klassen</span>
                     </button>
                     <div id="groupTabs" class="group-tabs-dynamic">
                         <!-- Group tabs will be populated dynamically -->
@@ -191,24 +174,17 @@
 
             <!-- Halbjahr-Tab-Navigation -->
             <div class="card-container">
-                <nav class="halbjahr-nav-container">
-                    <button class="halbjahr-nav-btn active" id="halbjahrBtn2hj" onclick="selectHalbjahr('2hj')">
-                        2. Halbjahr
-                    </button>
-                    <button class="halbjahr-nav-btn" id="halbjahrBtnGesamt" onclick="selectHalbjahr('gesamt')">
-                        Gesamt
-                    </button>
-                    <button class="halbjahr-nav-btn" id="halbjahrBtn1hj" onclick="selectHalbjahr('1hj')">
-                        1. Halbjahr
-                    </button>
+                <nav class="halbjahr-nav-container" id="halbjahrNav">
+                    <!-- Halbjahre werden aus plan.json erzeugt -->
                 </nav>
+                <p id="halbjahrHinweis" class="halbjahr-hinweis" style="display:none;"></p>
             </div>
 
             <!-- Übersichts-Cards (eine Reihe, inhalt wechselt je nach Tab) -->
             <div class="stats-group" id="overviewCardsGroup">
                 <div class="stats-row stats-grid" id="overviewCardsRow">
                     <!-- Gesamt-Cards -->
-                    <div class="stat-card halbjahr-cards gesamt-cards" style="display:none;">
+                    <div class="stat-card">
                         <div class="stat-progress-text" id="avgCompletionText">0%</div>
                         <div class="stat-progress-container">
                             <div class="stat-progress-bar">
@@ -217,39 +193,30 @@
                         </div>
                         <div class="stat-label" id="progressLabel">Ø Pflichtaufgaben</div>
                     </div>
-                    <div class="stat-card halbjahr-cards gesamt-cards" style="display:none;">
+                    <div class="stat-card">
                         <div class="stat-number" id="avgGradeText">-</div>
-                        <div class="stat-label">Durchschnittsnote Gruppe</div>
+                        <div class="stat-label">Durchschnittsnote Klasse</div>
                     </div>
-                    <div class="stat-card halbjahr-cards gesamt-cards" style="display:none;">
+                    <div class="stat-card">
                         <div class="stat-number" id="pflichtAverageGrade">-</div>
                         <div class="stat-label">Ø Note Pflichtaufgaben</div>
                     </div>
-                    <!-- 1. Halbjahr-Cards -->
-                    <div class="stat-card halbjahr-cards hj1-cards" style="display:none;">
-                        <div class="stat-number" id="hj1QuantitaetText">-</div>
-                        <div class="stat-label">Ø Quantität</div>
+                    <!-- Mitarbeitsnote des aktiven Halbjahres -->
+                    <div class="stat-card">
+                        <div class="stat-number" id="hjQuantitaetText">-</div>
+                        <div class="stat-label" title="Stundengewichtet">Ø Quantität</div>
                     </div>
-                    <div class="stat-card halbjahr-cards hj1-cards" style="display:none;">
-                        <div class="stat-number" id="hj1QualitaetText">-</div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="hjDeltaText">-</div>
+                        <div class="stat-label" title="Vorsprung bzw. Rückstand gegenüber dem Soll">Ø Delta</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="hjQualitaetText">-</div>
                         <div class="stat-label">Ø Qualität</div>
                     </div>
-                    <div class="stat-card halbjahr-cards hj1-cards" style="display:none;">
-                        <div class="stat-number" id="hj1GradeText">-</div>
-                        <div class="stat-label">Ø 1. MA Note</div>
-                    </div>
-                    <!-- 2. Halbjahr-Cards -->
-                    <div class="stat-card halbjahr-cards hj2-cards" style="display:none;">
-                        <div class="stat-number" id="hj2QuantitaetText">-</div>
-                        <div class="stat-label">Ø Quantität 2. HJ</div>
-                    </div>
-                    <div class="stat-card halbjahr-cards hj2-cards" style="display:none;">
-                        <div class="stat-number" id="hj2QualitaetText">-</div>
-                        <div class="stat-label">Ø Qualität 2. HJ</div>
-                    </div>
-                    <div class="stat-card halbjahr-cards hj2-cards" style="display:none;">
-                        <div class="stat-number" id="hj2GradeText">-</div>
-                        <div class="stat-label">Ø 2. MA Prognose</div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="hjGradeText">-</div>
+                        <div class="stat-label">Ø Mitarbeitsnote</div>
                     </div>
                 </div>
             </div>

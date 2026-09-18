@@ -1835,6 +1835,30 @@ h3 {
     color: var(--dark-color);
 }
 
+/* Gesperrtes Halbjahr: waehlbar erst ab Freischaltung */
+.halbjahr-nav-btn:disabled,
+.halbjahr-nav-btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    background: #e9ecef;
+    color: var(--text-color);
+}
+
+.halbjahr-nav-btn:disabled:hover {
+    background: #e9ecef;
+}
+
+/* Hinweiszeile unter der Halbjahr-Navigation */
+.halbjahr-hinweis {
+    margin: 10px 0 0;
+    padding: 8px 12px;
+    border-left: 3px solid var(--primary-color);
+    background: #f4f6f9;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-color);
+}
+
 /* Punkte-Unterzeile in Prozentzellen (z.B. "229 / 1333") */
 .cell-points {
     display: inline;

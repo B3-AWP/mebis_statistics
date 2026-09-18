@@ -1,21 +1,21 @@
 // Dashboard JavaScript
-let dashboardData = null;
-let currentGroup = 'all';
-let currentGrouping = 'all'; // New: current grouping selection
+let serverData = null;      // Vollständige Antwort von /api/data (alle Kurse + Plan)
+let dashboardData = null;   // Sicht auf den aktiven Kurs — was die Tabellen lesen
+let plan = null;            // Stammdaten aus plan.json
+let currentGroup = 'all';   // Klasse (seit 2026/27 keine Team-Ebene mehr)
 let currentWeek = 9; // Aktuelle ausgewählte Woche (wird durch Slider aktualisiert)
-let maxSchoolweeks = 9; // Maximale Schulwochen (aus Backend geladen, ersetzt totalWeeks)
+let maxSchoolweeks = 9; // Maximale Schulwochen (aus dem Wochenkalender des Plans)
 let checklistViewType = 'pflicht'; // New: track checklist column view setting
 let sortState = {}; // Track sorting state for different tables
 let gradeMapping = {}; // GradeMapping from config.ini
 let mitarbeitsnoteConfig = null; // Mitarbeitsnoten-Konfiguration aus Backend
 let manualGradeItemIds = {}; // Manuelle Bewertungselement-IDs aus Backend {id: title}
-let courseId = ''; // Mebis Course ID from config
-let currentHalbjahr = '2hj'; // Aktiver Halbjahr-Tab: '2hj' | 'gesamt' | '1hj'
+let courseId = ''; // Moodle-Kurs-ID des aktiven Halbjahres
+let currentHalbjahr = null; // Aktiver Kurs: kurs_id aus plan.json oder 'gesamt'
 
 // Make variables available globally for csv_export.js
 window.dashboardData = dashboardData;
 window.currentGroup = currentGroup;
-window.currentGrouping = currentGrouping;
 window.currentWeek = currentWeek;
 window.maxSchoolweeks = maxSchoolweeks;
 window.gradeMapping = gradeMapping;
@@ -281,54 +281,249 @@ async function startExportAndReload() {
         });
     }
 }
-function applyDashboardData(data) {
-    dashboardData = data;
+// ============================================================
+// KURS-SCOPE (Halbjahre)
+//
+// Der Server liefert alle Kurse. currentHalbjahr waehlt einen davon
+// (oder 'gesamt'); selectCourseScope() legt dessen Daten als
+// dashboardData ab, damit die Tabellen unveraendert weiterlesen koennen.
+// ============================================================
+
+// Liefert die Kurse in Planreihenfolge, angereichert um die Exportdaten.
+function getCourses() {
+    if (!serverData || !plan) return [];
+    return plan.kurse.map(k => {
+        const daten = (serverData.kurse || {})[k.moodle_course_id] || {};
+        return {
+            kursId: k.id,
+            moodleCourseId: k.moodle_course_id,
+            titel: k.titel,
+            gesperrt: k.gesperrt,
+            freischaltung: k.freischaltung,
+            stundenGeplant: k.stunden_geplant,
+            verfuegbar: daten.verfuegbar === true,
+            daten: daten
+        };
+    });
+}
+
+function getCourse(kursId) {
+    return getCourses().find(c => c.kursId === kursId) || null;
+}
+
+// Fasst mehrere Kurse zu einer Sicht zusammen ('gesamt').
+// Die Gewichtung ergibt sich von selbst aus der Stundensumme.
+function mergeCourses(courses) {
+    const verfuegbar = courses.filter(c => c.verfuegbar);
+    if (verfuegbar.length === 0) return null;
+    if (verfuegbar.length === 1) return verfuegbar[0].daten;
+
+    const merged = {
+        verfuegbar: true,
+        groups: {},
+        activities_by_category: [],
+        categories: [],
+        structured_tables: {},
+        assignment_details: {},
+        recent_submissions: [],
+        grade_mapping: verfuegbar[0].daten.grade_mapping,
+        mitarbeitsnote_config: verfuegbar[0].daten.mitarbeitsnote_config,
+        manual_grade_item_ids: verfuegbar[0].daten.manual_grade_item_ids,
+        stunden_geplant: verfuegbar.reduce((s, c) => s + (c.daten.stunden_geplant || 0), 0)
+    };
+
+    verfuegbar.forEach(c => {
+        const d = c.daten;
+        merged.activities_by_category.push(...(d.activities_by_category || []));
+        merged.categories.push(...(d.categories || []));
+        merged.recent_submissions.push(...(d.recent_submissions || []));
+        Object.assign(merged.assignment_details, d.assignment_details || {});
+        Object.assign(merged.structured_tables, d.structured_tables || {});
+
+        // Gruppen und Personen ueber Kurse hinweg zusammenfuehren:
+        // Stunden addieren sich, Prozentwerte werden daraus neu gebildet.
+        Object.entries(d.groups || {}).forEach(([gName, gData]) => {
+            if (!merged.groups[gName]) {
+                merged.groups[gName] = { name: gName, value: gData.value, users: [] };
+            }
+            const ziel = merged.groups[gName].users;
+            (gData.users || []).forEach(user => {
+                const vorhanden = ziel.find(u => u.name === user.name);
+                if (!vorhanden) {
+                    ziel.push(JSON.parse(JSON.stringify(user)));
+                    return;
+                }
+                const a = vorhanden.assignments, b = user.assignments;
+                if (!a || !b) return;
+                a.stunden_erledigt = (a.stunden_erledigt || 0) + (b.stunden_erledigt || 0);
+                a.stunden_gesamt = (a.stunden_gesamt || 0) + (b.stunden_gesamt || 0);
+                a.aufgaben_erledigt = (a.aufgaben_erledigt || 0) + (b.aufgaben_erledigt || 0);
+                a.aufgaben_gesamt = (a.aufgaben_gesamt || 0) + (b.aufgaben_gesamt || 0);
+                a.submitted_count = (a.submitted_count || 0) + (b.submitted_count || 0);
+                a.reviewed_count = (a.reviewed_count || 0) + (b.reviewed_count || 0);
+                a.percent_stunden = a.stunden_gesamt > 0
+                    ? Math.round((a.stunden_erledigt / a.stunden_gesamt) * 10000) / 100 : 0;
+                a.percent_submitted = a.aufgaben_gesamt > 0
+                    ? Math.round((a.aufgaben_erledigt / a.aufgaben_gesamt) * 10000) / 100 : 0;
+            });
+        });
+    });
+
+    return merged;
+}
+
+// Setzt dashboardData auf den gewaehlten Kurs-Scope.
+function selectCourseScope(scope) {
+    const courses = getCourses();
+    if (courses.length === 0) return;
+
+    // Vorgabe: der erste verfuegbare Kurs. Zu Schuljahresbeginn ist das
+    // das 1. Halbjahr — das 2. ist bis zur Freischaltung leer.
+    if (!scope) {
+        const ersterVerfuegbar = courses.find(c => c.verfuegbar);
+        scope = ersterVerfuegbar ? ersterVerfuegbar.kursId : courses[0].kursId;
+    }
+
+    currentHalbjahr = scope;
+    let daten = null;
+
+    if (scope === 'gesamt') {
+        daten = mergeCourses(courses);
+        courseId = '';
+    } else {
+        const kurs = getCourse(scope);
+        daten = kurs ? kurs.daten : null;
+        courseId = kurs ? kurs.moodleCourseId : '';
+    }
+
+    // Ein gesperrter oder noch nicht exportierter Kurs hat keine Daten.
+    // Leere Huelle statt Absturz — die Hinweiszeile erklaert den Grund.
+    dashboardData = daten || {
+        verfuegbar: false, groups: {}, activities_by_category: [], categories: [],
+        structured_tables: {}, assignment_details: {}, recent_submissions: []
+    };
     window.dashboardData = dashboardData;
 
-    dashboardLogger.debug('DATA', 'grade_mapping exists', { exists: !!dashboardData.grade_mapping });
-    if (dashboardData.grade_mapping) {
-        gradeMapping = dashboardData.grade_mapping;
-        window.gradeMapping = gradeMapping;
-        dashboardLogger.info('DATA', 'Grade mapping loaded successfully', gradeMapping);
-    } else {
-        dashboardLogger.error('DATA', 'No grade_mapping found in backend response', {
-            availableKeys: Object.keys(dashboardData)
-        });
-    }
+    gradeMapping = dashboardData.grade_mapping || {};
+    window.gradeMapping = gradeMapping;
+    mitarbeitsnoteConfig = dashboardData.mitarbeitsnote_config || null;
+    window.mitarbeitsnoteConfig = mitarbeitsnoteConfig;
+    manualGradeItemIds = dashboardData.manual_grade_item_ids || {};
 
-    if (dashboardData.max_schoolweeks) {
-        maxSchoolweeks = dashboardData.max_schoolweeks;
-        window.maxSchoolweeks = maxSchoolweeks;
-        dashboardLogger.info('DATA', `Max schoolweeks loaded: ${maxSchoolweeks}`);
-    } else {
-        dashboardLogger.warn('DATA', `No max_schoolweeks found, using default: ${maxSchoolweeks}`);
-    }
+    updateWeekSlider();
+    updateCourseScopeUI();
+}
 
-    if (dashboardData.mitarbeitsnote_config) {
-        mitarbeitsnoteConfig = dashboardData.mitarbeitsnote_config;
-        window.mitarbeitsnoteConfig = mitarbeitsnoteConfig;
-        dashboardLogger.info('DATA', 'Mitarbeitsnote config loaded', mitarbeitsnoteConfig);
-    }
-
-    if (dashboardData.manual_grade_item_ids) {
-        manualGradeItemIds = dashboardData.manual_grade_item_ids;
-        dashboardLogger.info('DATA', 'Manual grade item IDs loaded', manualGradeItemIds);
-    }
-
-    if (dashboardData.course_id) {
-        courseId = dashboardData.course_id;
-        dashboardLogger.info('DATA', `Course ID loaded: ${courseId}`);
-    } else {
-        dashboardLogger.warn('DATA', 'No course_id found in backend response');
-    }
-
+// Der Wochen-Slider zeigt die Blockwochen des aktiven Halbjahres.
+// Bei "Gesamt" laeuft er ueber das ganze Schuljahr.
+function updateWeekSlider() {
     const slider = document.getElementById('referenceWeekSlider');
-    if (slider) {
-        slider.max = maxSchoolweeks;
-        slider.value = maxSchoolweeks;
-        const maxLabel = document.querySelector('.slider-value.max');
-        if (maxLabel) maxLabel.textContent = maxSchoolweeks;
+    if (!slider) return;
+
+    const track = getTrackForGroup(currentGroup) || (plan && Object.keys(plan.schienen)[0]);
+    const wochen = getSchulwochenForScope(track);
+    if (wochen.length === 0) return;
+
+    const min = wochen[0].woche;
+    const max = wochen[wochen.length - 1].woche;
+
+    slider.min = min;
+    slider.max = max;
+
+    // Auf die laufende Woche stellen, falls sie im Zeitraum liegt,
+    // sonst auf das Ende des Zeitraums.
+    const jetzt = getCurrentReferenceWeekForTrack(track);
+    const wert = (jetzt >= min && jetzt <= max) ? jetzt : max;
+    slider.value = wert;
+
+    const minLabel = document.querySelector('.slider-value.min');
+    const maxLabel = document.querySelector('.slider-value.max');
+    if (minLabel) minLabel.textContent = min;
+    if (maxLabel) maxLabel.textContent = max;
+    const display = document.getElementById('currentWeekDisplay');
+    if (display) display.textContent = wert;
+
+    currentWeek = wert;
+    window.currentWeek = currentWeek;
+}
+
+// Zeichnet die Halbjahr-Schaltflaechen und den Hinweis bei leerem Kurs.
+function updateCourseScopeUI() {
+    const nav = document.getElementById('halbjahrNav');
+    if (!nav) return;
+
+    const courses = getCourses();
+    const anzahlVerfuegbar = courses.filter(c => c.verfuegbar).length;
+
+    const knoepfe = courses.map(c => {
+        const aktiv = currentHalbjahr === c.kursId ? ' active' : '';
+        const gesperrt = c.verfuegbar ? '' : ' disabled';
+        const titel = c.verfuegbar
+            ? `${c.titel} (${c.stundenGeplant} Std.)`
+            : (c.freischaltung
+                ? `${c.titel} — ab ${formatDateDe(c.freischaltung)}`
+                : `${c.titel} — noch keine Daten`);
+        return `<button class="halbjahr-nav-btn${aktiv}${gesperrt}" `
+             + `${c.verfuegbar ? `onclick="selectHalbjahr('${c.kursId}')"` : 'disabled'} `
+             + `title="${titel}">${c.titel}</button>`;
+    });
+
+    // "Gesamt" lohnt sich erst, wenn mehr als ein Kurs Daten hat.
+    if (anzahlVerfuegbar > 1) {
+        const aktiv = currentHalbjahr === 'gesamt' ? ' active' : '';
+        knoepfe.splice(1, 0,
+            `<button class="halbjahr-nav-btn${aktiv}" onclick="selectHalbjahr('gesamt')" `
+            + `title="Beide Halbjahre zusammen">Gesamt</button>`);
     }
+
+    nav.innerHTML = knoepfe.join('');
+
+    const hinweis = document.getElementById('halbjahrHinweis');
+    if (hinweis) {
+        const kurs = currentHalbjahr !== 'gesamt' ? getCourse(currentHalbjahr) : null;
+        if (kurs && !kurs.verfuegbar) {
+            hinweis.textContent = kurs.freischaltung
+                ? `${kurs.titel} ist noch gesperrt und wird am ${formatDateDe(kurs.freischaltung)} freigeschaltet.`
+                : `Für ${kurs.titel} liegen noch keine Exportdaten vor.`;
+            hinweis.style.display = '';
+        } else {
+            hinweis.style.display = 'none';
+        }
+    }
+}
+
+function formatDateDe(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return isNaN(d) ? iso : d.toLocaleDateString('de-DE');
+}
+
+function applyDashboardData(data) {
+    serverData = data;
+    plan = data.plan || null;
+
+    if (!plan) {
+        dashboardLogger.error('DATA', 'Keine Plandaten in der Server-Antwort');
+    }
+
+    // Schulwochen aus dem Plan; die Schienen haben denselben Wochenumfang.
+    if (plan && plan.schienen) {
+        const ersteSchiene = Object.values(plan.schienen)[0];
+        if (ersteSchiene && ersteSchiene.schulwochen.length > 0) {
+            maxSchoolweeks = ersteSchiene.schulwochen.length;
+            window.maxSchoolweeks = maxSchoolweeks;
+        }
+    }
+
+    manualGradeItemIds = data.manual_grade_item_ids || {};
+    selectCourseScope(currentHalbjahr);
+
+    dashboardLogger.info('DATA', 'Kurse geladen', {
+        schuljahr: data.schuljahr,
+        kurse: getCourses().map(c => `${c.titel}${c.verfuegbar ? '' : ' (gesperrt)'}`),
+        aktiv: currentHalbjahr,
+        maxSchoolweeks: maxSchoolweeks
+    });
 
     dashboardLogger.info('DATA', 'Dashboard data loaded', {
         hasActivitiesByCategory: !!dashboardData.activities_by_category,
@@ -419,10 +614,7 @@ function showError(message) {
 
 // Gruppen-Tabs und Dropdowns füllen
 function populateGroupSelectors() {
-    // Populate grouping tabs
-    populateGroupingTabs();
-
-    // Populate group tabs
+    // Klassen-Tabs (seit 2026/27 keine Team-Ebene mehr)
     populateGroupTabs();
 
     // Populate remaining dropdown selectors
@@ -509,58 +701,7 @@ function populateCategoryFilter() {
     });
 }
 
-// Gruppierungen aus Gruppennamen extrahieren
-function extractGroupings() {
-    if (!dashboardData || !dashboardData.groups) return {};
-
-    const groupings = {};
-
-    Object.keys(dashboardData.groups).forEach(groupName => {
-        // Alles vor dem ersten Leerzeichen als Gruppierung verwenden
-        const prefix = groupName.split(' ')[0];
-
-        if (!groupings[prefix]) {
-            groupings[prefix] = [];
-        }
-        groupings[prefix].push(groupName);
-    });
-
-    return groupings;
-}
-
-// Gruppierungs-Tabs dynamisch erstellen
-function populateGroupingTabs() {
-    const groupingTabsContainer = document.getElementById('groupingTabs');
-    if (!groupingTabsContainer || !dashboardData || !dashboardData.groups) return;
-
-    // Container leeren
-    groupingTabsContainer.innerHTML = '';
-
-    const groupings = extractGroupings();
-
-    // Für jede Gruppierung einen Tab erstellen
-    Object.keys(groupings).sort().forEach(groupingName => {
-        const groupingButton = document.createElement('button');
-        groupingButton.className = 'grouping-nav-btn';
-        groupingButton.id = `grouping${groupingName.replace(/\s+/g, '')}`;
-        groupingButton.onclick = () => selectGrouping(groupingName);
-
-        const spanText = document.createElement('span');
-        spanText.className = 'grouping-tab-text';
-        spanText.textContent = groupingName;
-        groupingButton.appendChild(spanText);
-
-        // Zeige Anzahl der Gruppen in dieser Gruppierung
-        const countBadge = document.createElement('span');
-        countBadge.className = 'grouping-count-badge';
-        countBadge.textContent = groupings[groupingName].length;
-        groupingButton.appendChild(countBadge);
-
-        groupingTabsContainer.appendChild(groupingButton);
-    });
-}
-
-// Gruppen-Tabs dynamisch erstellen (basierend auf aktueller Gruppierung)
+// Klassen-Tabs dynamisch erstellen
 function populateGroupTabs() {
     const groupTabsContainer = document.getElementById('groupTabs');
     if (!groupTabsContainer || !dashboardData || !dashboardData.groups) return;
@@ -568,15 +709,7 @@ function populateGroupTabs() {
     // Container leeren
     groupTabsContainer.innerHTML = '';
 
-    // Gruppen basierend auf aktueller Gruppierung filtern
-    let groupsToShow = [];
-
-    if (currentGrouping === 'all') {
-        groupsToShow = Object.keys(dashboardData.groups);
-    } else {
-        const groupings = extractGroupings();
-        groupsToShow = groupings[currentGrouping] || [];
-    }
+    const groupsToShow = Object.keys(dashboardData.groups);
 
     // Für jede zu zeigende Gruppe einen Tab erstellen
     groupsToShow.forEach(groupName => {
@@ -610,26 +743,12 @@ function getSelectedUsers() {
     if (!dashboardData || !dashboardData.groups) return [];
 
     if (currentGroup === 'all') {
-        // Alle Benutzer basierend auf aktueller Gruppierung
-        if (currentGrouping === 'all') {
-            // Alle Benutzer aus allen Gruppen
-            let allUsers = [];
-            Object.values(dashboardData.groups).forEach(group => {
-                allUsers = allUsers.concat(group.users);
-            });
-            return allUsers;
-        } else {
-            // Alle Benutzer aus Gruppen der aktuellen Gruppierung
-            const groupings = extractGroupings();
-            const groupsInGrouping = groupings[currentGrouping] || [];
-            let groupingUsers = [];
-            groupsInGrouping.forEach(groupName => {
-                if (dashboardData.groups[groupName]) {
-                    groupingUsers = groupingUsers.concat(dashboardData.groups[groupName].users);
-                }
-            });
-            return groupingUsers;
-        }
+        // Alle Personen aus allen Klassen
+        let allUsers = [];
+        Object.values(dashboardData.groups).forEach(group => {
+            allUsers = allUsers.concat(group.users);
+        });
+        return allUsers;
     } else {
         // Benutzer aus spezifischer Gruppe
         return dashboardData.groups[currentGroup]?.users || [];
@@ -838,53 +957,47 @@ function updateOverviewStats(groupStats, users) {
     generateGroupProgressTable(users);
 }
 
-// Halbjahr-spezifische Cards befüllen (1. HJ und 2. HJ)
+// Kennzahlen-Cards des aktiven Halbjahres befuellen
 function updateHalbjahrCards(users) {
     const noData = '-';
+    const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    const ids = ['hjQuantitaetText', 'hjQualitaetText', 'hjGradeText', 'hjDeltaText'];
 
-    if (!mitarbeitsnoteConfig || currentGroup === 'all' || !users || users.length === 0) {
-        // Kein Config oder "Alle Gruppen" → "-" anzeigen
-        ['hj1QuantitaetText', 'hj1QualitaetText', 'hj1GradeText',
-         'hj2QuantitaetText', 'hj2QualitaetText', 'hj2GradeText'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.textContent = noData;
-        });
+    if (currentGroup === 'all' || !users || users.length === 0) {
+        ids.forEach(id => setEl(id, noData));
         return;
     }
 
-    // 1. Halbjahresnote: Durchschnitte aus calculateMitarbeitsnote1
-    let sumQ1 = 0, countQ1 = 0;
-    let sumQual1 = 0, countQual1 = 0;
-    let sumGrade1 = 0, countHJ1 = 0;
-    users.forEach(user => {
-        const ma1 = calculateMitarbeitsnote1(user, currentGroup);
-        if (ma1) {
-            if (ma1.quantitaet !== null) { sumQ1 += ma1.quantitaet; countQ1++; }
-            if (ma1.qualitaet !== null) { sumQual1 += ma1.qualitaet; countQual1++; }
-            if (ma1.grade !== null) { sumGrade1 += ma1.grade; countHJ1++; }
-        }
-    });
-    const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    setEl('hj1QuantitaetText', countQ1 > 0 ? (sumQ1 / countQ1).toFixed(1) + '%' : noData);
-    setEl('hj1QualitaetText', countQual1 > 0 ? (sumQual1 / countQual1).toFixed(1) + '%' : noData);
-    setEl('hj1GradeText', countHJ1 > 0 ? (sumGrade1 / countHJ1).toFixed(1) : noData);
+    const sliderWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 0) || undefined;
 
-    // 2. Halbjahresnote-Prognose: Durchschnitte aus calculateMitarbeitsnote2Prognose (mit Slider-Woche)
-    const sliderWeekForCards = parseInt(document.getElementById('referenceWeekSlider')?.value || 0) || undefined;
-    let sumQ2 = 0, countQ2 = 0;
-    let sumQual2 = 0, countQual2 = 0;
-    let sumGrade2 = 0, countHJ2 = 0;
+    let sumQ = 0, countQ = 0;
+    let sumQual = 0, countQual = 0;
+    let sumGrade = 0, countGrade = 0;
+    let sumDelta = 0, countDelta = 0;
+
     users.forEach(user => {
-        const ma2 = calculateMitarbeitsnote2Prognose(user, currentGroup, sliderWeekForCards);
-        if (ma2) {
-            if (ma2.quantitaet !== null) { sumQ2 += ma2.quantitaet; countQ2++; }
-            if (ma2.qualitaet !== null) { sumQual2 += ma2.qualitaet; countQual2++; }
-            if (ma2.grade !== null) { sumGrade2 += ma2.grade; countHJ2++; }
+        const ma = calculateMitarbeitsnote(user, currentGroup, sliderWeek);
+        if (!ma) return;
+        if (ma.quantitaet !== null) { sumQ += ma.quantitaet; countQ++; }
+        if (ma.qualitaet !== null) { sumQual += ma.qualitaet; countQual++; }
+        if (ma.grade !== null) { sumGrade += ma.grade; countGrade++; }
+        if (ma.deltaStunden !== null && ma.deltaStunden !== undefined) {
+            sumDelta += ma.deltaStunden; countDelta++;
         }
     });
-    setEl('hj2QuantitaetText', countQ2 > 0 ? (sumQ2 / countQ2).toFixed(1) + '%' : noData);
-    setEl('hj2QualitaetText', countQual2 > 0 ? (sumQual2 / countQual2).toFixed(1) + '%' : noData);
-    setEl('hj2GradeText', countHJ2 > 0 ? (sumGrade2 / countHJ2).toFixed(1) : noData);
+
+    setEl('hjQuantitaetText', countQ > 0 ? (sumQ / countQ).toFixed(1) + '%' : noData);
+    setEl('hjQualitaetText', countQual > 0 ? (sumQual / countQual).toFixed(1) + '%' : noData);
+    setEl('hjGradeText', countGrade > 0 ? (sumGrade / countGrade).toFixed(1) : noData);
+
+    // Delta in Unterrichtsstunden — die Groesse, die im Schueler-Dashboard
+    // vorne steht: wie viele Stunden liegt die Klasse vor oder zurueck.
+    if (countDelta > 0) {
+        const d = sumDelta / countDelta;
+        setEl('hjDeltaText', (d >= 0 ? '+' : '') + d.toFixed(1) + ' Std.');
+    } else {
+        setEl('hjDeltaText', noData);
+    }
 }
 
 // Statistiken für eine einzelne Gruppe berechnen
@@ -966,21 +1079,14 @@ function generateGroupComparisonTable() {
     // Titel aktualisieren
     const titleElement = document.getElementById('groupDetailTitle');
     if (titleElement) {
-        if (currentGrouping === 'all') {
-            titleElement.textContent = 'Gruppenvergleich - Alle Gruppen';
-        } else {
-            titleElement.textContent = `Gruppenvergleich - ${currentGrouping}`;
-        }
+        const kursTitel = currentHalbjahr && currentHalbjahr !== 'gesamt'
+            ? (getCourse(currentHalbjahr)?.titel || 'Schuljahr') : 'Schuljahr';
+        titleElement.textContent = `Klassenvergleich – ${kursTitel}`;
     }
 
     // Gruppen basierend auf aktueller Gruppierung filtern
     let groupsToShow = [];
-    if (currentGrouping === 'all') {
-        groupsToShow = Object.keys(dashboardData.groups);
-    } else {
-        const groupings = extractGroupings();
-        groupsToShow = groupings[currentGrouping] || [];
-    }
+    groupsToShow = Object.keys(dashboardData.groups);
 
     if (groupsToShow.length === 0) {
         container.innerHTML = '<p><em>Keine Gruppen verfügbar.</em></p>';
@@ -1329,218 +1435,200 @@ function getManualItemIdByTitle(title) {
     return Object.keys(manualGradeItemIds).find(id => manualGradeItemIds[id] === title) || null;
 }
 
-// Berechnet die 1. Halbjahresnote (Mitarbeitsnote) für einen Benutzer
-// Rückgabe: {quantitaet, qualitaet, reviewTalk, overall, grade, componentCount}
-function calculateMitarbeitsnote1(user, groupName) {
-    if (!mitarbeitsnoteConfig) return null;
+// Berechnet die Mitarbeitsnote eines Halbjahres.
+//
+// Seit 2026/27 gibt es nur noch EINE Mitarbeitsnote je Halbjahr; die
+// frueheren Funktionen fuer die 1. und die prognostizierte 2. Note sind
+// hier zusammengefuehrt. Welches Halbjahr gilt, sagt der Kurs-Scope.
+//
+// Rueckgabe: {quantitaet, qualitaet, reviewTalk, overall, grade, ...}
+function calculateMitarbeitsnote(user, groupName, weekOverride) {
+    const prognosisAssignments = (mitarbeitsnoteConfig && mitarbeitsnoteConfig.prognosis_assignments) || {};
 
-    const track = getTrackForGroup(groupName);
-    const refWeek = mitarbeitsnoteConfig.mitarbeitsnote1_reference_week || 4;
-    const referenztermin = track && mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1
-        ? mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1[track]
-        : null;
-    const prognosisAssignments = mitarbeitsnoteConfig.prognosis_assignments || {};
-
-    // Suche Item-IDs aus Konfiguration
+    // Die Item-IDs des Notenbuchs sind kursspezifisch. Der Backend-Scope
+    // liefert nur die des aktiven Kurses, deshalb genuegt der Titel.
     const quantitaetId = getManualItemIdByTitle('Quantität');
     const qualitaetId = getManualItemIdByTitle('Qualität');
-    const ma1Id = getManualItemIdByTitle('1. Mitarbeitsnote');
+    const noteId = getManualItemIdByTitle('Mitarbeitsnote')
+                || getManualItemIdByTitle('1. Mitarbeitsnote');
 
-    // Komponente 1: Quantität – direkt aus Notenbuch (7751955:Quantität), kein berechneter Fallback
-    const quantitaet = quantitaetId ? getManualGradeValue(user, quantitaetId) : null;
+    // Komponente 1: Quantitaet — eingetragener Wert hat Vorrang,
+    // sonst der stundengewichtete Fortschritt aus dem Plan.
+    let quantitaet = quantitaetId ? getManualGradeValue(user, quantitaetId) : null;
     const quantitaetIsActual = quantitaet !== null;
-    const quantitaetPoints = null;
+    let quantResult = null;
+    if (!quantitaetIsActual) {
+        quantResult = calculateQuantitaet(user, groupName, weekOverride);
+        quantitaet = quantResult ? quantResult.value : null;
+    }
 
-    // Komponente 2: Qualität – priorisiere tatsächliche Note aus Notenbuch
+    // Komponente 2: Qualitaet — ungewichteter Durchschnitt der Bewertungen.
+    // Bewusst nicht stundengewichtet: eine gut gemachte kleine Aufgabe ist
+    // so viel wert wie eine gut gemachte grosse.
     let qualitaet = qualitaetId ? getManualGradeValue(user, qualitaetId) : null;
-    let qualitaetIsActual = qualitaet !== null;
+    const qualitaetIsActual = qualitaet !== null;
+    let qualResult = null;
     if (!qualitaetIsActual) {
-        // Fallback: Berechne aus Pflichtabgaben bis Referenztermin
-        const qualResult = calculatePflichtaufgabenGradeFiltered(user.name, referenztermin, false);
+        qualResult = calculatePflichtaufgabenGradeFiltered(user.name, null, false);
         qualitaet = qualResult ? qualResult.percent : null;
     }
 
-    // Komponente 3: Review-Talk 1 (optional, nur wenn ID konfiguriert)
-    const reviewTalk1Id = prognosisAssignments.reviewTalk1 || null;
-    const reviewTalk = reviewTalk1Id ? findAssignmentOrQuizGradeForUser(reviewTalk1Id, user.name, null) : null;
+    // Komponente 3: Review-Talk (optional, je Kurs konfiguriert)
+    const reviewTalkId = prognosisAssignments.reviewTalk || prognosisAssignments.reviewTalk1 || null;
+    const reviewTalk = reviewTalkId ? findAssignmentOrQuizGradeForUser(reviewTalkId, user.name, null) : null;
 
-    // Tatsächliche 1. Mitarbeitsnote aus Notenbuch (wenn Lehrer sie bereits eingetragen hat)
-    const actualMA1Grade = ma1Id ? getManualGradeValue(user, ma1Id) : null;
+    // Komponente 4: Code-Review (optional, je Kurs konfiguriert)
+    const codeReviewId = prognosisAssignments.codeReview || null;
+    const codeReview = codeReviewId ? findAssignmentOrQuizGradeForUser(codeReviewId, user.name, null) : null;
 
-    // Durchschnitt der Komponenten berechnen (Fallback falls keine tatsächliche Note)
-    const components = [quantitaet, qualitaet, reviewTalk].filter(v => v !== null && v !== undefined);
-    if (components.length === 0 && actualMA1Grade === null) return null;
+    // Eingetragene Note aus dem Notenbuch hat immer Vorrang.
+    const actualGrade = noteId ? getManualGradeValue(user, noteId) : null;
+
+    const components = [quantitaet, qualitaet, reviewTalk, codeReview]
+        .filter(v => v !== null && v !== undefined);
+    if (components.length === 0 && actualGrade === null) return null;
+
     const calculatedOverall = components.length > 0
         ? components.reduce((a, b) => a + b, 0) / components.length
         : null;
-
-    // Wenn tatsächliche 1. MA-Note vorhanden → verwende diese für die IHK-Note
-    const overallForGrade = actualMA1Grade !== null ? actualMA1Grade : calculatedOverall;
+    const overallForGrade = actualGrade !== null ? actualGrade : calculatedOverall;
 
     return {
         quantitaet: quantitaet,
         quantitaetIsActual: quantitaetIsActual,
-        quantitaetPoints: quantitaetPoints,  // {actual, expected} für Punkteanzeige (null wenn manuell)
+        quantitaetPoints: quantResult
+            ? { actual: quantResult.stundenErledigt, expected: quantResult.stundenGesamt }
+            : null,
+        quantitaetSoll: quantResult ? quantResult.sollProzent : null,
+        deltaStunden: quantResult ? quantResult.deltaStunden : null,
         qualitaet: qualitaet,
         qualitaetIsActual: qualitaetIsActual,
-        qualitaetCount: null,                // Anzahl Pflichtabgaben (wird ggf. ergänzt)
+        qualitaetCount: qualResult ? qualResult.count : null,
         reviewTalk: reviewTalk,
-        actualMA1Grade: actualMA1Grade,      // tatsächliche Note aus Notenbuch (oder null)
+        codeReview: codeReview,
+        actualGrade: actualGrade,
         overall: overallForGrade,
         grade: overallForGrade !== null ? convertPercentToIHKGrade(overallForGrade) : null,
         componentCount: components.length
     };
 }
 
-// Berechnet den Quantitäts-Fortschritt für die 2. Mitarbeitsnote
-// Basiert auf Pflichtaufgaben-Abgaben (nicht mehr Checklisten).
-function calculateQuantitaetMA2(user, groupName, currentWeek) {
-    if (!mitarbeitsnoteConfig || !dashboardData || !dashboardData.activities_by_category) return null;
+// Stundengewichteter Fortschritt eines Kurses.
+//
+// Ersetzt die frueheren MA1/MA2-Quantitaetsfunktionen: Halbjahre sind seit
+// 2026/27 getrennte Kurse, deshalb entfaellt die Aufteilung einer
+// Aufgabenliste per Wochenanteil samt Uebertrag.
+//
+// Ist  = Summe Stunden abgegebener Aufgaben / Summe Stunden aller Aufgaben
+// Soll = Summe Stunden der Schulwochen 1..w / Summe Stunden aller Wochen
+//
+// Rueckgabe: {ist, soll, deltaStunden, stundenErledigt, stundenGesamt, ...}
+function calculateQuantitaet(user, groupName, weekOverride) {
+    if (!plan) return null;
 
-    const B7 = mitarbeitsnoteConfig.mitarbeitsnote1_reference_week || 4;
-    const C7 = currentWeek;
-    const totalWeeks = maxSchoolweeks;
+    const a = user.assignments || {};
+    const stundenGesamt = a.stunden_gesamt || 0;
+    if (stundenGesamt <= 0) return null;
 
-    if (C7 <= B7) return null;
-
-    // Schritt 1: Gesamtzahl Pflichtaufgaben + Abgaben gesamt zählen
-    let totalPflicht = 0;
-    let completedGesamt = 0;
-    for (const category of dashboardData.activities_by_category) {
-        if (!category.category_name || !category.category_name.includes('Pflichtaufgaben')) continue;
-        const allActivities = (category.assignments || []).concat(category.quizzes || []);
-        for (const activity of allActivities) {
-            totalPflicht++;
-            const userStatus = (activity.user_status || []).find(s => s.user_name === user.name);
-            // Eingereicht = benotet ODER nur abgegeben (submission_time vorhanden aber noch kein finales Grade)
-            const hasGrade = userStatus && userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
-            const hasSubmission = userStatus && userStatus.submission_time;
-            if (hasGrade || hasSubmission) {
-                completedGesamt++;
-            }
-        }
-    }
-    if (totalPflicht === 0) return null;
-
-    // Schritt 2: Soll pro Halbjahr
-    const soll1HJ = Math.round(totalPflicht * B7 / totalWeeks);
-    const soll2HJ = totalPflicht - soll1HJ;
-    if (soll2HJ === 0) return null;
-
-    // Schritt 3: Eingereichte aus MA1 (gecachter Notenbuch-Wert), Fallback: soll1HJ
-    const eingereichtId = getManualItemIdByTitle('Eingereichte Aufgaben');
-    const eingereicht1HJ_raw = eingereichtId ? getManualGradeValue(user, eingereichtId) : null;
-    const eingereicht1HJ = eingereicht1HJ_raw !== null ? eingereicht1HJ_raw : soll1HJ;
-
-    // Schritt 4: Anrechnung 1. HJ (Übertrag wird auf Zähler angerechnet, nicht auf Nenner)
-    const angerechnet = Math.min(eingereicht1HJ, soll1HJ);
-
-    // Schritt 5: Abgeschlossen im 2. HJ
-    const completed2HJ = Math.max(0, completedGesamt - angerechnet);
-
-    // Schritt 6: Zeitproportionaler Nenner
-    const weeksInto2HJ = C7 - B7;
-    const totalWeeks2HJ = totalWeeks - B7;
-    const denominator = Math.round(soll2HJ * weeksInto2HJ / totalWeeks2HJ);
-    if (denominator <= 0) return null;
-
-    // Schritt 7: Quantität
-    const value = Math.round((completed2HJ / denominator) * 100 * 10) / 10;
-    const uebertrag = Math.max(0, eingereicht1HJ - soll1HJ);
-
-    return { value, actual: completed2HJ, expected: denominator, uebertrag };
-}
-
-// Berechnet den Gesamtfortschritt für alle Pflichtaufgaben (Assignments + Quizzes).
-// Nenner = totalPflicht × (selectedWeek / maxSchoolweeks), zeitproportional zum Referenztermin.
-function calculatePflichtaufgabenProgressGesamt(user, selectedWeek) {
-    if (!dashboardData || !dashboardData.activities_by_category) return null;
-
-    let totalPflicht = 0;
-    let completedGesamt = 0;
-    for (const category of dashboardData.activities_by_category) {
-        if (!category.category_name || !category.category_name.includes('Pflichtaufgaben')) continue;
-        const allActivities = (category.assignments || []).concat(category.quizzes || []);
-        for (const activity of allActivities) {
-            totalPflicht++;
-            const userStatus = (activity.user_status || []).find(s => s.user_name === user.name);
-            const hasGrade = userStatus && userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
-            const hasSubmission = userStatus && userStatus.submission_time;
-            if (hasGrade || hasSubmission) {
-                completedGesamt++;
-            }
-        }
-    }
-    if (totalPflicht === 0) return null;
-
-    const denominator = Math.round(totalPflicht * selectedWeek / maxSchoolweeks);
-    if (denominator <= 0) return null;
-
-    const value = Math.round((completedGesamt / denominator) * 100 * 10) / 10;
-    return { value, actual: completedGesamt, expected: denominator, total: totalPflicht };
-}
-
-// Berechnet die Prognose der 2. Halbjahresnote für einen Benutzer
-// weekOverride: optionaler Wochenwert (z.B. vom Slider); falls nicht angegeben, wird die aktuelle Woche aus dem Stundenplan ermittelt
-// Rückgabe: {quantitaet, qualitaet, reviewTalk2, codeReview, overall, grade, componentCount}
-function calculateMitarbeitsnote2Prognose(user, groupName, weekOverride) {
-    if (!mitarbeitsnoteConfig) return null;
+    const stundenErledigt = a.stunden_erledigt || 0;
+    const ist = stundenErledigt / stundenGesamt;
 
     const track = getTrackForGroup(groupName);
-    const referenztermin = track && mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1
-        ? mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1[track]
-        : null;
-    const prognosisAssignments = mitarbeitsnoteConfig.prognosis_assignments || {};
-    const currentWeek = weekOverride !== undefined ? weekOverride : getCurrentReferenceWeekForTrack(track);
-
-    // Komponente 1: Quantitäts-Fortschritt für 2. MA (Pflichtaufgaben-basiert)
-    const quantResult = calculateQuantitaetMA2(user, groupName, currentWeek);
-    const quantitaet = quantResult ? quantResult.value : null;
-
-    // Komponente 2: Qualität (Pflichtabgaben NACH Referenztermin)
-    const qualResult = calculatePflichtaufgabenGradeFiltered(user.name, referenztermin, true);
-    const qualitaet = qualResult ? qualResult.percent : null;
-
-    // Komponente 3: Review-Talks (2, 3) – Durchschnitt wenn beide vorhanden
-    const reviewTalk2Id = prognosisAssignments.reviewTalk2 || null;
-    const reviewTalk2 = reviewTalk2Id
-        ? findAssignmentOrQuizGradeForUser(reviewTalk2Id, user.name, null)
-        : null;
-    const reviewTalk3Id = prognosisAssignments.reviewTalk3 || null;
-    const reviewTalk3 = reviewTalk3Id
-        ? findAssignmentOrQuizGradeForUser(reviewTalk3Id, user.name, null)
-        : null;
-    let reviewTalks = null;
-    if (reviewTalk2 !== null && reviewTalk3 !== null) {
-        reviewTalks = (reviewTalk2 + reviewTalk3) / 2;
-    } else {
-        reviewTalks = reviewTalk2 !== null ? reviewTalk2 : reviewTalk3;
-    }
-
-    // Komponente 4: Code-Review (Datumsfilter: nur Bewertungen NACH Referenztermin)
-    const codeReviewId = prognosisAssignments.codeReview || null;
-    const codeReview = codeReviewId
-        ? findAssignmentOrQuizGradeForUser(codeReviewId, user.name, referenztermin)
-        : null;
-
-    const components = [quantitaet, qualitaet, reviewTalks, codeReview].filter(v => v !== null && v !== undefined);
-    if (components.length === 0) return null;
-    const overall = components.reduce((a, b) => a + b, 0) / components.length;
+    const wochen = getSchulwochenForScope(track);
+    const woche = weekOverride !== undefined && weekOverride !== null
+        ? weekOverride
+        : getCurrentReferenceWeekForTrack(track);
+    const soll = sollAnteil(wochen, woche);
 
     return {
-        quantitaet: quantitaet,
-        quantitaetPoints: quantResult ? { actual: quantResult.actual, expected: quantResult.expected } : null,
-        quantitaetUebertrag: quantResult ? quantResult.uebertrag : 0,
-        qualitaet: qualitaet,
-        qualitaetCount: qualResult ? qualResult.count : null,
-        reviewTalks: reviewTalks,
-        reviewTalk2: reviewTalk2,
-        reviewTalk3: reviewTalk3,
-        codeReview: codeReview,
-        overall: overall,
-        grade: convertPercentToIHKGrade(overall),
-        componentCount: components.length
+        value: Math.round(ist * 1000) / 10,       // Prozent, eine Nachkommastelle
+        ist: ist,
+        soll: soll,
+        sollProzent: Math.round(soll * 1000) / 10,
+        deltaStunden: Math.round((ist - soll) * stundenGesamt * 10) / 10,
+        stundenErledigt: stundenErledigt,
+        stundenGesamt: stundenGesamt,
+        aufgabenErledigt: a.aufgaben_erledigt || 0,
+        aufgabenGesamt: a.aufgaben_gesamt || 0,
+        woche: woche
     };
+}
+
+// Gesamtfortschritt gegen das zeitproportionale Soll.
+//
+// Frueher gezaehlte Aufgaben gegen "Anzahl x Woche / maxWochen"; jetzt
+// Stunden gegen den Soll-Anteil des Wochenkalenders. Damit rechnet diese
+// Funktion wie calculateQuantitaet und liefert konsistente Werte.
+//
+// value > 100 % heisst: weiter als zum Stichtag erwartet.
+function calculatePflichtaufgabenProgressGesamt(user, selectedWeek) {
+    const a = (user && user.assignments) || {};
+    const stundenGesamt = a.stunden_gesamt || 0;
+    if (stundenGesamt <= 0) return null;
+
+    const stundenErledigt = a.stunden_erledigt || 0;
+    const wochen = getSchulwochenForScope(getTrackForGroup(user.group || currentGroup));
+    const soll = sollAnteil(wochen, selectedWeek);
+
+    // Vor der ersten Blockwoche gibt es kein Soll — dann zeigen wir den
+    // absoluten Fortschritt statt durch null zu teilen.
+    if (soll <= 0) {
+        return {
+            value: Math.round((stundenErledigt / stundenGesamt) * 1000) / 10,
+            actual: stundenErledigt,
+            expected: stundenGesamt,
+            total: a.aufgaben_gesamt || 0
+        };
+    }
+
+    const erwarteteStunden = soll * stundenGesamt;
+    return {
+        value: Math.round((stundenErledigt / erwarteteStunden) * 1000) / 10,
+        actual: Math.round(stundenErledigt * 10) / 10,
+        expected: Math.round(erwarteteStunden * 10) / 10,
+        total: a.aufgaben_gesamt || 0
+    };
+}
+
+// Soll-Anteil nach Stunden — Gegenstueck zu sollAnteil() in js/bilanz.js.
+// Woche 1 hat 10 Stunden, die uebrigen 14; eine lineare Naeherung
+// (woche / anzahlWochen) waere daher schon innerhalb eines Halbjahres falsch.
+function sollAnteil(schulwochen, woche) {
+    if (!schulwochen || schulwochen.length === 0) return 0;
+    const gesamt = schulwochen.reduce((summe, w) => summe + (w.stunden || 0), 0);
+    if (gesamt <= 0) return 0;
+    const bisher = schulwochen
+        .filter(w => w.woche <= woche)
+        .reduce((summe, w) => summe + (w.stunden || 0), 0);
+    return bisher / gesamt;
+}
+
+// Wochenkalender der Schiene, auf den aktiven Kurs-Scope beschnitten.
+// Bei Einzelansicht eines Halbjahres darf sich das Soll nicht auf
+// Blockwochen des anderen Halbjahres stuetzen.
+function getSchulwochenForScope(track) {
+    if (!plan || !plan.schienen) return [];
+    const schiene = plan.schienen[track] || Object.values(plan.schienen)[0];
+    if (!schiene) return [];
+    const wochen = schiene.schulwochen || [];
+
+    if (!currentHalbjahr || currentHalbjahr === 'gesamt') return wochen;
+
+    // Grenze ist die Freischaltung des naechsten Kurses.
+    const kurse = plan.kurse || [];
+    const idx = kurse.findIndex(k => k.id === currentHalbjahr);
+    if (idx < 0) return wochen;
+
+    const ab = kurse[idx].freischaltung ? new Date(kurse[idx].freischaltung) : null;
+    const bis = (idx + 1 < kurse.length && kurse[idx + 1].freischaltung)
+        ? new Date(kurse[idx + 1].freischaltung) : null;
+
+    return wochen.filter(w => {
+        const start = new Date(w.start);
+        if (ab && start < ab) return false;
+        if (bis && start >= bis) return false;
+        return true;
+    });
 }
 
 // Hilfsfunktion: Rendert eine Prozentzelle mit Farbe und Fallback
@@ -1570,154 +1658,87 @@ function renderGradeCell(grade, overall = null) {
     return `<td class="text-center text-bold" style="color: ${getGradeColor(grade)};">${grade.toFixed(1)}${overallStr}</td>`;
 }
 
-// Generiert die Halbjahresnotenabschnitte unterhalb der Gesamtfortschritts-Tabelle
-// mode: '1hj' | '2hj' | 'both'
-function generateHalbjahresnotenTable(users, mode = 'both') {
+// Generiert die Mitarbeitsnoten-Tabelle des aktiven Halbjahres.
+// Frueher zwei Abschnitte (1. Note + Prognose der 2.); seit 2026/27 einer.
+function generateHalbjahresnotenTable(users) {
     const container = document.getElementById('groupHalbjahresnotenTable');
     if (!container) return;
     container.innerHTML = '';
 
-    if (!mitarbeitsnoteConfig || currentGroup === 'all') return;
+    if (currentGroup === 'all') return;
 
     const track = getTrackForGroup(currentGroup);
-    if (!track) return;
-
-    const refWeek = mitarbeitsnoteConfig.mitarbeitsnote1_reference_week || 4;
-    // Slider-Wert als Referenzwoche für Prognose; Fallback auf aktuelle Woche aus Stundenplan
+    const wochen = getSchulwochenForScope(track);
     const sliderWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 0);
     const autoWeek = getCurrentReferenceWeekForTrack(track);
-    const currentWeek = sliderWeek > 0 ? sliderWeek : autoWeek;
+    const woche = sliderWeek > 0 ? sliderWeek : autoWeek;
 
-    if (currentWeek < refWeek) return; // Noch nicht in der Referenzwoche
-
-    const prognosisAssignments = mitarbeitsnoteConfig.prognosis_assignments || {};
-    const showReviewTalk1 = !!(prognosisAssignments.reviewTalk1);
-    const showReviewTalks = !!(prognosisAssignments.reviewTalk2 || prognosisAssignments.reviewTalk3);
+    const prognosisAssignments = (mitarbeitsnoteConfig && mitarbeitsnoteConfig.prognosis_assignments) || {};
+    const showReviewTalk = !!(prognosisAssignments.reviewTalk || prognosisAssignments.reviewTalk1);
     const showCodeReview = !!(prognosisAssignments.codeReview);
-    const referenztermin = mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1
-        ? mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1[track]
-        : null;
-    const referenzterminDisplay = referenztermin
-        ? new Date(referenztermin).toLocaleDateString('de-DE')
-        : '–';
+
+    const noteId = getManualItemIdByTitle('Mitarbeitsnote') || getManualItemIdByTitle('1. Mitarbeitsnote');
+    const hasActualNote = noteId && users.some(u => getManualGradeValue(u, noteId) !== null);
+
+    const kurs = currentHalbjahr && currentHalbjahr !== 'gesamt' ? getCourse(currentHalbjahr) : null;
+    const zeitraum = kurs ? kurs.titel : 'Schuljahr';
+    const sollPct = Math.round(sollAnteil(wochen, woche) * 1000) / 10;
 
     let html = '';
+    html += `<div style="margin-top: 24px;">`;
+    html += `<div class="stats-group-title" style="margin-bottom: 8px;">`;
+    html += `<span>Mitarbeitsnote – ${zeitraum} (Woche ${woche} von ${wochen.length}, `
+          + `Soll ${sollPct.toFixed(1)} %, Schiene: ${track || '–'})</span>`;
+    html += `</div>`;
+    html += `<table id="maTable" class="info-table dashboard-table overview-table">`;
+    html += `<thead><tr class="sticky-header">`;
+    html += `<th class="person-name">Person</th>`;
+    html += `<th title="Stundengewichtet: Summe der Stunden abgegebener Aufgaben">Quantität<br>(%)</th>`;
+    html += `<th title="Vorsprung bzw. Rückstand in Unterrichtsstunden">Delta<br>(Std.)</th>`;
+    html += `<th title="Ungewichteter Durchschnitt der Bewertungen">Qualität<br>(%)</th>`;
+    if (showReviewTalk) html += `<th>Review-Talk<br>(%)</th>`;
+    if (showCodeReview) html += `<th>Code-Review<br>(%)</th>`;
+    if (hasActualNote) html += `<th title="Eingetragene Note aus dem Mebis-Notenbuch">Notenbuch<br>(%)</th>`;
+    html += `<th>Ø Mitarbeitsnote</th>`;
+    html += `</tr></thead><tbody>`;
 
-    const show1hj = mode === '1hj' || mode === 'both';
-    const show2hj = mode === '2hj' || mode === 'both';
+    const colCount = 4 + (showReviewTalk ? 1 : 0) + (showCodeReview ? 1 : 0) + (hasActualNote ? 1 : 0);
 
-    // Prüfe ob tatsächliche Notenbuch-Werte verfügbar sind (bei mindestens einem User)
-    const ma1Id = getManualItemIdByTitle('1. Mitarbeitsnote');
-    const hasActualMA1 = ma1Id && users.some(u => getManualGradeValue(u, ma1Id) !== null);
-    const eingereichtId = getManualItemIdByTitle('Eingereichte Aufgaben');
-    const hasEingereicht = eingereichtId && users.some(u => getManualGradeValue(u, eingereichtId) !== null);
+    users.forEach(user => {
+        const ma = calculateMitarbeitsnote(user, currentGroup, woche);
+        html += `<tr><td class="person-name">${user.name}</td>`;
+        if (!ma) {
+            html += `<td class="text-center" colspan="${colCount}" style="color:#6C757D;">–</td></tr>`;
+            return;
+        }
 
-    // --- Abschnitt 1: 1. Halbjahresnote ---
-    if (show1hj) {
-        html += `<div style="margin-top: 24px;">`;
-        html += `<div class="stats-group-title" style="margin-bottom: 8px;">`;
-        html += `<span>1. Halbjahresnote (Referenzwoche ${refWeek}, Schiene: ${track})</span>`;
-        html += `</div>`;
-        html += `<table id="ma1Table" class="info-table dashboard-table overview-table">`;
-        html += `<thead><tr class="sticky-header">`;
-        html += `<th class="person-name">Person</th>`;
-        html += `<th>Quantität<br>(%)</th>`;
-        html += `<th>Qualität<br>(%)</th>`;
-        if (showReviewTalk1) html += `<th>Review-Talk 1<br>(%)</th>`;
-        if (hasActualMA1) html += `<th title="Tatsächliche Note aus Mebis-Notenbuch">1. Mitarbeitsnote<br>(%))</th>`;
-        if (hasEingereicht) html += `<th title="Eingereichte Pflichtaufgaben (Notenbuch)">Eingereichte<br>Aufgaben</th>`;
-        html += `<th>Ø 1. Mitarbeitsnote</th>`;
-        html += `</tr></thead><tbody>`;
+        const stundenLabel = ma.quantitaetPoints
+            ? `${ma.quantitaetPoints.actual} / ${ma.quantitaetPoints.expected} Std.`
+            : (ma.quantitaetIsActual ? 'Notenbuch' : null);
+        html += renderPctCell(ma.quantitaet, 'progress-color-info', null, 1, stundenLabel);
 
-        users.forEach(user => {
-            const ma1 = calculateMitarbeitsnote1(user, currentGroup);
-            const colCount = 3 + (showReviewTalk1 ? 1 : 0) + (hasActualMA1 ? 1 : 0) + (hasEingereicht ? 1 : 0);
-            if (!ma1) {
-                html += `<tr><td class="person-name"><strong>${user.name}</strong></td>`;
-                html += `<td colspan="${colCount}" class="text-center" style="color:#6C757D;">Keine Daten</td></tr>`;
-                return;
-            }
-            html += `<tr>`;
-            html += `<td class="person-name"><strong>${user.name}</strong></td>`;
-            if (ma1.quantitaetIsActual) {
-                html += renderPctCell(ma1.quantitaet, 'progress-color-info', null, 0);
-            } else {
-                html += `<td class="text-center" style="color:#6C757D;">–</td>`;
-            }
-            if (ma1.qualitaetIsActual) {
-                html += renderPctCell(ma1.qualitaet, 'progress-color-warning', null, 0);
-            } else {
-                html += `<td class="progress-cell progress-color-warning" style="opacity:0.65;" title="Berechneter Wert (noch keine tatsächliche Note)">${ma1.qualitaet !== null ? ma1.qualitaet.toFixed(0) + '%' : '–'}</td>`;
-            }
-            if (showReviewTalk1) html += renderPctCell(ma1.reviewTalk, 'progress-color-secondary', null, 0);
-            if (hasActualMA1) {
-                if (ma1.actualMA1Grade !== null) {
-                    html += renderPctCell(ma1.actualMA1Grade, 'progress-color-success', null, 0);
-                } else {
-                    html += `<td class="text-center" style="color:#6C757D;">–</td>`;
-                }
-            }
-            if (hasEingereicht) {
-                const eingereichtVal = eingereichtId ? getManualGradeValue(user, eingereichtId) : null;
-                if (eingereichtVal !== null) {
-                    html += `<td class="text-center">${Math.round(eingereichtVal)}</td>`;
-                } else {
-                    html += `<td class="text-center" style="color:#6C757D;">–</td>`;
-                }
-            }
-            html += renderGradeCell(ma1.grade);
-            html += `</tr>`;
-        });
+        // Delta: positiv = voraus, negativ = im Rueckstand.
+        if (ma.deltaStunden === null || ma.deltaStunden === undefined) {
+            html += `<td class="text-center" style="color:#6C757D;">–</td>`;
+        } else {
+            const farbe = ma.deltaStunden >= 0 ? '#1e7e34' : '#dc3545';
+            const vz = ma.deltaStunden >= 0 ? '+' : '';
+            html += `<td class="text-center text-bold" style="color:${farbe};">`
+                  + `${vz}${ma.deltaStunden.toFixed(1)}</td>`;
+        }
 
-        html += `</tbody></table></div>`;
-    }
+        html += renderPctCell(ma.qualitaet, 'progress-color-warning', null, 1,
+                              ma.qualitaetIsActual ? 'Notenbuch' : null);
+        if (showReviewTalk) html += renderPctCell(ma.reviewTalk, 'progress-color-secondary', null, 0);
+        if (showCodeReview) html += renderPctCell(ma.codeReview, 'progress-color-success', null, 0);
+        if (hasActualNote) html += renderPctCell(ma.actualGrade, 'progress-color-info', null, 1);
+        html += renderGradeCell(ma.grade, ma.overall);
+        html += `</tr>`;
+    });
 
-    // --- Abschnitt 2: Prognose 2. Halbjahresnote ---
-    if (show2hj) {
-        html += `<div style="margin-top: 24px;">`;
-        html += `<div class="stats-group-title" style="margin-bottom: 8px;">`;
-        html += `<span>Prognose 2. Halbjahresnote (aktuell Woche ${currentWeek}, Referenztermin: ${referenzterminDisplay})</span>`;
-        html += `</div>`;
-        html += `<table id="ma2Table" class="info-table dashboard-table overview-table">`;
-        html += `<thead><tr class="sticky-header">`;
-        html += `<th class="person-name">Person</th>`;
-        html += `<th>Quantität (%)</th>`;
-        html += `<th>Qualität (%)</th>`;
-        if (showReviewTalks) html += `<th>Review-Talks (2, 3) (%)</th>`;
-        if (showCodeReview) html += `<th>Code-Review (%)</th>`;
-        html += `<th>2. Mitarbeitsnote Prognose</th>`;
-        html += `</tr></thead><tbody>`;
-
-        users.forEach(user => {
-            const ma2 = calculateMitarbeitsnote2Prognose(user, currentGroup, currentWeek);
-            if (!ma2) {
-                const cols = 3 + (showReviewTalks ? 1 : 0) + (showCodeReview ? 1 : 0);
-                html += `<tr><td class="person-name"><strong>${user.name}</strong></td>`;
-                html += `<td colspan="${cols}" class="text-center" style="color:#6C757D;">Keine Daten</td></tr>`;
-                return;
-            }
-            html += `<tr>`;
-            html += `<td class="person-name"><strong>${user.name}</strong></td>`;
-            const uebertragLabel = (ma2.quantitaetUebertrag > 0) ? `inkl. ${ma2.quantitaetUebertrag} aus 1.HJ` : null;
-            html += renderPctCell(ma2.quantitaet, 'progress-color-info', ma2.quantitaetPoints, 0, uebertragLabel);
-            html += renderPctCell(ma2.qualitaet, 'progress-color-warning', null, 0);
-            if (showReviewTalks) {
-                const rt2 = ma2.reviewTalk2 !== null ? `${Math.round(ma2.reviewTalk2)}%` : '–';
-                const rt3 = ma2.reviewTalk3 !== null ? `${Math.round(ma2.reviewTalk3)}%` : '–';
-                const rtLabel = `${rt2}, ${rt3}`;
-                html += renderPctCell(ma2.reviewTalks, 'progress-color-secondary', null, 0, rtLabel);
-            }
-            if (showCodeReview) html += renderPctCell(ma2.codeReview, 'progress-color-success', null, 0);
-            html += renderGradeCell(ma2.grade, ma2.overall);
-            html += `</tr>`;
-        });
-
-        html += `</tbody></table></div>`;
-    }
-
+    html += `</tbody></table></div>`;
     container.innerHTML = html;
-    if (show1hj) makeTableSortable('ma1Table');
-    if (show2hj) makeTableSortable('ma2Table');
+    makeTableSortable('maTable');
 }
 
 // Generiert die Fortschritts-Tabelle für die Übersicht
@@ -1726,15 +1747,11 @@ function generateGroupProgressTable(users) {
     if (!container) return;
     const halbjahresContainer = document.getElementById('groupHalbjahresnotenTable');
 
-    // Bei HJ-Tabs: nur die Halbjahresnoten-Tabelle zeigen (Gesamt-Tabelle ausblenden)
-    if (currentHalbjahr === '1hj' || currentHalbjahr === '2hj') {
+    // Ohne Daten (gesperrter Kurs) bleibt die Ansicht leer; der Hinweis
+    // ueber der Navigation nennt den Grund.
+    if (dashboardData && dashboardData.verfuegbar === false) {
         container.innerHTML = '';
-        if (currentGroup === 'all') {
-            if (halbjahresContainer) halbjahresContainer.innerHTML = '<p><em>Bitte eine Gruppe auswählen.</em></p>';
-            return;
-        }
-        generateHalbjahresnotenTable(users, currentHalbjahr);
-        setTimeout(() => wrapTableWithScrollContainer('groupHalbjahresnotenTable'), 50);
+        if (halbjahresContainer) halbjahresContainer.innerHTML = '';
         return;
     }
 
@@ -1804,8 +1821,8 @@ function generateGroupProgressTable(users) {
     // Tabelle sortierbar machen
     makeTableSortable('individualProgressTable');
 
-    // Halbjahresnotenberechnung anzeigen (Gesamt-Tab: beide Abschnitte)
-    generateHalbjahresnotenTable(users, 'both');
+    // Mitarbeitsnote des aktiven Halbjahres
+    generateHalbjahresnotenTable(users);
 
     // Scroll-Wrapper anwenden
     setTimeout(() => wrapTableWithScrollContainer('groupProgressTable'), 50);
@@ -1847,9 +1864,6 @@ function generateRecentSubmissionsTable() {
     // Filtere auf aktuelle Gruppierung / Gruppe (ignorierte Gruppen ausschließen)
     const ignoredGroups = (dashboardData && dashboardData.ignored_groups) || [];
     let groupNames = Object.keys(recentData).filter(name => !ignoredGroups.includes(name));
-    if (currentGrouping !== 'all') {
-        groupNames = groupNames.filter(name => name.split(' ')[0] === currentGrouping);
-    }
     if (currentGroup !== 'all') {
         groupNames = groupNames.filter(name => name === currentGroup);
     }
@@ -2026,49 +2040,21 @@ function toggleProgressType() {
 }
 
 // Halbjahr-Tab auswählen
-function selectHalbjahr(halbjahr) {
-    currentHalbjahr = halbjahr;
+// Halbjahr (= Kurs) wechseln. Der Umschalter waehlt seit 2026/27 einen
+// Moodle-Kurs aus, keine Notenstufe.
+function selectHalbjahr(scope) {
+    selectCourseScope(scope);
 
-    // Tab-Buttons aktualisieren
-    document.querySelectorAll('.halbjahr-nav-btn').forEach(btn => btn.classList.remove('active'));
-    const btnMap = { '2hj': 'halbjahrBtn2hj', 'gesamt': 'halbjahrBtnGesamt', '1hj': 'halbjahrBtn1hj' };
-    const activeBtn = document.getElementById(btnMap[halbjahr]);
-    if (activeBtn) activeBtn.classList.add('active');
-
-    // Steuerelemente (Slider) immer sichtbar – relevant für Gesamt und 2. HJ Prognose
-
-    // Cards einblenden
-    document.querySelectorAll('.gesamt-cards').forEach(el => el.style.display = halbjahr === 'gesamt' ? '' : 'none');
-    document.querySelectorAll('.hj1-cards').forEach(el => el.style.display = halbjahr === '1hj' ? '' : 'none');
-    document.querySelectorAll('.hj2-cards').forEach(el => el.style.display = halbjahr === '2hj' ? '' : 'none');
-
-    // Titel der Detailtabelle anpassen
     const titleEl = document.getElementById('groupDetailTitle');
     if (titleEl) {
-        if (halbjahr === '1hj') titleEl.textContent = '1. Halbjahresnote';
-        else if (halbjahr === '2hj') titleEl.textContent = 'Prognose 2. Halbjahresnote';
-        else titleEl.textContent = currentGroup === 'all' ? 'Gruppenvergleich' : 'Gesamtfortschritt pro Person';
+        const kurs = scope !== 'gesamt' ? getCourse(scope) : null;
+        const zeitraum = kurs ? kurs.titel : 'Schuljahr';
+        titleEl.textContent = currentGroup === 'all'
+            ? `Klassenvergleich – ${zeitraum}`
+            : `Gesamtfortschritt pro Person – ${zeitraum}`;
     }
 
-    updateDashboard();
-}
-
-// Gruppierung über Tab auswählen
-function selectGrouping(groupingName) {
-    currentGrouping = groupingName;
-    window.currentGrouping = currentGrouping; // Sync to window
-
-    // Bei Gruppierungsauswahl auf "Alle Gruppen" der Gruppierung setzen
-    currentGroup = 'all';
-    window.currentGroup = currentGroup; // Sync to window
-
-    // Gruppen-Tabs basierend auf neuer Gruppierung aktualisieren
-    populateGroupTabs();
-
-    // Alle Tabs und Dropdowns synchronisieren
-    syncGroupSelectors();
-
-    // Dashboard und alle Tabs aktualisieren
+    populateGroupSelectors();
     updateDashboard();
     updateAllTabs();
 }
@@ -2104,10 +2090,6 @@ function filterByGroup() {
 
 // Synchronisiert alle Gruppen-Tabs und Dropdowns
 function syncGroupSelectors() {
-    // Synchronize grouping tabs
-    syncGroupingTabs();
-
-    // Synchronize group tabs
     syncGroupTabs();
 
     // Synchronize remaining dropdown selectors
@@ -2121,27 +2103,6 @@ function syncGroupSelectors() {
             selector.value = currentGroup;
         }
     });
-}
-
-// Synchronisiert die Gruppierungs-Tabs
-function syncGroupingTabs() {
-    // Alle Gruppierungs-Tabs inaktiv setzen
-    document.querySelectorAll('.grouping-nav-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
-
-    // Den aktiven Gruppierungs-Tab markieren
-    if (currentGrouping === 'all') {
-        const allGroupingBtn = document.getElementById('groupingAll');
-        if (allGroupingBtn) {
-            allGroupingBtn.classList.add('active');
-        }
-    } else {
-        const activeGroupingBtn = document.getElementById(`grouping${currentGrouping.replace(/\s+/g, '')}`);
-        if (activeGroupingBtn) {
-            activeGroupingBtn.classList.add('active');
-        }
-    }
 }
 
 // Synchronisiert die Gruppen-Tabs
@@ -2902,15 +2863,10 @@ function generateAllGroupsChecklistTable() {
 
     // Gruppen basierend auf aktueller Gruppierung filtern
     let groupsToShow = [];
-    if (currentGrouping === 'all') {
-        groupsToShow = Object.keys(dashboardData.structured_tables).filter(groupName => {
-            // Überspringe ignorierte Gruppen
-            return !(dashboardData.ignored_groups && dashboardData.ignored_groups.includes(groupName));
-        });
-    } else {
-        const groupings = extractGroupings();
-        groupsToShow = groupings[currentGrouping] || [];
-    }
+    groupsToShow = Object.keys(dashboardData.structured_tables).filter(groupName => {
+        // Überspringe ignorierte Gruppen
+        return !(dashboardData.ignored_groups && dashboardData.ignored_groups.includes(groupName));
+    });
 
     // Alle Benutzer aus gefilterten Gruppen sammeln
     let allUsers = [];
@@ -3088,14 +3044,7 @@ function generateAllGroupsPflichtTable() {
 
     // Bestimme welche Gruppen basierend auf der aktuellen Gruppierung angezeigt werden sollen
     let groupsToShow = [];
-    if (currentGrouping === 'all') {
-        // Alle Gruppen anzeigen
-        groupsToShow = Object.keys(dashboardData.groups);
-    } else {
-        // Nur Gruppen der aktuellen Gruppierung anzeigen
-        const groupings = extractGroupings();
-        groupsToShow = groupings[currentGrouping] || [];
-    }
+    groupsToShow = Object.keys(dashboardData.groups);
 
     // Sammle alle User-IDs aus den gefilterten Gruppen (für Filterung)
     // Erstelle eine Mapping von Name -> ID aus den Assignments
@@ -3843,8 +3792,8 @@ function makeTableSortable(tableId) {
 
 // Initial laden beim Start
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialen Halbjahr-Tab-Zustand setzen (2. Halbjahr = Standard)
-    selectHalbjahr('2hj');
+    // Der aktive Kurs steht erst fest, wenn der Plan geladen ist —
+    // applyDashboardData() waehlt das erste verfuegbare Halbjahr.
     loadData();
 });
 
@@ -4215,16 +4164,9 @@ function generateAllGroupsExamTable() {
 
     // Bestimme welche Gruppen basierend auf der aktuellen Gruppierung angezeigt werden sollen
     let groupsToShow = [];
-    if (currentGrouping === 'all') {
-        // Alle Gruppen anzeigen (außer ignorierte)
-        groupsToShow = Object.keys(dashboardData.groups).filter(groupName => {
-            return !(dashboardData.ignored_groups && dashboardData.ignored_groups.includes(groupName));
-        });
-    } else {
-        // Nur Gruppen der aktuellen Gruppierung anzeigen
-        const groupings = extractGroupings();
-        groupsToShow = groupings[currentGrouping] || [];
-    }
+    groupsToShow = Object.keys(dashboardData.groups).filter(groupName => {
+        return !(dashboardData.ignored_groups && dashboardData.ignored_groups.includes(groupName));
+    });
 
     // Erstelle eine Mapping von Name -> ID aus den Aktivitäten
     const nameToIdMap = new Map();
