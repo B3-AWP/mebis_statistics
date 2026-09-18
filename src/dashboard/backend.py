@@ -534,6 +534,7 @@ def _process_dashboard_data(data, source_label=None):
             continue
 
         logger.info(f"Verarbeite Kurs {course_id} ({kurs['titel']})")
+        _warne_bei_planabweichung(course_data, kurs, logger)
         # Die Gruppen stehen nur einmal ganz oben; der Kursauswertung
         # reichen wir sie als 'groups' hinein.
         merged = dict(course_data)
@@ -586,6 +587,37 @@ def _process_dashboard_data(data, source_label=None):
         'environment': environment_settings,
         'recent_submission_days': config_manager.get_recent_submission_days(),
     }
+
+
+def _warne_bei_planabweichung(course_data, kurs, logger):
+    """
+    Meldet Plan-Aufgaben, die im Kurs nicht auffindbar sind.
+
+    Der Plan bestimmt den Nenner: Eine fehlende Aufgabe bleibt darin und
+    gilt fuer alle als nicht begonnen. Das ist gewollt, solange die
+    Aufgabe wirklich noch aussteht — bei einer veralteten cmid wuerde es
+    dagegen das Soll aller Klassen dauerhaft verzerren. Deshalb die
+    Warnung statt stillschweigendem Weiterrechnen.
+    """
+    vorhanden = set()
+    for cat in course_data.get('activities_by_category', []):
+        for typ in ('assignments', 'quizzes'):
+            for act in cat.get(typ, []):
+                vorhanden.add(str(act.get('id', '')).strip())
+
+    fehlend = [a for a in kurs['aufgaben'] if a['cmid'] not in vorhanden]
+    if not fehlend:
+        return
+
+    stunden = sum(a['stunden'] for a in fehlend)
+    anteil = (stunden / kurs['stundenGeplant'] * 100) if kurs['stundenGeplant'] else 0
+    logger.warning(
+        f"{len(fehlend)} Aufgabe(n) aus plan.json fehlen im Kurs {kurs['moodle_course_id']} "
+        f"({stunden} von {kurs['stundenGeplant']} Std. = {anteil:.1f} % des Solls). "
+        f"Sie zaehlen fuer alle als nicht begonnen — pruefe, ob die cmid noch stimmt:"
+    )
+    for a in fehlend:
+        logger.warning(f"    cmid {a['cmid']}  {a['stunden']:>5} h  {a['typ']:6} {a['titel']}")
 
 
 def _process_course_data(data, plan, kurs, source_label=None):
