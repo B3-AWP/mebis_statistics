@@ -19,6 +19,8 @@ import os
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
+from src.common.group_utils import extract_group_prefix
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 3
@@ -506,17 +508,22 @@ class Plan:
 
     def get_track_for_class(self, klasse: str) -> Optional[str]:
         """
-        Schiene zu einer Klasse. Unterstützt exakten Treffer und Präfix
-        ("IFA12A - Team 1" → "IFA12A"), damit Altnamen weiter greifen.
+        Schiene zu einer Klasse.
+
+        Nimmt den Gruppennamen in jeder Form entgegen: Moodle liefert
+        "K - IFA12A (6072)", frühere Kurse "IFA12A - Team 1" oder
+        schlicht "IFA12A". Das Klassenkürzel wird per Muster gezogen.
+
+        Returns:
+            Schienenname, oder None wenn die Klasse nicht im Plan steht
+            (fremde Klassen im selben Kurs werden so ausgesteuert).
         """
         if not klasse:
             return None
         if klasse in self.klassen_zu_schiene:
             return self.klassen_zu_schiene[klasse]
-        for key, schiene in self.klassen_zu_schiene.items():
-            if klasse.startswith(key):
-                return schiene
-        return None
+        kuerzel = extract_group_prefix(klasse)
+        return self.klassen_zu_schiene.get(kuerzel)
 
     def get_schulwochen(self, track: str) -> List[Dict]:
         schiene = self.schienen.get(track)

@@ -34,6 +34,7 @@ from config.logger_config import get_logger, backend_logger, api_logger, data_lo
 
 # Stammdaten (Kurse, Aufgaben, Stunden, Schulwochen)
 from src.common import plan_loader
+from src.common.group_utils import extract_group_prefix
 from src.common.plan_loader import PlanFehler, get_plan
 
 # PDF Generator
@@ -630,7 +631,20 @@ def _process_course_data(data, plan, kurs, source_label=None):
 
     groups_data = {}
     for group in data.get('groups', []):
-        group_name = group.get('name', 'Unknown')
+        roher_name = group.get('name', 'Unknown')
+        if roher_name in ignored_groups:
+            continue
+
+        # Im Kurs liegen auch Klassen, die nicht zu diesem Unterricht
+        # gehoeren (IF10B, IF11J, ...). Ohne Schiene im Plan gibt es weder
+        # Wochenkalender noch Soll — sie werden stillschweigend ausgesteuert.
+        if not plan.get_track_for_class(roher_name):
+            logger.debug(f"Gruppe '{roher_name}' steht nicht im Plan — uebersprungen")
+            continue
+
+        # Anzeigename ist das Klassenkuerzel, nicht der Moodle-Rohname
+        # ("K - IFA12A (6072)" -> "IFA12A").
+        group_name = extract_group_prefix(roher_name)
         if group_name in ignored_groups:
             continue
 
@@ -1216,7 +1230,16 @@ def build_recent_submissions(groups_data, raw_groups,
     ref_date = reference_date or datetime.date.today()
     details = assignment_details or {}
 
-    raw_group_by_name = {g.get('name'): g for g in raw_groups}
+    # groups_data ist auf das Klassenkuerzel normalisiert ("IFA12A"), die
+    # Rohdaten tragen noch den Moodle-Namen ("K - IFA12A (6072)").
+    # Beide Schluessel eintragen, damit die Zuordnung in jedem Fall greift.
+    raw_group_by_name = {}
+    for g in raw_groups:
+        name = g.get('name')
+        if not name:
+            continue
+        raw_group_by_name[name] = g
+        raw_group_by_name.setdefault(extract_group_prefix(name), g)
 
     # Pflicht-Kategorie-ID ermitteln
     pflicht_cat_id = None

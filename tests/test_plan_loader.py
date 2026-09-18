@@ -17,6 +17,7 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.common.group_utils import extract_group_prefix  # noqa: E402
 from src.common.plan_loader import (  # noqa: E402
     PlanFehler,
     aktuelle_woche,
@@ -155,6 +156,11 @@ class TestNoten(unittest.TestCase):
 
 
 class TestSchienen(unittest.TestCase):
+    """
+    Die Gruppennamen kommen je nach Kursanlage in sehr unterschiedlicher
+    Form aus Moodle. Der Kurs 2026/27 liefert "K - IFA12A (6072)" — eine
+    Praefix-Regel ergaebe dort "K" fuer jede Klasse.
+    """
 
     def setUp(self):
         self.plan = pruefe_plan(minimal_plan())
@@ -162,12 +168,40 @@ class TestSchienen(unittest.TestCase):
     def test_exakter_treffer(self):
         self.assertEqual(self.plan.get_track_for_class('IFA12A'), 'Schiene1')
 
+    def test_moodle_format_2026_27(self):
+        self.assertEqual(self.plan.get_track_for_class('K - IFA12A (6072)'), 'Schiene1')
+
     def test_praefix_treffer_fuer_altnamen(self):
         self.assertEqual(self.plan.get_track_for_class('IFA12A - Team 1'), 'Schiene1')
 
     def test_unbekannte_klasse(self):
         self.assertIsNone(self.plan.get_track_for_class('IFA12Z'))
         self.assertIsNone(self.plan.get_track_for_class(''))
+
+    def test_fremde_klassen_werden_ausgesteuert(self):
+        """Im Kurs liegen auch Klassen, die nicht im Plan stehen."""
+        for name in ['K - IF11J (6072)', 'K - IF10B (6072)', 'Testgruppe', 'IT_Lehrkraft']:
+            with self.subTest(name=name):
+                self.assertIsNone(self.plan.get_track_for_class(name))
+
+
+class TestKlassenkuerzel(unittest.TestCase):
+    """extract_group_prefix gegen die real vorkommenden Namensformen."""
+
+    def test_moodle_2026_27(self):
+        self.assertEqual(extract_group_prefix('K - IFA12A (6072)'), 'IFA12A')
+        self.assertEqual(extract_group_prefix('K - IF11J (6072)'), 'IF11J')
+
+    def test_altformat_mit_team(self):
+        self.assertEqual(extract_group_prefix('IFA12A - Team 3'), 'IFA12A')
+
+    def test_blanker_name(self):
+        self.assertEqual(extract_group_prefix('IFA12A'), 'IFA12A')
+
+    def test_ohne_klassenkuerzel(self):
+        self.assertEqual(extract_group_prefix('Testgruppe'), 'Testgruppe')
+        self.assertEqual(extract_group_prefix('IT_Lehrkraft'), 'IT_Lehrkraft')
+        self.assertEqual(extract_group_prefix(''), '')
 
 
 class TestWochenrechnung(unittest.TestCase):

@@ -1968,6 +1968,11 @@ function selectGroup(groupName) {
     currentGroup = groupName;
     window.currentGroup = currentGroup; // Sync to window
 
+    // Die Schienen starten zu unterschiedlichen Terminen (Schiene 3 am
+    // 15.09., Schiene 1 erst am 28.09.). Mit der Klasse aendert sich
+    // daher die laufende Woche — der Slider muss nachziehen.
+    updateWeekSlider();
+
     // Alle Gruppen-Tabs und Dropdowns synchronisieren
     syncGroupSelectors();
 
