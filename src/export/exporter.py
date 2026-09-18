@@ -333,7 +333,7 @@ def create_requests_session_from_driver(driver):
     })
     return session
 
-def get_activity_urls(driver):
+def get_activity_urls(driver, course_id=None):
     activity_urls = {
         "assignments": [],
         "checklists": [],
@@ -414,6 +414,52 @@ def get_activity_urls(driver):
 
     except Exception as e:
         logger.error(f"Error searching gradebook for additional activities: {e}")
+
+    # Method 3: Quiz-Index des Kurses.
+    #
+    # Die Fortschrittsseite listet nur Aktivitaeten mit aktivierter
+    # Abschlussverfolgung. Ein Quiz ohne diese Einstellung fehlt dort und
+    # damit im Export — im Kurs 2491549 betraf das u.a. "OOP - SOLID"
+    # (cmid 95572024), immerhin 8 der 58,5 Plan-Stunden. Der Quiz-Index
+    # kennt dagegen alle Quizze des Kurses.
+    if not course_id:
+        # Rueckfallebene: Kurs-ID aus der gerade offenen Seite ziehen.
+        match = re.search(r'[?&](?:course|id)=(\d+)', driver.current_url or '')
+        course_id = match.group(1) if match else None
+
+    if course_id:
+        logger.info("Ergaenze Quizze aus dem Quiz-Index...")
+        try:
+            vorher = len(activity_urls["quizzes"])
+            driver.get(f"https://lernplattform.bycs.de/mod/quiz/index.php?id={course_id}")
+            time.sleep(2)
+            for element in driver.find_elements(By.CSS_SELECTOR, "a[href*='mod/quiz/view.php']"):
+                href = element.get_attribute("href") or ''
+                id_match = re.search(r'id=(\d+)', href)
+                if not id_match:
+                    continue
+                activity_id = id_match.group(1)
+                if activity_id in activity_ids_found:
+                    continue
+                # .text ist auf der Index-Seite leer (Element nicht sichtbar
+                # gerendert); textContent traegt den Titel.
+                title = ((element.get_attribute("textContent") or '').strip()
+                         or (element.text or '').strip()
+                         or element.get_attribute("title")
+                         or f"Quiz {activity_id}")
+                activity_urls["quizzes"].append({"id": activity_id, "title": title, "url": href})
+                activity_ids_found.add(activity_id)
+                logger.info(f"  Quiz nur im Index gefunden: {activity_id} - {title}")
+            neu = len(activity_urls["quizzes"]) - vorher
+            if neu:
+                logger.info(
+                    f"  {neu} Quiz(ze) ergaenzt, die auf der Fortschrittsseite fehlen "
+                    f"(vermutlich ohne Abschlussverfolgung)."
+                )
+        except Exception as e:
+            logger.error(f"Quiz-Index konnte nicht gelesen werden: {e}")
+    else:
+        logger.warning("Keine Kurs-ID ermittelbar — Quiz-Index wird uebersprungen.")
 
     logger.info(f"Total activities found: {len(activity_urls['assignments'])} assignments, {len(activity_urls['checklists'])} checklists, {len(activity_urls['feedbacks'])} feedbacks, {len(activity_urls['quizzes'])} quizzes")
     return activity_urls
@@ -1518,7 +1564,7 @@ def export_course(driver, course_id, course_title, base_url, username, password,
 
     # Erfasse die Aktivitäten einmalig
     timer.start("Aktivitäten erfassen")
-    activities = get_activity_urls(driver)
+    activities = get_activity_urls(driver, course_id)
     timer.stop({
         "assignments": len(activities["assignments"]),
         "checklists": len(activities["checklists"]),
