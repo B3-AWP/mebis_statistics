@@ -196,8 +196,10 @@ Moodle-Gruppen doch noch alte Namen tragen. Gleiches gilt für das Prefix-Matchi
 
 > **Rückfrage:** Heißen die Moodle-Gruppen in den neuen Kursen exakt `IFA12A`,
 > oder gibt es weiterhin einen Zusatz? Davon hängt ab, ob `klassenZuSchiene` aus
-> `plan.json` direkt greift. Ebenso: `plan.json` kennt nur IFA12A–D, die alte
-> Konfiguration auch **IFA12E** — entfällt diese Klasse?
+> `plan.json` direkt greift.
+>
+> **Geklärt:** Die Klassen sind IFA12A–D. IFA12E gibt es nicht mehr; `plan.json`
+> ist damit vollständig.
 
 ---
 
@@ -389,27 +391,40 @@ MA2-Prognose-Arithmetik und die Grouping-Ebene wiegen schwerer als der neue Load
 
 ## 5. Offene Punkte (vor Implementierungsbeginn zu klären)
 
+> **Was `MANUAL_GRADE_ITEM_IDS` bewirkt:** Es sind Moodle-Bewertungselemente ohne
+> Aktivität — Spalten im Notenbuch, in die du Werte von Hand einträgst (Quantität,
+> Qualität, Mitarbeitsnote, Sonstiges). Das Dashboard liest sie aus und **lässt
+> deinem Eintrag den Vorrang** vor dem berechneten Wert. Sie sind also eine
+> Übersteuerung, keine Voraussetzung: Fehlen sie, rechnet das Dashboard Quantität
+> (stundengewichtet) und Qualität selbst und zeigt genau diese Werte.
+
 ### Jetzt zu klären (blockieren den Start)
 
 1. **Gruppennamen** in Kurs 2491549 — exakt `IFA12A` oder mit Zusatz?
-2. **Klassen** — `plan.json` führt IFA12A–D, die alte Konfiguration auch **IFA12E**.
-   Entfällt E, oder fehlt sie in `plan.json`?
-3. **`MANUAL_GRADE_ITEM_IDS` für Kurs 2491549** — Quantität, Qualität, Mitarbeitsnote,
+2. **`MANUAL_GRADE_ITEM_IDS` für Kurs 2491549** — Quantität, Qualität, Mitarbeitsnote,
    Sonstiges. Die alten IDs (`17751955` usw.) gehören zum Vorjahreskurs und sind
-   wertlos; die neuen sind aus dem Notenbuch zu holen.
-4. **`PROGNOSIS_ASSIGNMENTS` für Kurs 2491549** — welche Aufgabe ist der Review-Talk,
+   wertlos; die neuen sind aus dem Notenbuch zu holen. Optional: ohne sie rechnet
+   das Dashboard die Werte selbst (siehe unten).
+3. **`PROGNOSIS_ASSIGNMENTS` für Kurs 2491549** — welche Aufgabe ist der Review-Talk,
    welche das Code-Review? Im Plan sehe ich dafür keine offensichtlichen Kandidaten.
-5. **Neuer `EXPORT_FOLDER`** für 2026/27?
-6. **`plan.json`-Bezug** — Pfad-Referenz ins Nachbar-Repo (empfohlen) oder Kopie?
-7. **Stunden-Pflege** — `plan.json` ist die einzige Quelle der `stunden`-Werte und
+   Ebenfalls optional.
+4. **Stunden-Pflege** — `plan.json` ist die einzige Quelle der `stunden`-Werte und
    liegt im Schüler-Dashboard-Repo. Bei einer Änderung dort verschiebt sich auch die
    Lehrkräfte-Auswertung. Das ist gewollt, sollte dir aber bewusst sein.
 
-Ein Probe-Export gegen Kurs 2491549 beantwortet die Punkte 1 und 3 von selbst.
-Das ist der sinnvolle erste Schritt, bevor Code entsteht.
+Ein Probe-Export gegen Kurs 2491549 beantwortet die Punkte 1 und 2 von selbst.
 
 ### Später zu klären (nach Freischaltung 11.01.2027)
 
-8. **Item-IDs und Review-Talks für Kurs 2491870** — analog zu 4 und 5.
-9. **Kategorienamen in Kurs 2491870.**
-10. **Reports** — je Halbjahr getrennt oder kombiniert?
+5. **Item-IDs und Review-Talks für Kurs 2491870** — analog zu 2 und 3.
+6. **Kategorienamen in Kurs 2491870.**
+7. **Reports** — je Halbjahr getrennt oder kombiniert?
+
+### Erledigt
+
+- **Klassen** — IFA12A–D; IFA12E gibt es nicht mehr.
+- **Kategoriename** — heißt weiterhin `Pflichtaufgaben`; die Zuordnung läuft
+  trotzdem über `plan.json` (siehe AP 2).
+- **Gewichtung** — nach Stunden (siehe AP 4).
+- **`EXPORT_FOLDER`** — neuer Ordner `Exports_2026_27`.
+- **`plan.json`-Bezug** — Pfad-Referenz ins Nachbar-Repo über `PLAN_JSON_PATH`.

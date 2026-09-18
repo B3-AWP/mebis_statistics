@@ -83,7 +83,8 @@ Moodle fehlt, bleibt darin und gilt als nicht begonnen.
 1. `MANUAL_GRADE_ITEM_IDS` für Kurs 2491549 eintragen (Notenbuch)
 2. `PROGNOSIS_ASSIGNMENTS` eintragen, falls Review-Talk/Code-Review genutzt
 3. `EXPORT_FOLDER` zeigt auf `Exports_2026_27` — Ordner anlegen
-4. Offen: Klasse **IFA12E** fehlt in `plan.json` (dort nur IFA12A–D)
+
+Die Klassen sind IFA12A–D; IFA12E gibt es nicht mehr.
 
 ## [Unreleased] - 2026-03-16 (2)
 
