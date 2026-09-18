@@ -464,9 +464,6 @@ function buildHjConfig(users, group) {
     const showReviewTalk = !!(prognosisAssignments.reviewTalk || prognosisAssignments.reviewTalk1);
     const showCodeReview = !!(prognosisAssignments.codeReview);
 
-    const noteId = getManualItemIdByTitle('Mitarbeitsnote') || getManualItemIdByTitle('1. Mitarbeitsnote');
-    const hasActualNote = noteId && users.some(u => getManualGradeValue(u, noteId) !== null);
-
     // Titel des aktiven Halbjahres fuer die Spaltenbeschriftung
     const kurs = (typeof getCourse === 'function' && window.currentHalbjahr
                   && window.currentHalbjahr !== 'gesamt')
@@ -478,8 +475,6 @@ function buildHjConfig(users, group) {
         zeitraum: kurs ? kurs.titel : 'Schuljahr',
         showReviewTalk,
         showCodeReview,
-        hasActualNote,
-        noteId,
         codeReviewId: prognosisAssignments.codeReview || null
     };
 }
@@ -664,7 +659,6 @@ function buildCsvHeaders(data) {
         headers.push(`${p}Qualität (%)`);
         if (hj.showReviewTalk) headers.push(`${p}Review-Talk (%)`);
         if (hj.showCodeReview) headers.push(`${p}Code-Review (%)`);
-        if (hj.hasActualNote) headers.push(`${p}Notenbuch (%)`);
         headers.push(`${p}Ø Mitarbeitsnote`);
     }
 
@@ -877,7 +871,6 @@ function buildUserRow(user, data) {
         row.push(formatHjValue(ma?.qualitaet));
         if (hj.showReviewTalk) row.push(formatHjValue(ma?.reviewTalk));
         if (hj.showCodeReview) row.push(formatHjValue(ma?.codeReview));
-        if (hj.hasActualNote) row.push(formatHjValue(ma?.actualGrade));
         row.push(formatHjGrade(ma?.grade));
     }
 

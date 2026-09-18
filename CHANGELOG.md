@@ -18,9 +18,12 @@ Punkte: [REFACTORING_PLAN.md](REFACTORING_PLAN.md).
 - **Entfallene `.env`-Variablen:** `MEBIS_COURSE_ID`, `CLASS_TO_TRACK`,
   `TRACK_SCHEDULES`, `MAX_SCHOOLWEEKS`, `MITARBEITSNOTE1_REFERENCE_WEEK`.
   Sie stehen jetzt in `plan.json`.
-- **`MANUAL_GRADE_ITEM_IDS` und `PROGNOSIS_ASSIGNMENTS` sind neu zu
-  befüllen** — die Item-IDs sind kursspezifisch, die Werte des Vorjahres
-  gelten nicht mehr.
+- **`MANUAL_GRADE_ITEM_IDS` entfällt.** Manuelle Notenbuch-Spalten
+  (Quantität, Qualität, Mitarbeitsnote, Sonstiges, Eingereichte Aufgaben)
+  gibt es nicht mehr. Die Werte werden ausschließlich berechnet; der
+  Export scrapet sie nicht mehr, was ihn zusätzlich beschleunigt.
+- **`PROGNOSIS_ASSIGNMENTS` ist neu zu befüllen**, falls Review-Talk oder
+  Code-Review genutzt werden — die IDs sind kursspezifisch. Optional.
 
 ### 🚀 Neue Struktur
 
@@ -80,9 +83,9 @@ Moodle fehlt, bleibt darin und gilt als nicht begonnen.
 
 ### ⚠️ Vor dem ersten Lauf zu erledigen
 
-1. `MANUAL_GRADE_ITEM_IDS` für Kurs 2491549 eintragen (Notenbuch)
-2. `PROGNOSIS_ASSIGNMENTS` eintragen, falls Review-Talk/Code-Review genutzt
-3. `EXPORT_FOLDER` zeigt auf `Exports_2026_27` — Ordner anlegen
+1. `EXPORT_FOLDER` zeigt auf `Exports_2026_27` — Ordner anlegen
+2. Optional: `PROGNOSIS_ASSIGNMENTS` eintragen, falls Review-Talk oder
+   Code-Review als Komponenten zählen sollen
 
 Die Klassen sind IFA12A–D; IFA12E gibt es nicht mehr.
 

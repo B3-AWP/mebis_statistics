@@ -47,7 +47,7 @@ def build_user(uid, name, done_cmids):
         (assignments if a['typ'] == 'assign' else quizzes).append(entry)
     return {"id": uid, "name": name,
             "activities": {"assignments": assignments, "quizzes": quizzes,
-                           "checklists": [], "feedbacks": [], "manual_grades": []}}
+                           "checklists": [], "feedbacks": []}}
 
 
 categories = [{
@@ -70,7 +70,6 @@ export = {
             "course_id": kurs['moodle_course_id'],
             "activities_by_category": categories,
             "activityincludes": [], "activitysections": [],
-            "manual_grade_items": {},
         }
     },
     "groups": [{

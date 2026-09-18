@@ -9,7 +9,6 @@ let checklistViewType = 'pflicht'; // New: track checklist column view setting
 let sortState = {}; // Track sorting state for different tables
 let gradeMapping = {}; // GradeMapping from config.ini
 let mitarbeitsnoteConfig = null; // Mitarbeitsnoten-Konfiguration aus Backend
-let manualGradeItemIds = {}; // Manuelle Bewertungselement-IDs aus Backend {id: title}
 let courseId = ''; // Moodle-Kurs-ID des aktiven Halbjahres
 let currentHalbjahr = null; // Aktiver Kurs: kurs_id aus plan.json oder 'gesamt'
 
@@ -328,7 +327,6 @@ function mergeCourses(courses) {
         recent_submissions: [],
         grade_mapping: verfuegbar[0].daten.grade_mapping,
         mitarbeitsnote_config: verfuegbar[0].daten.mitarbeitsnote_config,
-        manual_grade_item_ids: verfuegbar[0].daten.manual_grade_item_ids,
         stunden_geplant: verfuegbar.reduce((s, c) => s + (c.daten.stunden_geplant || 0), 0)
     };
 
@@ -408,7 +406,6 @@ function selectCourseScope(scope) {
     window.gradeMapping = gradeMapping;
     mitarbeitsnoteConfig = dashboardData.mitarbeitsnote_config || null;
     window.mitarbeitsnoteConfig = mitarbeitsnoteConfig;
-    manualGradeItemIds = dashboardData.manual_grade_item_ids || {};
 
     updateWeekSlider();
     updateCourseScopeUI();
@@ -515,7 +512,6 @@ function applyDashboardData(data) {
         }
     }
 
-    manualGradeItemIds = data.manual_grade_item_ids || {};
     selectCourseScope(currentHalbjahr);
 
     dashboardLogger.info('DATA', 'Kurse geladen', {
@@ -1422,19 +1418,6 @@ function parseGermanDecimal(str) {
 }
 
 // Gibt den numerischen Bewertungswert eines manuellen Notenbuchelements für einen User zurück
-// Sucht in user.manual_grades nach dem Eintrag mit der gegebenen itemId
-function getManualGradeValue(user, itemId) {
-    if (!user || !user.manual_grades) return null;
-    const entry = user.manual_grades.find(g => String(g.id) === String(itemId));
-    if (!entry || entry.grade === null || entry.grade === undefined) return null;
-    return parseGermanDecimal(entry.grade);
-}
-
-// Gibt die Item-ID für einen gegebenen Titel aus manualGradeItemIds zurück
-function getManualItemIdByTitle(title) {
-    return Object.keys(manualGradeItemIds).find(id => manualGradeItemIds[id] === title) || null;
-}
-
 // Berechnet die Mitarbeitsnote eines Halbjahres.
 //
 // Seit 2026/27 gibt es nur noch EINE Mitarbeitsnote je Halbjahr; die
@@ -1445,70 +1428,43 @@ function getManualItemIdByTitle(title) {
 function calculateMitarbeitsnote(user, groupName, weekOverride) {
     const prognosisAssignments = (mitarbeitsnoteConfig && mitarbeitsnoteConfig.prognosis_assignments) || {};
 
-    // Die Item-IDs des Notenbuchs sind kursspezifisch. Der Backend-Scope
-    // liefert nur die des aktiven Kurses, deshalb genuegt der Titel.
-    const quantitaetId = getManualItemIdByTitle('Quantität');
-    const qualitaetId = getManualItemIdByTitle('Qualität');
-    const noteId = getManualItemIdByTitle('Mitarbeitsnote')
-                || getManualItemIdByTitle('1. Mitarbeitsnote');
-
-    // Komponente 1: Quantitaet — eingetragener Wert hat Vorrang,
-    // sonst der stundengewichtete Fortschritt aus dem Plan.
-    let quantitaet = quantitaetId ? getManualGradeValue(user, quantitaetId) : null;
-    const quantitaetIsActual = quantitaet !== null;
-    let quantResult = null;
-    if (!quantitaetIsActual) {
-        quantResult = calculateQuantitaet(user, groupName, weekOverride);
-        quantitaet = quantResult ? quantResult.value : null;
-    }
+    // Komponente 1: Quantitaet — stundengewichteter Fortschritt aus dem Plan.
+    const quantResult = calculateQuantitaet(user, groupName, weekOverride);
+    const quantitaet = quantResult ? quantResult.value : null;
 
     // Komponente 2: Qualitaet — ungewichteter Durchschnitt der Bewertungen.
     // Bewusst nicht stundengewichtet: eine gut gemachte kleine Aufgabe ist
     // so viel wert wie eine gut gemachte grosse.
-    let qualitaet = qualitaetId ? getManualGradeValue(user, qualitaetId) : null;
-    const qualitaetIsActual = qualitaet !== null;
-    let qualResult = null;
-    if (!qualitaetIsActual) {
-        qualResult = calculatePflichtaufgabenGradeFiltered(user.name, null, false);
-        qualitaet = qualResult ? qualResult.percent : null;
-    }
+    const qualResult = calculatePflichtaufgabenGradeFiltered(user.name, null, false);
+    const qualitaet = qualResult ? qualResult.percent : null;
 
     // Komponente 3: Review-Talk (optional, je Kurs konfiguriert)
-    const reviewTalkId = prognosisAssignments.reviewTalk || prognosisAssignments.reviewTalk1 || null;
+    const reviewTalkId = prognosisAssignments.reviewTalk || null;
     const reviewTalk = reviewTalkId ? findAssignmentOrQuizGradeForUser(reviewTalkId, user.name, null) : null;
 
     // Komponente 4: Code-Review (optional, je Kurs konfiguriert)
     const codeReviewId = prognosisAssignments.codeReview || null;
     const codeReview = codeReviewId ? findAssignmentOrQuizGradeForUser(codeReviewId, user.name, null) : null;
 
-    // Eingetragene Note aus dem Notenbuch hat immer Vorrang.
-    const actualGrade = noteId ? getManualGradeValue(user, noteId) : null;
-
     const components = [quantitaet, qualitaet, reviewTalk, codeReview]
         .filter(v => v !== null && v !== undefined);
-    if (components.length === 0 && actualGrade === null) return null;
+    if (components.length === 0) return null;
 
-    const calculatedOverall = components.length > 0
-        ? components.reduce((a, b) => a + b, 0) / components.length
-        : null;
-    const overallForGrade = actualGrade !== null ? actualGrade : calculatedOverall;
+    const overall = components.reduce((a, b) => a + b, 0) / components.length;
 
     return {
         quantitaet: quantitaet,
-        quantitaetIsActual: quantitaetIsActual,
         quantitaetPoints: quantResult
             ? { actual: quantResult.stundenErledigt, expected: quantResult.stundenGesamt }
             : null,
         quantitaetSoll: quantResult ? quantResult.sollProzent : null,
         deltaStunden: quantResult ? quantResult.deltaStunden : null,
         qualitaet: qualitaet,
-        qualitaetIsActual: qualitaetIsActual,
         qualitaetCount: qualResult ? qualResult.count : null,
         reviewTalk: reviewTalk,
         codeReview: codeReview,
-        actualGrade: actualGrade,
-        overall: overallForGrade,
-        grade: overallForGrade !== null ? convertPercentToIHKGrade(overallForGrade) : null,
+        overall: overall,
+        grade: convertPercentToIHKGrade(overall),
         componentCount: components.length
     };
 }
@@ -1677,9 +1633,6 @@ function generateHalbjahresnotenTable(users) {
     const showReviewTalk = !!(prognosisAssignments.reviewTalk || prognosisAssignments.reviewTalk1);
     const showCodeReview = !!(prognosisAssignments.codeReview);
 
-    const noteId = getManualItemIdByTitle('Mitarbeitsnote') || getManualItemIdByTitle('1. Mitarbeitsnote');
-    const hasActualNote = noteId && users.some(u => getManualGradeValue(u, noteId) !== null);
-
     const kurs = currentHalbjahr && currentHalbjahr !== 'gesamt' ? getCourse(currentHalbjahr) : null;
     const zeitraum = kurs ? kurs.titel : 'Schuljahr';
     const sollPct = Math.round(sollAnteil(wochen, woche) * 1000) / 10;
@@ -1698,11 +1651,10 @@ function generateHalbjahresnotenTable(users) {
     html += `<th title="Ungewichteter Durchschnitt der Bewertungen">Qualität<br>(%)</th>`;
     if (showReviewTalk) html += `<th>Review-Talk<br>(%)</th>`;
     if (showCodeReview) html += `<th>Code-Review<br>(%)</th>`;
-    if (hasActualNote) html += `<th title="Eingetragene Note aus dem Mebis-Notenbuch">Notenbuch<br>(%)</th>`;
     html += `<th>Ø Mitarbeitsnote</th>`;
     html += `</tr></thead><tbody>`;
 
-    const colCount = 4 + (showReviewTalk ? 1 : 0) + (showCodeReview ? 1 : 0) + (hasActualNote ? 1 : 0);
+    const colCount = 4 + (showReviewTalk ? 1 : 0) + (showCodeReview ? 1 : 0);
 
     users.forEach(user => {
         const ma = calculateMitarbeitsnote(user, currentGroup, woche);
@@ -1714,7 +1666,7 @@ function generateHalbjahresnotenTable(users) {
 
         const stundenLabel = ma.quantitaetPoints
             ? `${ma.quantitaetPoints.actual} / ${ma.quantitaetPoints.expected} Std.`
-            : (ma.quantitaetIsActual ? 'Notenbuch' : null);
+            : null;
         html += renderPctCell(ma.quantitaet, 'progress-color-info', null, 1, stundenLabel);
 
         // Delta: positiv = voraus, negativ = im Rueckstand.
@@ -1727,11 +1679,9 @@ function generateHalbjahresnotenTable(users) {
                   + `${vz}${ma.deltaStunden.toFixed(1)}</td>`;
         }
 
-        html += renderPctCell(ma.qualitaet, 'progress-color-warning', null, 1,
-                              ma.qualitaetIsActual ? 'Notenbuch' : null);
+        html += renderPctCell(ma.qualitaet, 'progress-color-warning', null, 1);
         if (showReviewTalk) html += renderPctCell(ma.reviewTalk, 'progress-color-secondary', null, 0);
         if (showCodeReview) html += renderPctCell(ma.codeReview, 'progress-color-success', null, 0);
-        if (hasActualNote) html += renderPctCell(ma.actualGrade, 'progress-color-info', null, 1);
         html += renderGradeCell(ma.grade, ma.overall);
         html += `</tr>`;
     });

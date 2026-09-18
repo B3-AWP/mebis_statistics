@@ -1494,7 +1494,7 @@ def export_course(driver, course_id, course_title, base_url, username, password,
         timer: PhaseTimer des Gesamtlaufs
 
     Returns:
-        dict mit activities_by_category, groups, manual_grade_items, ...
+        dict mit activities_by_category, groups, ...
 
     Raises:
         ExportValidationError: bei kritischen Luecken in den Kursdaten
@@ -1715,27 +1715,6 @@ def export_course(driver, course_id, course_title, base_url, username, password,
     grader_data = get_grader_report_data(driver, course_id, "0", waittime)
     timer.stop({"aktivitäten_mit_bewertungen": len(grader_data)})
 
-    # Manuelle Elemente aus .env-Konfiguration (MANUAL_GRADE_ITEM_IDS)
-    timer.start("Manuelle Bewertungselemente")
-    tree_manual_ids = config_manager.get_manual_grade_item_ids()
-    logger.info(f"  {len(tree_manual_ids)} manuelle Bewertungselemente aus Konfiguration: {list(tree_manual_ids.values())}")
-
-    # Bewertungen für manuelle Elemente via Singleview holen (direkt mit Schülernamen)
-    manual_grade_items = {}
-    for item_id, title in tree_manual_ids.items():
-        logger.info(f"  Hole Singleview-Bewertungen für '{title}' (itemid={item_id})...")
-        user_grades = get_singleview_grades(driver, course_id, item_id, base_url, waittime)
-        manual_grade_items[item_id] = {
-            "title": title,
-            "user_grades": user_grades
-        }
-        logger.info(f"    -> {len(user_grades)} Bewertungen gelesen")
-    data["manual_grade_items"] = manual_grade_items
-    if manual_grade_items:
-        titles = [v["title"] for v in manual_grade_items.values()]
-        logger.info(f"  Manuelle Bewertungselemente: {titles}")
-    timer.stop({"elemente": len(manual_grade_items)})
-
     timer.start("User-Daten zusammenführen")
     for group in data["groups"]:
 
@@ -1744,8 +1723,7 @@ def export_course(driver, course_id, course_title, base_url, username, password,
                 "assignments": [],
                 "checklists": [],
                 "feedbacks": [],
-                "quizzes": [],
-                "manual_grades": []
+                "quizzes": []
             }
 
             # Verwende die zuvor erfassten Assignment-Status
@@ -1810,14 +1788,6 @@ def export_course(driver, course_id, course_title, base_url, username, password,
                         "category_name": quiz.get("category_name")
                     })
 
-            # Füge manuelle Bewertungselemente zum User hinzu
-            for item_id, item_data in manual_grade_items.items():
-                grade = item_data["user_grades"].get(user["id"])
-                user["activities"]["manual_grades"].append({
-                    "id": item_id,
-                    "title": item_data["title"],
-                    "grade": grade  # None wenn keine Bewertung vorhanden
-                })
     timer.stop()
 
     # =====================================================

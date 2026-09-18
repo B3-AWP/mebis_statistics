@@ -220,23 +220,6 @@ class ConfigManager:
             130: "**** Exzellent"
         }
 
-    def get_manual_grade_item_ids(self) -> Dict[str, str]:
-        """
-        Holt manuell konfigurierte Bewertungselement-IDs aus MANUAL_GRADE_ITEM_IDS.
-
-        Format in .env: ID1:Titel1,ID2:Titel2,...
-        Returns: {item_id: title}
-        """
-        env_val = os.getenv('MANUAL_GRADE_ITEM_IDS', '')
-        result = {}
-        if env_val:
-            for entry in env_val.split(','):
-                entry = entry.strip()
-                if ':' in entry:
-                    item_id, title = entry.split(':', 1)
-                    result[item_id.strip()] = title.strip()
-        return result
-
     def get_recent_submission_days(self) -> int:
         """
         Holt den Schwellenwert für die Anzeige der letzten Abgaben in Kalendertagen.

@@ -583,7 +583,6 @@ def _process_dashboard_data(data, source_label=None):
         'ignored_groups': list(load_ignored_groups()),
         'last_updated': source_label,
         'environment': environment_settings,
-        'manual_grade_item_ids': config_manager.get_manual_grade_item_ids(),
         'recent_submission_days': config_manager.get_recent_submission_days(),
     }
 
@@ -760,13 +759,11 @@ def _process_course_data(data, plan, kurs, source_label=None):
         ]
         for name, schiene in plan.schienen.items()
     }
-    manual_grade_ids = config_manager.get_manual_grade_item_ids()
     recent_days = config_manager.get_recent_submission_days()
     inactive_threshold = config_manager.get_inactive_threshold_days()
     recent_submissions = build_recent_submissions(
         groups_data=groups_data,
         raw_groups=data.get('groups', []),
-        manual_grade_item_ids=manual_grade_ids,
         mitarbeitsnote_config=mitarbeitsnote_cfg,
         recent_submission_days=recent_days,
         assignment_details=assignment_details,
@@ -786,8 +783,6 @@ def _process_course_data(data, plan, kurs, source_label=None):
         'structured_tables': structured_data,
         'grade_mapping': grade_mapping,
         'mitarbeitsnote_config': mitarbeitsnote_cfg,
-        'manual_grade_item_ids': manual_grade_ids,
-        'manual_grade_items': data.get('manual_grade_items', {}),
         'recent_submissions': recent_submissions,
         'stunden_geplant': kurs['stundenGeplant'],
     }
@@ -915,7 +910,6 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
             "avg_all_progress_timed": 0,
             "individual_checklists": []
         },
-        "manual_grades": user.get('activities', {}).get('manual_grades', [])
     }
 
     # Pflichtaufgaben bestimmt der Plan über die cmid, nicht der Kategoriename.
@@ -1180,7 +1174,7 @@ def count_school_days_since(submission_time_str, track_schedules, today=None):
     return school_days
 
 
-def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
+def build_recent_submissions(groups_data, raw_groups,
                               mitarbeitsnote_config, recent_submission_days,
                               assignment_details=None, reference_date=None,
                               categories=None, inactive_threshold_days=14):
@@ -1193,7 +1187,6 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
     Args:
         groups_data:              Dict der verarbeiteten Gruppen.
         raw_groups:               Rohdaten-Gruppen aus dem Export-JSON.
-        manual_grade_item_ids:    Mapping item_id -> Titel für manuelle Bewertungen.
         mitarbeitsnote_config:    Konfiguration mit class_to_track und track_schedules.
         recent_submission_days:   Zeitfenster in Kalendertagen für angezeigte Abgaben
                                   (RECENT_SUBMISSION_DAYS).
@@ -1312,23 +1305,6 @@ def build_recent_submissions(groups_data, raw_groups, manual_grade_item_ids,
                         'category_name': act_details.get('category_name', ''),
                         'url': act_details.get('url'),
                         'activity_type': 'quiz',
-                    })
-
-            for mg in activities.get('manual_grades', []):
-                st = mg.get('submission_time')
-                if st:
-                    item_id = str(mg.get('item_id', ''))
-                    title = manual_grade_item_ids.get(item_id, mg.get('title', 'Manuelle Bewertung'))
-                    all_submissions.append({
-                        'time': st,
-                        'title': title,
-                        '_key': f'mg_{item_id}' if item_id else None,
-                        '_status': '',
-                        'is_pflicht': False,
-                        '_grade': mg.get('grade', '-'),
-                        'category_name': 'Manuelle Bewertung',
-                        'url': None,
-                        'activity_type': 'manual',
                     })
 
         # Nach Zeit absteigend sortieren

@@ -147,13 +147,11 @@ class ReportGenerator:
         flach = {
             'groups': data.get('groups', []),
             'activities_by_category': [],
-            'manual_grade_items': {},
             'exported_at': data.get('exported_at'),
             'schuljahr': data.get('schuljahr'),
         }
-        for course_id, kurs in (data.get('kurse') or {}).items():
+        for kurs in (data.get('kurse') or {}).values():
             flach['activities_by_category'].extend(kurs.get('activities_by_category', []))
-            flach['manual_grade_items'].update(kurs.get('manual_grade_items', {}))
         return flach
 
     def _load_second_export(self) -> Optional[Tuple[Dict, str, str]]:

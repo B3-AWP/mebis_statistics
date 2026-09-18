@@ -391,34 +391,23 @@ MA2-Prognose-Arithmetik und die Grouping-Ebene wiegen schwerer als der neue Load
 
 ## 5. Offene Punkte (vor Implementierungsbeginn zu klären)
 
-> **Was `MANUAL_GRADE_ITEM_IDS` bewirkt:** Es sind Moodle-Bewertungselemente ohne
-> Aktivität — Spalten im Notenbuch, in die du Werte von Hand einträgst (Quantität,
-> Qualität, Mitarbeitsnote, Sonstiges). Das Dashboard liest sie aus und **lässt
-> deinem Eintrag den Vorrang** vor dem berechneten Wert. Sie sind also eine
-> Übersteuerung, keine Voraussetzung: Fehlen sie, rechnet das Dashboard Quantität
-> (stundengewichtet) und Qualität selbst und zeigt genau diese Werte.
-
 ### Jetzt zu klären (blockieren den Start)
 
 1. **Gruppennamen** in Kurs 2491549 — exakt `IFA12A` oder mit Zusatz?
-2. **`MANUAL_GRADE_ITEM_IDS` für Kurs 2491549** — Quantität, Qualität, Mitarbeitsnote,
-   Sonstiges. Die alten IDs (`17751955` usw.) gehören zum Vorjahreskurs und sind
-   wertlos; die neuen sind aus dem Notenbuch zu holen. Optional: ohne sie rechnet
-   das Dashboard die Werte selbst (siehe unten).
-3. **`PROGNOSIS_ASSIGNMENTS` für Kurs 2491549** — welche Aufgabe ist der Review-Talk,
+2. **`PROGNOSIS_ASSIGNMENTS` für Kurs 2491549** — welche Aufgabe ist der Review-Talk,
    welche das Code-Review? Im Plan sehe ich dafür keine offensichtlichen Kandidaten.
-   Ebenfalls optional.
-4. **Stunden-Pflege** — `plan.json` ist die einzige Quelle der `stunden`-Werte und
+   Optional: ohne Eintrag entfallen die beiden Komponenten.
+3. **Stunden-Pflege** — `plan.json` ist die einzige Quelle der `stunden`-Werte und
    liegt im Schüler-Dashboard-Repo. Bei einer Änderung dort verschiebt sich auch die
    Lehrkräfte-Auswertung. Das ist gewollt, sollte dir aber bewusst sein.
 
-Ein Probe-Export gegen Kurs 2491549 beantwortet die Punkte 1 und 2 von selbst.
+Ein Probe-Export gegen Kurs 2491549 beantwortet Punkt 1 von selbst.
 
 ### Später zu klären (nach Freischaltung 11.01.2027)
 
-5. **Item-IDs und Review-Talks für Kurs 2491870** — analog zu 2 und 3.
-6. **Kategorienamen in Kurs 2491870.**
-7. **Reports** — je Halbjahr getrennt oder kombiniert?
+4. **Review-Talk/Code-Review für Kurs 2491870** — analog zu 2.
+5. **Kategorienamen in Kurs 2491870.**
+6. **Reports** — je Halbjahr getrennt oder kombiniert?
 
 ### Erledigt
 
@@ -428,3 +417,6 @@ Ein Probe-Export gegen Kurs 2491549 beantwortet die Punkte 1 und 2 von selbst.
 - **Gewichtung** — nach Stunden (siehe AP 4).
 - **`EXPORT_FOLDER`** — neuer Ordner `Exports_2026_27`.
 - **`plan.json`-Bezug** — Pfad-Referenz ins Nachbar-Repo über `PLAN_JSON_PATH`.
+- **Manuelle Notenbuch-Elemente** — entfallen ersatzlos. Quantität und Qualität
+  werden ausschließlich berechnet; damit gibt es keine Übersteuerung mehr und
+  auch keine kursspezifischen Item-IDs zu pflegen.
