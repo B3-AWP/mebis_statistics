@@ -745,6 +745,96 @@ class ReportGenerator:
         logger.info(f"Ausgabe: {output_dir}")
 
     # ------------------------------------------------------------------ #
+    #  LNW Übersicht (pro Leistungsnachweis alle Schüler)                 #
+    # ------------------------------------------------------------------ #
+
+    def _lnw_overview_table(self, lnw_item: Dict,
+                            students: List[Dict], styles: Dict) -> Table:
+        """Tabelle aller Schüler für einen Leistungsnachweis."""
+        col_w = [CONTENT_WIDTH * 0.38, CONTENT_WIDTH * 0.28,
+                 CONTENT_WIDTH * 0.20, CONTENT_WIDTH * 0.14]
+        rows = [['Name', 'Note', 'Abgabedatum', 'Klasse']]
+
+        for entry in students:
+            user = entry['user']
+            klasse = entry['klasse']
+            vorname, nachname = self._parse_name(user.get('name', ''))
+            display_name = f"{vorname} {nachname}".strip()
+            activities = user.get('activities', {})
+
+            grade_display, raw_time = self._extract_student_grade(activities, lnw_item)
+            sub_time = self._format_submission_time(raw_time) if raw_time else None
+
+            if raw_time is None:
+                rows.append([
+                    Paragraph(display_name, styles['cell']), '—',
+                    Paragraph('nicht abgegeben', styles['cell_missing']), klasse,
+                ])
+            else:
+                rows.append([
+                    Paragraph(display_name, styles['cell']),
+                    grade_display, sub_time or '—', klasse,
+                ])
+
+        if len(rows) == 1:
+            rows.append([Paragraph('Keine Einträge vorhanden.', styles['cell_missing']), '', '', ''])
+
+        return self._styled_table(rows, col_w)
+
+    def run_lnw_overview(self, lnw_items: List[Dict], all_students: List[Dict]):
+        """Generiert pro Leistungsnachweis einen Übersichtsbericht mit allen Schülern."""
+
+        output_dir = os.path.join(self.output_base, 'leistungsnachweise')
+        os.makedirs(output_dir, exist_ok=True)
+
+        total_pdfs = 0
+        total_errors = 0
+
+        for item in lnw_items:
+            title = item['title']
+            filename = f"{self._safe_filename(title)}_{self.export_date}.pdf"
+            filepath = os.path.join(output_dir, filename)
+
+            try:
+                buffer = io.BytesIO()
+                doc = SimpleDocTemplate(
+                    buffer,
+                    pagesize=A4,
+                    topMargin=1.0 * cm,
+                    bottomMargin=1.0 * cm,
+                    leftMargin=MARGIN,
+                    rightMargin=MARGIN,
+                    title=f"Leistungsnachweis: {title}",
+                    author="Mebis Statistics",
+                )
+                styles = self._make_styles()
+                elements = []
+
+                elements.append(Paragraph("Leistungsnachweis-Übersicht", styles['title']))
+                elements.append(Paragraph(
+                    f"{title}&nbsp;&nbsp;|&nbsp;&nbsp;Stand: {self.export_date_display}",
+                    styles['meta']
+                ))
+                separator = Table([['']], colWidths=[CONTENT_WIDTH],
+                                  style=TableStyle([('LINEABOVE', (0, 0), (-1, -1), 1.2, COLOR_SECTION)]))
+                elements.append(separator)
+                elements.append(Spacer(1, 1 * mm))
+                elements.append(self._lnw_overview_table(item, all_students, styles))
+
+                doc.build(elements, onFirstPage=self._page_footer, onLaterPages=self._page_footer)
+                with open(filepath, 'wb') as f:
+                    f.write(buffer.getvalue())
+                total_pdfs += 1
+                logger.info(f"  OK  {filename}")
+            except Exception as e:
+                total_errors += 1
+                logger.error(f"  ERR {title}: {e}", exc_info=True)
+
+        logger.info(f"\n{'='*50}")
+        logger.info(f"Fertig: {total_pdfs} LNW-Übersichten erstellt, {total_errors} Fehler")
+        logger.info(f"Ausgabe: {output_dir}")
+
+    # ------------------------------------------------------------------ #
     #  LNW Änderungsbericht (aktuell vs. vorherig)                        #
     # ------------------------------------------------------------------ #
 
@@ -1074,6 +1164,10 @@ class ReportGenerator:
         all_students = self._get_all_students(export_data)
         logger.info(f"{len(all_students)} Schüler gesamt")
         self.run_pflichtaufgaben(pflichtaufgaben_items, all_students, cutoff_date_override)
+
+        # --- LNW-Übersichten ---
+        logger.info("\n--- Leistungsnachweis-Übersichten ---")
+        self.run_lnw_overview(lnw_items, all_students)
 
         # --- LNW Änderungsbericht ---
         logger.info("\n--- LNW Änderungsbericht ---")

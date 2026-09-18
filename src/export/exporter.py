@@ -1951,8 +1951,10 @@ def main(test_mode=False):
 
     try:
         os.makedirs(export_folder, exist_ok=True)
-        with open(local_filename, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+        json_bytes = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        new_file_size = len(json_bytes)
+        with open(local_filename, 'wb') as f:
+            f.write(json_bytes)
         save_duration = time.time() - save_start_time
         logger.info(f"Daten erfolgreich lokal gespeichert in {save_duration:.1f}s: {local_filename}")
         save_success = True
@@ -1961,7 +1963,6 @@ def main(test_mode=False):
         # GRÖSSENVERGLEICH: Prüfe ob neuer Export kleiner ist
         # (Nur im normalen Modus – im Testmodus überspringen)
         # =====================================================
-        new_file_size = os.path.getsize(local_filename)
         logger.info(f"Größe der neuen Datei: {new_file_size:,} bytes ({new_file_size / 1024:.1f} KB)")
 
         if test_mode:

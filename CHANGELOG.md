@@ -2,6 +2,78 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [Unreleased] - 2026-03-16 (2)
+
+### 🚀 Neue Features
+
+#### Dashboard: Spalte „Eingereichte Aufgaben" in der 1. Halbjahresnoten-Tabelle
+- Neue Spalte im 1.-HJ-Abschnitt der Halbjahresnotentabelle
+- Zeigt den gecachten Notenbuch-Wert des manuellen Grade-Items `17762677:Eingereichte Aufgaben`
+- Spalte wird nur eingeblendet, wenn mindestens ein Schüler einen eingetragenen Wert hat
+
+#### Dashboard: Überarbeitete Quantität-Berechnung für die 2. HJ Prognose
+- **Bisher**: Checklisten-basierte Formel (abhängig von Checklist-Rohdaten und `quantitaet1Pct` der 1. MA)
+- **Neu**: Pflichtaufgaben-basierte 7-Schritt-Formel; kein Zugriff auf Checklisten mehr nötig
+
+**Formel (7 Schritte):**
+
+| # | Was | Formel |
+|---|-----|--------|
+| 1 | Gesamtzahl Pflicht | `totalPflicht` = Anzahl Items in Pflichtaufgaben-Kategorie |
+| 2 | Soll pro HJ | `soll1HJ = ROUND(totalPflicht × B7 / weeks)`, `soll2HJ = totalPflicht - soll1HJ` |
+| 3 | Eingereichte aus MA1 | `eingereicht1HJ` aus `17762677:Eingereichte Aufgaben` (Notenbuch), Fallback: `soll1HJ` |
+| 4 | Anrechnung 1. HJ | `angerechnet = MIN(eingereicht1HJ, soll1HJ)` |
+| 5 | Abgeschlossen im 2. HJ | `completed2HJ = MAX(0, completedGesamt - angerechnet)` |
+| 6 | Zeitproportionaler Nenner | `ROUND(soll2HJ × (C7 - B7) / (weeks - B7))` |
+| 7 | Quantität | `(completed2HJ / Nenner) × 100` |
+
+**Schlüsselvariablen:**
+- `B7` = `mitarbeitsnote1_reference_week` (Woche der 1. Mitarbeitsnote)
+- `C7` = aktuelle Referenzwoche (Slider)
+- `weeks` = `maxSchoolweeks` (Semesterlänge)
+- Übertrag aus 1. HJ (wenn `eingereicht1HJ > soll1HJ`) wirkt nur auf den Zähler, nicht den Nenner
+
+### 🔧 Technische Änderungen
+
+#### src/dashboard/static/dashboard.js
+- `calculateQuantitaetMA2(user, groupName, currentWeek)`: Signatur vereinfacht (kein `quantitaet1Pct` mehr); komplette Neuimplementierung mit Pflichtaufgaben-Iteration statt Checklist-Rohdaten
+- `calculateMitarbeitsnote2Prognose()`: Entfernt `quantitaetId`-, `actualQuantitaet1`-, `ma1`- und `quantitaet1Pct`-Berechnung; vereinfachter Aufruf von `calculateQuantitaetMA2`
+- `generateHalbjahresnotenTable()`: Neue Variablen `eingereichtId` und `hasEingereicht`; Spalte „Eingereichte Aufgaben" in Tabellenkopf und Zeilen des 1.-HJ-Abschnitts; `colCount` um Eingereicht-Spalte erweitert
+
+---
+
+## [Unreleased] - 2026-03-16
+
+### 🚀 Neue Features
+
+#### Abgabedatum-Ermittlung via Singleview-Feedback (exporter.py)
+- **Neue Funktion `get_singleview_feedback_dates()`**: Liest Feedback-Datumsangaben aus der Moodle-Singleview (`/grade/report/singleview/index.php?itemid={grade_item_id}`) für jedes Assignment
+- **Priorität über Grading-Page-Datum**: Das Feedback-Datum hat Vorrang vor dem bisherigen `Zuletzt geändert (Abgabe)`-Datum der Bewertungsseite
+- **Dreistufige Priorität**:
+  1. Singleview-Feedback-Datum (Spalte c4 der Tabelle `#singleview-grades`)
+  2. Grading-Page-Datum (`Zuletzt geändert (Abgabe)`)
+  3. Bewertungshistorie als letzter Fallback (für manuell eingetragene Bewertungen)
+- **Robuste Textextraktion**: Versucht sichtbaren Text, dann `<textarea>`-Wert, dann `<input>`-Wert
+- **Logging**: Anzahl extrahierter Feedback-Daten wird geloggt für Nachvollziehbarkeit
+
+#### Erweitertes Datumsformat-Parsing (exporter.py)
+- **Neues Format `DD.MM.YYYY`**: `parse_german_datetime()` unterstützt jetzt das numerische Kurzformat (z.B. `09.01.2026`) zusätzlich zu den bisherigen deutschen Langformaten
+- **Neues Format `DD.MM.YYYY HH:MM`**: Auch numerisches Format mit Uhrzeit wird erkannt
+
+#### Singleview-Feedback-Fallback auch für Quizzes (exporter.py)
+- `process_quiz_parallel()`: Wenn `get_quiz_submission_times()` für einen User kein Datum liefert, wird das Singleview-Feedback-Datum als Fallback verwendet
+- **Keine Überschreibung**: Vorhandene Quiz-Abgabezeitpunkte bleiben erhalten; Singleview ergänzt nur fehlende Einträge
+
+### 🔧 Technische Änderungen
+
+#### src/export/exporter.py
+- Neue Funktion `get_singleview_feedback_dates(driver, course_id, grade_item_id, waittime)`
+- `process_assignment_parallel()`: Singleview-Schritt wird vor dem History-Fallback ausgeführt; `grade_item_id` wird früher im Funktionsablauf gesetzt
+- `process_quiz_parallel()`: Singleview-Feedback als Fallback für fehlende submission_times ergänzt
+- `parse_german_datetime()`: Zwei neue Formate `%d.%m.%Y %H:%M` und `%d.%m.%Y` ergänzt
+
+---
+
 ## [Unreleased] - 2025-11-27
 
 ### 🚀 Neue Features

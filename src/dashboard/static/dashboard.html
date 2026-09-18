@@ -170,6 +170,21 @@
                     <span>Letzte Abgaben je Gruppe</span>
                 </div>
                 <div class="config-section">
+                    <div class="filter-controls">
+                        <div class="filter-group">
+                            <label>Aufgaben:</label>
+                            <div class="progress-toggle">
+                                <label class="active">
+                                    <input type="radio" name="recentPflichtFilter" value="pflicht" checked onchange="setRecentPflichtFilter(this.value)">
+                                    Nur Pflichtaufgaben
+                                </label>
+                                <label>
+                                    <input type="radio" name="recentPflichtFilter" value="all" onchange="setRecentPflichtFilter(this.value)">
+                                    Alle Aufgaben
+                                </label>
+                            </div>
+                        </div>
+                    </div>
                     <div id="recentSubmissionsTable"></div>
                 </div>
             </div>

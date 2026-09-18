@@ -1501,19 +1501,29 @@ function calculateMitarbeitsnote2Prognose(user, groupName, weekOverride) {
     const qualResult = calculatePflichtaufgabenGradeFiltered(user.name, referenztermin, true);
     const qualitaet = qualResult ? qualResult.percent : null;
 
-    // Komponente 3: Review-Talk 2
+    // Komponente 3: Review-Talks (2, 3) – Durchschnitt wenn beide vorhanden
     const reviewTalk2Id = prognosisAssignments.reviewTalk2 || null;
     const reviewTalk2 = reviewTalk2Id
         ? findAssignmentOrQuizGradeForUser(reviewTalk2Id, user.name, null)
         : null;
+    const reviewTalk3Id = prognosisAssignments.reviewTalk3 || null;
+    const reviewTalk3 = reviewTalk3Id
+        ? findAssignmentOrQuizGradeForUser(reviewTalk3Id, user.name, null)
+        : null;
+    let reviewTalks = null;
+    if (reviewTalk2 !== null && reviewTalk3 !== null) {
+        reviewTalks = (reviewTalk2 + reviewTalk3) / 2;
+    } else {
+        reviewTalks = reviewTalk2 !== null ? reviewTalk2 : reviewTalk3;
+    }
 
-    // Komponente 4: Code-Review
+    // Komponente 4: Code-Review (Datumsfilter: nur Bewertungen NACH Referenztermin)
     const codeReviewId = prognosisAssignments.codeReview || null;
     const codeReview = codeReviewId
         ? findAssignmentOrQuizGradeForUser(codeReviewId, user.name, referenztermin)
         : null;
 
-    const components = [quantitaet, qualitaet, reviewTalk2, codeReview].filter(v => v !== null && v !== undefined);
+    const components = [quantitaet, qualitaet, reviewTalks, codeReview].filter(v => v !== null && v !== undefined);
     if (components.length === 0) return null;
     const overall = components.reduce((a, b) => a + b, 0) / components.length;
 
@@ -1523,7 +1533,9 @@ function calculateMitarbeitsnote2Prognose(user, groupName, weekOverride) {
         quantitaetUebertrag: quantResult ? quantResult.uebertrag : 0,
         qualitaet: qualitaet,
         qualitaetCount: qualResult ? qualResult.count : null,
+        reviewTalks: reviewTalks,
         reviewTalk2: reviewTalk2,
+        reviewTalk3: reviewTalk3,
         codeReview: codeReview,
         overall: overall,
         grade: convertPercentToIHKGrade(overall),
@@ -1580,7 +1592,7 @@ function generateHalbjahresnotenTable(users, mode = 'both') {
 
     const prognosisAssignments = mitarbeitsnoteConfig.prognosis_assignments || {};
     const showReviewTalk1 = !!(prognosisAssignments.reviewTalk1);
-    const showReviewTalk2 = !!(prognosisAssignments.reviewTalk2);
+    const showReviewTalks = !!(prognosisAssignments.reviewTalk2 || prognosisAssignments.reviewTalk3);
     const showCodeReview = !!(prognosisAssignments.codeReview);
     const referenztermin = mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1
         ? mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1[track]
@@ -1671,7 +1683,7 @@ function generateHalbjahresnotenTable(users, mode = 'both') {
         html += `<th class="person-name">Person</th>`;
         html += `<th>Quantität (%)</th>`;
         html += `<th>Qualität (%)</th>`;
-        if (showReviewTalk2) html += `<th>Review-Talk 2 (%)</th>`;
+        if (showReviewTalks) html += `<th>Review-Talks (2, 3) (%)</th>`;
         if (showCodeReview) html += `<th>Code-Review (%)</th>`;
         html += `<th>2. Mitarbeitsnote Prognose</th>`;
         html += `</tr></thead><tbody>`;
@@ -1679,7 +1691,7 @@ function generateHalbjahresnotenTable(users, mode = 'both') {
         users.forEach(user => {
             const ma2 = calculateMitarbeitsnote2Prognose(user, currentGroup, currentWeek);
             if (!ma2) {
-                const cols = 3 + (showReviewTalk2 ? 1 : 0) + (showCodeReview ? 1 : 0);
+                const cols = 3 + (showReviewTalks ? 1 : 0) + (showCodeReview ? 1 : 0);
                 html += `<tr><td class="person-name"><strong>${user.name}</strong></td>`;
                 html += `<td colspan="${cols}" class="text-center" style="color:#6C757D;">Keine Daten</td></tr>`;
                 return;
@@ -1689,7 +1701,12 @@ function generateHalbjahresnotenTable(users, mode = 'both') {
             const uebertragLabel = (ma2.quantitaetUebertrag > 0) ? `inkl. ${ma2.quantitaetUebertrag} aus 1.HJ` : null;
             html += renderPctCell(ma2.quantitaet, 'progress-color-info', ma2.quantitaetPoints, 0, uebertragLabel);
             html += renderPctCell(ma2.qualitaet, 'progress-color-warning', null, 0);
-            if (showReviewTalk2) html += renderPctCell(ma2.reviewTalk2, 'progress-color-secondary', null, 0);
+            if (showReviewTalks) {
+                const rt2 = ma2.reviewTalk2 !== null ? `${Math.round(ma2.reviewTalk2)}%` : '–';
+                const rt3 = ma2.reviewTalk3 !== null ? `${Math.round(ma2.reviewTalk3)}%` : '–';
+                const rtLabel = `${rt2}, ${rt3}`;
+                html += renderPctCell(ma2.reviewTalks, 'progress-color-secondary', null, 0, rtLabel);
+            }
             if (showCodeReview) html += renderPctCell(ma2.codeReview, 'progress-color-success', null, 0);
             html += renderGradeCell(ma2.grade, ma2.overall);
             html += `</tr>`;
@@ -1798,6 +1815,12 @@ function generateGroupProgressTable(users) {
 // Standardsortierung: Status (inaktive zuerst), sekundär alphabetisch
 let recentSortCol = 7;
 let recentSortDir = 'desc';
+let recentPflichtOnly = true;
+
+function setRecentPflichtFilter(value) {
+    recentPflichtOnly = value === 'pflicht';
+    generateRecentSubmissionsTable();
+}
 
 function sortRecentSubmissions(colIndex) {
     if (recentSortCol === colIndex) {
@@ -1821,8 +1844,9 @@ function generateRecentSubmissionsTable() {
         return;
     }
 
-    // Filtere auf aktuelle Gruppierung / Gruppe
-    let groupNames = Object.keys(recentData);
+    // Filtere auf aktuelle Gruppierung / Gruppe (ignorierte Gruppen ausschließen)
+    const ignoredGroups = (dashboardData && dashboardData.ignored_groups) || [];
+    let groupNames = Object.keys(recentData).filter(name => !ignoredGroups.includes(name));
     if (currentGrouping !== 'all') {
         groupNames = groupNames.filter(name => name.split(' ')[0] === currentGrouping);
     }
@@ -1894,7 +1918,8 @@ function generateRecentSubmissionsTable() {
         const entry = recentData[groupName];
         const noSubs = entry.no_submissions;
         const inactive = entry.inactive;
-        const recent = entry.recent_submissions || [];
+        const allRecent = entry.recent_submissions || [];
+        const recent = allRecent.filter(s => !recentPflichtOnly || s.is_pflicht);
 
         let statusHtml, groupRowClass;
         if (noSubs) {
@@ -1905,8 +1930,11 @@ function generateRecentSubmissionsTable() {
             const schD = entry.school_days_since != null ? entry.school_days_since : '?';
             statusHtml = `<span class="badge badge-warning">Inaktiv<br>(${calD} Kal. / ${schD} Schultage)</span>`;
             groupRowClass = 'recent-group-header recent-inactive';
+        } else if (recentPflichtOnly && recent.length === 0) {
+            statusHtml = `<span class="badge badge-secondary">Aktiv – keine Pflicht</span>`;
+            groupRowClass = 'recent-group-header recent-active';
         } else {
-            statusHtml = `<span class="badge badge-success">Aktiv (${recent.length})</span>`;
+            statusHtml = `<span class="badge badge-success">Aktiv (${allRecent.length})</span>`;
             groupRowClass = 'recent-group-header recent-active';
         }
 
@@ -1948,14 +1976,16 @@ function generateRecentSubmissionsTable() {
             }
         } else {
             // Inaktiv/keine aktuellen Abgaben: letzte bekannte Abgabe anzeigen
+            // Bei aktivem Pflichtfilter: Detailfelder nur anzeigen wenn letzte Abgabe eine Pflichtaufgabe war
+            const showFallbackDetails = !recentPflichtOnly || entry.last_submission_is_pflicht;
             html += `<tr class="${groupRowClass}">
                 <td><strong>${groupName}</strong></td>
-                <td>${fmtDate(entry.last_submission_time)}</td>
-                <td>${entry.last_submission_title || '—'}</td>
-                <td>${entry.last_submission_category || '—'}</td>
-                <td style="text-align:center;">${fmtBewertbar(null, entry.last_submission_url, entry.last_submission_type, entry.last_submission_bewertbar, entry.last_submission_grade)}</td>
-                <td style="text-align:center;">${entry.calendar_days_since ?? '—'}</td>
-                <td style="text-align:center;">${entry.school_days_since ?? '—'}</td>
+                <td>${showFallbackDetails ? fmtDate(entry.last_submission_time) : '—'}</td>
+                <td>${showFallbackDetails ? (entry.last_submission_title || '—') : '—'}</td>
+                <td>${showFallbackDetails ? (entry.last_submission_category || '—') : '—'}</td>
+                <td style="text-align:center;">${showFallbackDetails ? fmtBewertbar(null, entry.last_submission_url, entry.last_submission_type, entry.last_submission_bewertbar, entry.last_submission_grade) : '—'}</td>
+                <td style="text-align:center;">${showFallbackDetails ? (entry.calendar_days_since ?? '—') : '—'}</td>
+                <td style="text-align:center;">${showFallbackDetails ? (entry.school_days_since ?? '—') : '—'}</td>
                 <td>${statusHtml}</td>
             </tr>`;
         }
@@ -4717,8 +4747,8 @@ function extractPercentageFromString(gradeString) {
         }
     }
 
-    // Prüfe auf Punktzahlen (z.B. "8/10")
-    const pointsMatch = content.match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+    // Prüfe auf Punktzahlen (z.B. "8/10" oder "70 / 100")
+    const pointsMatch = content.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
     if (pointsMatch) {
         const achieved = parseFloat(pointsMatch[1]);
         const total = parseFloat(pointsMatch[2]);
@@ -4764,8 +4794,8 @@ function extractGradeFromString(gradeString) {
         }
     }
 
-    // Prüfe auf Punktzahlen (z.B. "8/10")
-    const pointsMatch = content.match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+    // Prüfe auf Punktzahlen (z.B. "8/10" oder "70 / 100")
+    const pointsMatch = content.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
     if (pointsMatch) {
         const achieved = parseFloat(pointsMatch[1]);
         const total = parseFloat(pointsMatch[2]);

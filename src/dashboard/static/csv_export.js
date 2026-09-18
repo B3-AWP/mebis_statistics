@@ -133,6 +133,16 @@ function yieldToBrowser() {
     return new Promise(resolve => setTimeout(resolve, 0));
 }
 
+function formatHjValue(value) {
+    if (value === null || value === undefined) return '';
+    return value.toFixed(1).replace('.', ',');
+}
+
+function formatHjGrade(grade) {
+    if (grade === null || grade === undefined) return '';
+    return grade.toFixed(1).replace('.', ',');
+}
+
 function extractGroupingPrefix(groupName) {
     if (!groupName || groupName === 'all') return 'Alle';
     // Extract prefix before first space or dash (e.g., "IFA12A" from "IFA12A - Team 1")
@@ -257,9 +267,13 @@ function getGradeFromActivitiesByCategory(userName, assignmentId) {
             for (const assignment of category.assignments) {
                 if (assignment.id === assignmentId && assignment.user_status) {
                     const userStatus = assignment.user_status.find(status => status.user_name === userName);
-                    if (userStatus && userStatus.grade && userStatus.grade !== '-') {
-                        // Convert to percentage before returning
+                    if (!userStatus) continue;
+                    const hasGrade = userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
+                    if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
+                    }
+                    if (userStatus.submission_time) {
+                        return 'nicht bewertet';
                     }
                 }
             }
@@ -270,9 +284,13 @@ function getGradeFromActivitiesByCategory(userName, assignmentId) {
             for (const quiz of category.quizzes) {
                 if (quiz.id === assignmentId && quiz.user_status) {
                     const userStatus = quiz.user_status.find(status => status.user_name === userName);
-                    if (userStatus && userStatus.grade && userStatus.grade !== '-') {
-                        // Convert to percentage before returning
+                    if (!userStatus) continue;
+                    const hasGrade = userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
+                    if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
+                    }
+                    if (userStatus.submission_time) {
+                        return 'nicht bewertet';
                     }
                 }
             }
@@ -307,9 +325,13 @@ function getGradeFromLeistungsnachweise(userName, assignmentId) {
             for (const assignment of category.assignments) {
                 if (assignment.id === assignmentId && assignment.user_status) {
                     const userStatus = assignment.user_status.find(status => status.user_name === userName);
-                    if (userStatus && userStatus.grade && userStatus.grade !== '-') {
-                        // Convert to percentage before returning
+                    if (!userStatus) continue;
+                    const hasGrade = userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
+                    if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
+                    }
+                    if (userStatus.submission_time) {
+                        return 'nicht bewertet';
                     }
                 }
             }
@@ -320,9 +342,13 @@ function getGradeFromLeistungsnachweise(userName, assignmentId) {
             for (const quiz of category.quizzes) {
                 if (quiz.id === assignmentId && quiz.user_status) {
                     const userStatus = quiz.user_status.find(status => status.user_name === userName);
-                    if (userStatus && userStatus.grade && userStatus.grade !== '-') {
-                        // Convert to percentage before returning
+                    if (!userStatus) continue;
+                    const hasGrade = userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
+                    if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
+                    }
+                    if (userStatus.submission_time) {
+                        return 'nicht bewertet';
                     }
                 }
             }
@@ -330,6 +356,33 @@ function getGradeFromLeistungsnachweise(userName, assignmentId) {
     }
 
     return '';
+}
+
+// =============================================================================
+// CODE-REVIEW GRADE WITH DATE
+// =============================================================================
+
+// Gibt {percent, submissionDate} zurück, oder null wenn keine Note vorhanden
+function getCodeReviewGradeWithDate(codeReviewId, userName) {
+    if (!codeReviewId || !window.dashboardData || !window.dashboardData.activities_by_category) return null;
+    const idStr = String(codeReviewId);
+
+    for (const category of window.dashboardData.activities_by_category) {
+        for (const list of [category.assignments || [], category.quizzes || []]) {
+            for (const activity of list) {
+                if (String(activity.id) !== idStr && String(activity.grade_item_id) !== idStr) continue;
+                const userStatus = (activity.user_status || []).find(s => s.user_name === userName);
+                if (!userStatus || !userStatus.grade || userStatus.grade === '-') return null;
+                const percent = extractPercentageFromString(userStatus.grade);
+                if (percent === null) return null;
+                return {
+                    percent,
+                    submissionDate: userStatus.submission_time ? new Date(userStatus.submission_time) : null
+                };
+            }
+        }
+    }
+    return null;
 }
 
 // =============================================================================
@@ -402,6 +455,57 @@ function getAllUsersAcrossGroups() {
     return users;
 }
 
+function buildHjConfig(users, group) {
+    if (!window.mitarbeitsnoteConfig) return null;
+
+    // Bestimme Gruppe für Track-Ermittlung
+    const sampleGroup = (window.currentGroup !== 'all')
+        ? window.currentGroup
+        : (users.length > 0 ? users[0]._groupName : null);
+    if (!sampleGroup) return null;
+
+    const track = getTrackForGroup(sampleGroup);
+    if (!track) return null;
+
+    const refWeek = window.mitarbeitsnoteConfig.mitarbeitsnote1_reference_week || 4;
+    const sliderWeek = parseInt(document.getElementById('csvWeekSlider')?.value || 0);
+    const autoWeek = getCurrentReferenceWeekForTrack(track);
+    const currentWeek = sliderWeek > 0 ? sliderWeek : autoWeek;
+
+    const prognosisAssignments = window.mitarbeitsnoteConfig.prognosis_assignments || {};
+    const showReviewTalk1 = !!(prognosisAssignments.reviewTalk1);
+    const showReviewTalks = !!(prognosisAssignments.reviewTalk2 || prognosisAssignments.reviewTalk3);
+    const showCodeReview = !!(prognosisAssignments.codeReview);
+
+    // Prüfe ob tatsächliche Notenbuch-Werte vorhanden
+    const ma1Id = getManualItemIdByTitle('1. Mitarbeitsnote');
+    const hasActualMA1 = ma1Id && users.some(u => getManualGradeValue(u, ma1Id) !== null);
+    const eingereichtId = getManualItemIdByTitle('Eingereichte Aufgaben');
+    const hasEingereicht = eingereichtId && users.some(u => getManualGradeValue(u, eingereichtId) !== null);
+
+    const referenztermin = window.mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1
+        ? window.mitarbeitsnoteConfig.referenztermin_mitarbeitsnote1[track]
+        : null;
+    const codeReviewId = prognosisAssignments.codeReview || null;
+
+    return {
+        track,
+        refWeek,
+        currentWeek,
+        showReviewTalk1,
+        showReviewTalks,
+        showCodeReview,
+        hasActualMA1,
+        hasEingereicht,
+        ma1Id,
+        eingereichtId,
+        referenztermin,
+        codeReviewId,
+        show1hj: currentWeek >= refWeek,
+        show2hj: currentWeek >= refWeek
+    };
+}
+
 function collectCsvData(selectedWeek) {
     const group = window.currentGroup === 'all' ? 'Alle Gruppen' : window.currentGroup;
     const grouping = window.currentGrouping === 'all' ? 'Alle Gruppierungen' : window.currentGrouping;
@@ -447,6 +551,9 @@ function collectCsvData(selectedWeek) {
         examRows = collectAllLeistungsnachweise();
     }
 
+    // Halbjahresnotenkonfiguration ermitteln
+    const hjConfig = buildHjConfig(users, group);
+
     return {
         grouping,
         group,
@@ -457,7 +564,8 @@ function collectCsvData(selectedWeek) {
         examRows,
         checklistHeaders,
         pflichtHeaders,
-        examHeaders
+        examHeaders,
+        hjConfig
     };
 }
 
@@ -569,6 +677,26 @@ function buildCsvHeaders(data) {
         headers.push(exam.assignment_title || 'Unbekannter LNW');
     });
 
+    // Halbjahresnotenspalten
+    const hj = data.hjConfig;
+    if (hj && hj.show1hj) {
+        headers.push('1.HJ Quantität (%)');
+        headers.push('1.HJ Qualität (%)');
+        if (hj.showReviewTalk1) headers.push('1.HJ Review-Talk 1 (%)');
+        if (hj.showCodeReview) headers.push('1.HJ Code-Review (%)');
+        if (hj.hasActualMA1) headers.push('1.HJ 1. Mitarbeitsnote (%)');
+        if (hj.hasEingereicht) headers.push('1.HJ Eingereichte Aufgaben');
+        headers.push('1.HJ Ø 1. Mitarbeitsnote');
+    }
+    if (hj && hj.show2hj) {
+        headers.push('2.HJ Eingereichte Aufgaben');
+        headers.push('2.HJ Quantität (%)');
+        headers.push('2.HJ Qualität (%)');
+        if (hj.showReviewTalks) headers.push('2.HJ Review-Talks (2,3) (%)');
+        if (hj.showCodeReview) headers.push('2.HJ Code-Review (%)');
+        headers.push('2.HJ 2. Mitarbeitsnote Prognose');
+    }
+
     return headers;
 }
 
@@ -582,35 +710,8 @@ function buildUserRow(user, data) {
     // Get group name for calculations
     const userGroup = user._groupName || data.group;
 
-    // Debug before calculation
-    console.log(`CSV Export Debug BEFORE calc - User: ${user.name}`, {
-        userGroup: userGroup,
-        selectedWeek: data.selectedWeek,
-        currentGroup: window.currentGroup,
-        hasStructuredTables: !!window.dashboardData?.structured_tables,
-        hasGroupInTables: !!window.dashboardData?.structured_tables?.[userGroup],
-        userChecklists: user.checklists
-    });
-
-    // Calculate progress for selected week
-    // IMPORTANT: Use hardcoded 10 for maxWeeks to match dashboard.js behavior (lines 767, 866, 1158)
-    // IMPORTANT: Pass userGroup as 4th parameter for correct data lookup
-    const actualProgress = calculateActualProgressForWeek(
-        user,
-        data.selectedWeek,
-        10,
-        userGroup
-    );
-
-    // Debug logging AFTER calculation
-    console.log(`CSV Export Debug AFTER calc - User: ${user.name}`, {
-        actualProgress: actualProgress,
-        actualProgressType: typeof actualProgress,
-        pflichtProgressValue: actualProgress?.pflichtProgress,
-        gesamtProgressValue: actualProgress?.gesamtProgress,
-        userChecklistsAvgRequired: user.checklists?.avg_required_progress,
-        userChecklistsAvgAll: user.checklists?.avg_all_progress
-    });
+    // Calculate progress using same function as dashboard's "Gesamtfortschritt pro Person" table
+    const pflichtResult = calculatePflichtaufgabenProgressGesamt(user, data.selectedWeek);
 
     // Calculate pflichtaufgaben grade
     const pflichtGrade = calculatePflichtaufgabenGradeForUserByName(
@@ -642,45 +743,20 @@ function buildUserRow(user, data) {
     row.push(nachname); // Nachname
     row.push(user.checklists?.required_100_count || 0); // Checklisten 100%
 
-    // Pflicht (%) - ensure it's a valid number and NOT using user.checklists.avg_required_progress
-    const pflichtValue = actualProgress?.pflichtProgress;
-
-    // CRITICAL: Verify we're not accidentally getting the raw value
-    if (pflichtValue > 100) {
-        console.error(`CSV Export ERROR - pflichtValue is ${pflichtValue} which is > 100! This is likely the raw sum, not percentage.`, {
-            user: user.name,
-            actualProgress: actualProgress,
-            userChecklists: user.checklists
-        });
-    }
+    // Pflicht (%) - same calculation as dashboard "Gesamtfortschritt pro Person"
+    const pflichtValue = pflichtResult ? pflichtResult.value : 0;
 
     // Format mit deutschem Dezimaltrennzeichen (Komma) für Excel-Kompatibilität
-    const pflichtFormatted = (pflichtValue !== null && pflichtValue !== undefined && !isNaN(pflichtValue))
-        ? pflichtValue.toFixed(1).replace('.', ',')
-        : '0,0';
+    const pflichtFormatted = pflichtValue.toFixed(1).replace('.', ',');
     row.push(pflichtFormatted);
 
     // Note - from calculateGradeFromPflichtProgress mit deutschem Dezimaltrennzeichen
-    const gradeText = calculateGradeFromPflichtProgress(pflichtValue || 0);
+    const gradeText = calculateGradeFromPflichtProgress(pflichtValue);
     const gradeFormatted = gradeText ? gradeText.replace('.', ',') : '';
     row.push(gradeFormatted); // Note
 
-    // Gesamt (%) - ensure it's a valid number
-    const gesamtValue = actualProgress?.gesamtProgress;
-
-    // CRITICAL: Verify we're not accidentally getting the raw value for Gesamt too
-    if (gesamtValue > 100) {
-        console.error(`CSV Export ERROR - gesamtValue is ${gesamtValue} which is > 100! This is likely the raw sum, not percentage.`, {
-            user: user.name,
-            actualProgress: actualProgress,
-            userChecklists: user.checklists
-        });
-    }
-
-    // Format mit deutschem Dezimaltrennzeichen (Komma) für Excel-Kompatibilität
-    const gesamtFormatted = (gesamtValue !== null && gesamtValue !== undefined && !isNaN(gesamtValue))
-        ? gesamtValue.toFixed(1).replace('.', ',')
-        : '0,0';
+    // Gesamt (%) - im Dashboard identisch mit Pflicht (%)
+    const gesamtFormatted = pflichtFormatted;
     row.push(gesamtFormatted);
 
     row.push(user.assignments?.submitted_count || 0); // Eingereichte Aufgaben
@@ -819,6 +895,56 @@ function buildUserRow(user, data) {
 
         row.push(grade);
     });
+
+    // Halbjahresnotenspalten
+    const hj = data.hjConfig;
+
+    // Code-Review einmalig ermitteln und nach Halbjahr aufteilen
+    let codeReview1HJ = null;
+    let codeReview2HJ = null;
+    if (hj && hj.showCodeReview && hj.codeReviewId) {
+        const crResult = getCodeReviewGradeWithDate(hj.codeReviewId, user.name);
+        if (crResult) {
+            const cutoff = hj.referenztermin ? new Date(hj.referenztermin) : null;
+            if (cutoff && crResult.submissionDate && crResult.submissionDate <= cutoff) {
+                codeReview1HJ = crResult.percent;
+            } else {
+                codeReview2HJ = crResult.percent;
+            }
+        }
+    }
+
+    if (hj && hj.show1hj) {
+        const ma1 = calculateMitarbeitsnote1(user, userGroup);
+        row.push(formatHjValue(ma1?.quantitaet));
+        row.push(formatHjValue(ma1?.qualitaet));
+        if (hj.showReviewTalk1) row.push(formatHjValue(ma1?.reviewTalk));
+        if (hj.showCodeReview) row.push(formatHjValue(codeReview1HJ));
+        if (hj.hasActualMA1) row.push(formatHjValue(ma1?.actualMA1Grade));
+        if (hj.hasEingereicht) {
+            const eingereichtVal = hj.eingereichtId ? getManualGradeValue(user, hj.eingereichtId) : null;
+            row.push(eingereichtVal !== null ? Math.round(eingereichtVal).toString() : '');
+        }
+        // Ø 1. Mitarbeitsnote (IHK-Note)
+        row.push(formatHjGrade(ma1?.grade));
+    }
+    if (hj && hj.show2hj) {
+        // Eingereichte Aufgaben 2.HJ = Gesamt eingereicht - Eingereichte 1.HJ (aus Notenbuch)
+        const gesamtEingereicht = user.assignments?.submitted_count || 0;
+        const eingereicht1HJ = hj.eingereichtId ? getManualGradeValue(user, hj.eingereichtId) : null;
+        const eingereicht2HJ = eingereicht1HJ !== null
+            ? Math.max(0, gesamtEingereicht - Math.round(eingereicht1HJ))
+            : '';
+        row.push(eingereicht2HJ !== '' ? eingereicht2HJ.toString() : '');
+
+        const ma2 = calculateMitarbeitsnote2Prognose(user, userGroup, hj.currentWeek);
+        row.push(formatHjValue(ma2?.quantitaet));
+        row.push(formatHjValue(ma2?.qualitaet));
+        if (hj.showReviewTalks) row.push(formatHjValue(ma2?.reviewTalks));
+        if (hj.showCodeReview) row.push(formatHjValue(codeReview2HJ));
+        // 2. Mitarbeitsnote Prognose (IHK-Note)
+        row.push(formatHjGrade(ma2?.grade));
+    }
 
     return row;
 }
