@@ -362,29 +362,6 @@ function getGradeFromLeistungsnachweise(userName, assignmentId) {
 // CODE-REVIEW GRADE WITH DATE
 // =============================================================================
 
-// Gibt {percent, submissionDate} zurück, oder null wenn keine Note vorhanden
-function getCodeReviewGradeWithDate(codeReviewId, userName) {
-    if (!codeReviewId || !window.dashboardData || !window.dashboardData.activities_by_category) return null;
-    const idStr = String(codeReviewId);
-
-    for (const category of window.dashboardData.activities_by_category) {
-        for (const list of [category.assignments || [], category.quizzes || []]) {
-            for (const activity of list) {
-                if (String(activity.id) !== idStr && String(activity.grade_item_id) !== idStr) continue;
-                const userStatus = (activity.user_status || []).find(s => s.user_name === userName);
-                if (!userStatus || !userStatus.grade || userStatus.grade === '-') return null;
-                const percent = extractPercentageFromString(userStatus.grade);
-                if (percent === null) return null;
-                return {
-                    percent,
-                    submissionDate: userStatus.submission_time ? new Date(userStatus.submission_time) : null
-                };
-            }
-        }
-    }
-    return null;
-}
-
 // =============================================================================
 // ERROR HANDLING & VALIDATION
 // =============================================================================
@@ -459,11 +436,6 @@ function buildHjConfig(users, group) {
     const autoWeek = getCurrentReferenceWeekForTrack(track);
     const currentWeek = sliderWeek > 0 ? sliderWeek : autoWeek;
 
-    const prognosisAssignments = (window.mitarbeitsnoteConfig
-        && window.mitarbeitsnoteConfig.prognosis_assignments) || {};
-    const showReviewTalk = !!(prognosisAssignments.reviewTalk || prognosisAssignments.reviewTalk1);
-    const showCodeReview = !!(prognosisAssignments.codeReview);
-
     // Titel des aktiven Halbjahres fuer die Spaltenbeschriftung
     const kurs = (typeof getCourse === 'function' && window.currentHalbjahr
                   && window.currentHalbjahr !== 'gesamt')
@@ -473,9 +445,6 @@ function buildHjConfig(users, group) {
         track,
         currentWeek,
         zeitraum: kurs ? kurs.titel : 'Schuljahr',
-        showReviewTalk,
-        showCodeReview,
-        codeReviewId: prognosisAssignments.codeReview || null
     };
 }
 
@@ -657,8 +626,6 @@ function buildCsvHeaders(data) {
         headers.push(`${p}Quantität (%)`);
         headers.push(`${p}Delta (Std.)`);
         headers.push(`${p}Qualität (%)`);
-        if (hj.showReviewTalk) headers.push(`${p}Review-Talk (%)`);
-        if (hj.showCodeReview) headers.push(`${p}Code-Review (%)`);
         headers.push(`${p}Ø Mitarbeitsnote`);
     }
 
@@ -869,8 +836,6 @@ function buildUserRow(user, data) {
         row.push(ma && ma.deltaStunden !== null && ma.deltaStunden !== undefined
             ? ma.deltaStunden.toFixed(1).replace('.', ',') : '');
         row.push(formatHjValue(ma?.qualitaet));
-        if (hj.showReviewTalk) row.push(formatHjValue(ma?.reviewTalk));
-        if (hj.showCodeReview) row.push(formatHjValue(ma?.codeReview));
         row.push(formatHjGrade(ma?.grade));
     }
 

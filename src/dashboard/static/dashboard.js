@@ -1383,32 +1383,6 @@ function calculatePflichtaufgabenGradeFiltered(userName, cutoffDate, useAfter) {
     return { percent: avg, count: count, grade: convertPercentToIHKGrade(avg) };
 }
 
-// Sucht eine Aufgabe oder ein Quiz nach ID und gibt den Prozentwert für einen Benutzer zurück.
-// afterDate: Optional, nur Bewertungen MIT submission_time > afterDate
-function findAssignmentOrQuizGradeForUser(assignmentId, userName, afterDate) {
-    if (!assignmentId || !dashboardData || !dashboardData.activities_by_category) return null;
-    const idStr = String(assignmentId);
-    const cutoff = afterDate ? new Date(afterDate) : null;
-
-    for (const category of dashboardData.activities_by_category) {
-        for (const list of [category.assignments || [], category.quizzes || []]) {
-            for (const activity of list) {
-                // Treffer bei activity.id (Moodle-Modul-ID) ODER activity.grade_item_id (Bewertungs-ID)
-                if (String(activity.id) !== idStr && String(activity.grade_item_id) !== idStr) continue;
-                const userStatus = (activity.user_status || []).find(s => s.user_name === userName);
-                if (!userStatus || !userStatus.grade || userStatus.grade === '-') return null;
-                if (cutoff && userStatus.submission_time) {
-                    if (new Date(userStatus.submission_time) <= cutoff) return null;
-                } else if (cutoff && !userStatus.submission_time) {
-                    return null;
-                }
-                return extractPercentageFromString(userStatus.grade);
-            }
-        }
-    }
-    return null;
-}
-
 // Parst eine deutsche Dezimalzahl (z.B. "86,09" oder "86.09") zu einem Float
 function parseGermanDecimal(str) {
     if (str === null || str === undefined) return null;
@@ -1424,10 +1398,8 @@ function parseGermanDecimal(str) {
 // frueheren Funktionen fuer die 1. und die prognostizierte 2. Note sind
 // hier zusammengefuehrt. Welches Halbjahr gilt, sagt der Kurs-Scope.
 //
-// Rueckgabe: {quantitaet, qualitaet, reviewTalk, overall, grade, ...}
+// Rueckgabe: {quantitaet, qualitaet, overall, grade, ...}
 function calculateMitarbeitsnote(user, groupName, weekOverride) {
-    const prognosisAssignments = (mitarbeitsnoteConfig && mitarbeitsnoteConfig.prognosis_assignments) || {};
-
     // Komponente 1: Quantitaet — stundengewichteter Fortschritt aus dem Plan.
     const quantResult = calculateQuantitaet(user, groupName, weekOverride);
     const quantitaet = quantResult ? quantResult.value : null;
@@ -1438,15 +1410,7 @@ function calculateMitarbeitsnote(user, groupName, weekOverride) {
     const qualResult = calculatePflichtaufgabenGradeFiltered(user.name, null, false);
     const qualitaet = qualResult ? qualResult.percent : null;
 
-    // Komponente 3: Review-Talk (optional, je Kurs konfiguriert)
-    const reviewTalkId = prognosisAssignments.reviewTalk || null;
-    const reviewTalk = reviewTalkId ? findAssignmentOrQuizGradeForUser(reviewTalkId, user.name, null) : null;
-
-    // Komponente 4: Code-Review (optional, je Kurs konfiguriert)
-    const codeReviewId = prognosisAssignments.codeReview || null;
-    const codeReview = codeReviewId ? findAssignmentOrQuizGradeForUser(codeReviewId, user.name, null) : null;
-
-    const components = [quantitaet, qualitaet, reviewTalk, codeReview]
+    const components = [quantitaet, qualitaet]
         .filter(v => v !== null && v !== undefined);
     if (components.length === 0) return null;
 
@@ -1461,8 +1425,6 @@ function calculateMitarbeitsnote(user, groupName, weekOverride) {
         deltaStunden: quantResult ? quantResult.deltaStunden : null,
         qualitaet: qualitaet,
         qualitaetCount: qualResult ? qualResult.count : null,
-        reviewTalk: reviewTalk,
-        codeReview: codeReview,
         overall: overall,
         grade: convertPercentToIHKGrade(overall),
         componentCount: components.length
@@ -1629,10 +1591,6 @@ function generateHalbjahresnotenTable(users) {
     const autoWeek = getCurrentReferenceWeekForTrack(track);
     const woche = sliderWeek > 0 ? sliderWeek : autoWeek;
 
-    const prognosisAssignments = (mitarbeitsnoteConfig && mitarbeitsnoteConfig.prognosis_assignments) || {};
-    const showReviewTalk = !!(prognosisAssignments.reviewTalk || prognosisAssignments.reviewTalk1);
-    const showCodeReview = !!(prognosisAssignments.codeReview);
-
     const kurs = currentHalbjahr && currentHalbjahr !== 'gesamt' ? getCourse(currentHalbjahr) : null;
     const zeitraum = kurs ? kurs.titel : 'Schuljahr';
     const sollPct = Math.round(sollAnteil(wochen, woche) * 1000) / 10;
@@ -1649,12 +1607,10 @@ function generateHalbjahresnotenTable(users) {
     html += `<th title="Stundengewichtet: Summe der Stunden abgegebener Aufgaben">Quantität<br>(%)</th>`;
     html += `<th title="Vorsprung bzw. Rückstand in Unterrichtsstunden">Delta<br>(Std.)</th>`;
     html += `<th title="Ungewichteter Durchschnitt der Bewertungen">Qualität<br>(%)</th>`;
-    if (showReviewTalk) html += `<th>Review-Talk<br>(%)</th>`;
-    if (showCodeReview) html += `<th>Code-Review<br>(%)</th>`;
     html += `<th>Ø Mitarbeitsnote</th>`;
     html += `</tr></thead><tbody>`;
 
-    const colCount = 4 + (showReviewTalk ? 1 : 0) + (showCodeReview ? 1 : 0);
+    const colCount = 4;
 
     users.forEach(user => {
         const ma = calculateMitarbeitsnote(user, currentGroup, woche);
@@ -1680,8 +1636,6 @@ function generateHalbjahresnotenTable(users) {
         }
 
         html += renderPctCell(ma.qualitaet, 'progress-color-warning', null, 1);
-        if (showReviewTalk) html += renderPctCell(ma.reviewTalk, 'progress-color-secondary', null, 0);
-        if (showCodeReview) html += renderPctCell(ma.codeReview, 'progress-color-success', null, 0);
         html += renderGradeCell(ma.grade, ma.overall);
         html += `</tr>`;
     });

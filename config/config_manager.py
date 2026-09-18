@@ -240,11 +240,14 @@ class ConfigManager:
 
     def get_mitarbeitsnote_config(self) -> Dict[str, Any]:
         """
-        Holt Mitarbeitsnoten-Konfiguration aus Environment Variables.
+        Holt Mitarbeitsnoten-Konfiguration.
+
+        Schienen, Klassenzuordnung und Schulwochen kommen aus plan.json und
+        werden vom Backend ergaenzt. Uebrig bleibt der optionale
+        Referenztermin fuer den Berichts-Cutoff.
 
         Returns:
-            Dictionary mit allen Mitarbeitsnoten-Einstellungen.
-            Gibt None-Werte zurück wenn nicht konfiguriert.
+            Dictionary mit den verbliebenen Einstellungen
         """
         def parse_json_env(key: str) -> Optional[Any]:
             val = os.getenv(key)
@@ -255,12 +258,8 @@ class ConfigManager:
                     logger.warning(f"Invalid JSON for {key}: {e}")
             return None
 
-        # class_to_track und track_schedules kommen seit 2026/27 aus
-        # plan.json und werden vom Backend ergaenzt; hier stehen nur noch
-        # die kursspezifischen Aufgaben-IDs.
         return {
             'referenztermin_mitarbeitsnote1': parse_json_env('REFERENZTERMIN_MITARBEITSNOTE1'),
-            'prognosis_assignments': parse_json_env('PROGNOSIS_ASSIGNMENTS'),
         }
 
     def _get_int(self, env_var: str, default: int) -> int:
