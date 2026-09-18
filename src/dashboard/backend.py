@@ -32,8 +32,15 @@ from flask_cors import CORS
 from config.config_manager import config_manager
 from config.logger_config import get_logger, backend_logger, api_logger, data_logger
 
+# Stammdaten (Kurse, Aufgaben, Stunden, Schulwochen)
+from src.common import plan_loader
+from src.common.plan_loader import PlanFehler, get_plan
+
 # PDF Generator
 from src.export.pdf_multi import ReviewPDFGeneratorMulti
+
+# Erwartete Version des Exportformats (siehe exporter.EXPORT_SCHEMA_VERSION)
+EXPORT_SCHEMA_VERSION = 2
 
 # Flask App Setup mit sicherer Konfiguration
 # Use absolute path for static folder
@@ -113,11 +120,24 @@ def load_json_data(file_path):
         with open(file_path, 'r', encoding='utf-8') as file:
             data = json.load(file)
 
-        if isinstance(data, dict):
-            logger.info(f"JSON file loaded successfully. Keys: {list(data.keys())}")
-        else:
-            logger.warning("Loaded JSON is not a dictionary")
+        if not isinstance(data, dict):
+            logger.error("Loaded JSON is not a dictionary")
+            return None
 
+        # Schuljahr 2026/27: Ein Export enthält mehrere Kurse unter "kurse".
+        # Altformate werden bewusst abgelehnt statt stillschweigend falsch
+        # interpretiert — sie stammen aus dem Vorjahr mit anderer Kursstruktur.
+        schema = data.get('schema')
+        if schema != EXPORT_SCHEMA_VERSION:
+            logger.error(
+                f"Export '{os.path.basename(file_path)}' hat Schema {schema!r}, "
+                f"erwartet wird {EXPORT_SCHEMA_VERSION}. "
+                f"Altformate aus dem Vorjahr werden nicht mehr gelesen — "
+                f"bitte einen neuen Export erzeugen."
+            )
+            return None
+
+        logger.info(f"JSON file loaded successfully. Keys: {list(data.keys())}")
         return data
 
     except json.JSONDecodeError as e:
@@ -478,14 +498,108 @@ def static_files(filename):
 
 def _process_dashboard_data(data, source_label=None):
     """
-    Verarbeitet rohe JSON-Exportdaten und gibt ein fertiges Response-Dict zurück.
+    Verarbeitet einen Export mit mehreren Kursen.
+
+    Jeder Kurs wird einzeln ausgewertet (_process_course_data); die Gruppen
+    liegen kursübergreifend auf oberster Ebene und werden in jeden Kurs
+    hineingereicht.
 
     Args:
-        data: Geladenes JSON-Dict
+        data: Geladenes JSON-Dict (Schema 2)
         source_label: Anzeigename der Quelle (Dateipfad oder Dateiname)
 
     Returns:
         dict: Response-Dict für jsonify
+    """
+    logger = data_logger
+
+    try:
+        plan = get_plan()
+    except PlanFehler as e:
+        logger.error(f"Planungsdatei nicht ladbar: {e}")
+        raise
+
+    raw_groups = data.get('groups', [])
+    kurse_raw = data.get('kurse', {})
+
+    kurse_response = {}
+    for course_id, course_data in kurse_raw.items():
+        kurs = plan.get_kurs_by_moodle_id(course_id)
+        if not kurs:
+            logger.warning(
+                f"Kurs {course_id} steht nicht in plan.json — wird übersprungen. "
+                f"Bekannte Kurse: {[k['moodle_course_id'] for k in plan.kurse]}"
+            )
+            continue
+
+        logger.info(f"Verarbeite Kurs {course_id} ({kurs['titel']})")
+        # Die Gruppen stehen nur einmal ganz oben; der Kursauswertung
+        # reichen wir sie als 'groups' hinein.
+        merged = dict(course_data)
+        merged['groups'] = raw_groups
+
+        kurs_response = _process_course_data(
+            merged, plan=plan, kurs=kurs, source_label=source_label
+        )
+        kurs_response['titel'] = kurs['titel']
+        kurs_response['kurs_id'] = kurs['id']
+        kurs_response['gesperrt'] = kurs['gesperrt']
+        kurse_response[str(course_id)] = kurs_response
+
+    # Kurse, die im Plan stehen, aber (noch) nicht exportiert wurden —
+    # typischerweise das gesperrte 2. Halbjahr. Sie erscheinen als leere
+    # Huelle, damit das Frontend den Tab anzeigen und begruenden kann.
+    for kurs in plan.get_kurse():
+        cid = kurs['moodle_course_id']
+        if cid in kurse_response:
+            continue
+        kurse_response[cid] = {
+            'titel': kurs['titel'],
+            'kurs_id': kurs['id'],
+            'gesperrt': kurs['gesperrt'],
+            'freischaltung': kurs['freischaltung'].isoformat() if kurs['freischaltung'] else None,
+            'verfuegbar': False,
+            'groups': {},
+            'overall_stats': {},
+            'activities_by_category': [],
+            'categories': [],
+            'structured_tables': {},
+            'assignment_details': {},
+            'recent_submissions': [],
+        }
+
+    environment_settings = {
+        'flask_env': os.getenv('FLASK_ENV', 'production'),
+        'log_level': os.getenv('LOG_LEVEL', 'INFO'),
+        'flask_debug': os.getenv('FLASK_DEBUG', 'False'),
+    }
+
+    return {
+        'schema': EXPORT_SCHEMA_VERSION,
+        'exported_at': data.get('exported_at'),
+        'schuljahr': data.get('schuljahr') or plan.schuljahr,
+        'plan': plan.to_dict(),
+        'kurse': kurse_response,
+        'ignored_groups': list(load_ignored_groups()),
+        'last_updated': source_label,
+        'environment': environment_settings,
+        'manual_grade_item_ids': config_manager.get_manual_grade_item_ids(),
+        'recent_submission_days': config_manager.get_recent_submission_days(),
+    }
+
+
+def _process_course_data(data, plan, kurs, source_label=None):
+    """
+    Verarbeitet die Rohdaten eines einzelnen Kurses.
+
+    Args:
+        data: Kursdaten inkl. hineingereichter 'groups'
+        plan: geladener Plan (Stammdaten)
+        kurs: Kurseintrag aus plan.json
+        source_label: Anzeigename der Quelle
+
+    Returns:
+        dict: Auswertung dieses Kurses
     """
     import datetime, re as _re
 
@@ -506,6 +620,14 @@ def _process_dashboard_data(data, source_label=None):
         grade_mapping = {}
 
     assignment_details = get_assignment_details(data.get('activities_by_category', []))
+
+    # Wochenkalender: die Klassen dieses Exports können auf mehreren Schienen
+    # liegen. Für die kursweite Vorberechnung nehmen wir die erste Schiene;
+    # die schienengenaue Rechnung passiert pro Gruppe im Frontend.
+    erste_schiene = next(iter(plan.schienen), None)
+    schulwochen = plan.get_schulwochen(erste_schiene) if erste_schiene else []
+    total_weeks = len(schulwochen) or 1
+    current_week = plan_loader.aktuelle_woche(schulwochen) if schulwochen else 0
 
     groups_data = {}
     for group in data.get('groups', []):
@@ -539,7 +661,8 @@ def _process_dashboard_data(data, source_label=None):
                 try:
                     user['group'] = group_name
                     user_progress = calculate_user_progress(
-                        user, assignment_details, data.get('activities_by_category', []), 10, 40
+                        user, assignment_details, data.get('activities_by_category', []),
+                        current_week, total_weeks, plan=plan, kurs=kurs
                     )
                     groups_data[group_name]['users'].append(user_progress)
                 except Exception as e:
@@ -639,25 +762,25 @@ def _process_dashboard_data(data, source_label=None):
     )
 
     response_data = {
+        'verfuegbar': True,
+        'course_id': kurs['moodle_course_id'],
         'groups': groups_data,
         'overall_stats': overall_stats,
         'assignment_details': assignment_details,
         'categories': activities_with_status,
         'activities_by_category': activities_with_status,
         'structured_tables': structured_data,
-        'ignored_groups': list(ignored_groups),
         'grade_mapping': grade_mapping,
-        'max_schoolweeks': config_manager.get_max_schoolweeks(),
         'mitarbeitsnote_config': mitarbeitsnote_cfg,
         'manual_grade_item_ids': manual_grade_ids,
-        'course_id': config_manager.get_course_id(),
-        'last_updated': source_label,
-        'environment': environment_settings,
+        'manual_grade_items': data.get('manual_grade_items', {}),
         'recent_submissions': recent_submissions,
-        'recent_submission_days': recent_days,
+        'stunden_geplant': kurs['stundenGeplant'],
     }
 
-    logger.info(f"Response created successfully with {len(groups_data)} groups")
+    logger.info(
+        f"Kurs {kurs['moodle_course_id']} verarbeitet: {len(groups_data)} Gruppen"
+    )
     return response_data
 
 
@@ -748,8 +871,17 @@ def create_fallback_user(user, group_name):
         }
     }
 
-def calculate_user_progress(user, assignment_details, categories, current_week, total_weeks):
-    """Berechnet den Fortschritt eines Benutzers"""
+def calculate_user_progress(user, assignment_details, categories, current_week, total_weeks,
+                            plan=None, kurs=None):
+    """
+    Berechnet den Fortschritt eines Benutzers.
+
+    Args:
+        plan: geladener Plan; bestimmt über die cmid, was Pflichtaufgabe ist,
+              und liefert die Stundengewichte. Ohne Plan fällt die Erkennung
+              auf den Kategorienamen zurück (nur für Alt-Aufrufer).
+        kurs: Kurseintrag; begrenzt die Pflichtaufgaben auf diesen Kurs.
+    """
     user_data = {
         "name": user['name'],
         "group": user.get('group', 'Unbekannt'),
@@ -772,36 +904,50 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
         "manual_grades": user.get('activities', {}).get('manual_grades', [])
     }
 
-    # Nur Pflichtaufgaben berücksichtigen
-    pflicht_categories = [c for c in categories if c['category_name'] == "🎯Pflichtaufgaben"]
-
-    if not pflicht_categories:
-        return user_data
-
-    pflicht_category = pflicht_categories[0]
-    pflicht_category_id = pflicht_category['id']
-
-    # Alle Pflichtaufgaben des Benutzers sammeln
+    # Pflichtaufgaben bestimmt der Plan über die cmid, nicht der Kategoriename.
+    # Nur so kommt man an das stunden-Feld, das die Gewichtung trägt.
     user_assignments = user['activities'].get('assignments', [])
     user_quizzes = user['activities'].get('quizzes', [])
     user_checklists = user['activities'].get('checklists', [])
     user_feedbacks = user['activities'].get('feedbacks', [])
 
-    pflicht_assignments = [a for a in user_assignments if a.get('category_id') == pflicht_category_id]
-    pflicht_quizzes = [q for q in user_quizzes if q.get('category_id') == pflicht_category_id]
-    pflicht_checklists = [c for c in user_checklists if c.get('category_id') == pflicht_category_id]
-    pflicht_feedbacks = [f for f in user_feedbacks if f.get('category_id') == pflicht_category_id]
+    if plan is not None:
+        plan_cmids = {a['cmid'] for a in (kurs['aufgaben'] if kurs else plan.get_alle_aufgaben())}
+
+        def _ist_pflicht(act):
+            return str(act.get('id', '')).strip() in plan_cmids
+
+        pflicht_assignments = [a for a in user_assignments if _ist_pflicht(a)]
+        pflicht_quizzes = [q for q in user_quizzes if _ist_pflicht(q)]
+        pflicht_checklists = [c for c in user_checklists if _ist_pflicht(c)]
+        pflicht_feedbacks = [f for f in user_feedbacks if _ist_pflicht(f)]
+
+        # Nenner = alle im Plan vorgesehenen Aufgaben. Eine Aufgabe, die in
+        # Moodle (noch) fehlt, bleibt darin und gilt als nicht begonnen.
+        total_pflicht_activities = len(plan_cmids)
+    else:
+        pflicht_categories = [c for c in categories
+                              if 'Pflichtaufgaben' in c.get('category_name', '')]
+        if not pflicht_categories:
+            return user_data
+
+        pflicht_category = pflicht_categories[0]
+        pflicht_category_id = pflicht_category['id']
+
+        pflicht_assignments = [a for a in user_assignments if a.get('category_id') == pflicht_category_id]
+        pflicht_quizzes = [q for q in user_quizzes if q.get('category_id') == pflicht_category_id]
+        pflicht_checklists = [c for c in user_checklists if c.get('category_id') == pflicht_category_id]
+        pflicht_feedbacks = [f for f in user_feedbacks if f.get('category_id') == pflicht_category_id]
+
+        total_pflicht_activities = (
+            len(pflicht_category.get('assignments', [])) +
+            len(pflicht_category.get('quizzes', [])) +
+            len(pflicht_category.get('checklists', [])) +
+            len(pflicht_category.get('feedbacks', []))
+        )
 
     # Alle Pflichtaktivitäten kombinieren
     all_pflicht_activities = pflicht_assignments + pflicht_quizzes + pflicht_checklists + pflicht_feedbacks
-
-    # Gesamtanzahl aller Pflichtaufgaben in der Kategorie berechnen
-    total_pflicht_activities = (
-        len(pflicht_category.get('assignments', [])) +
-        len(pflicht_category.get('quizzes', [])) +
-        len(pflicht_category.get('checklists', [])) +
-        len(pflicht_category.get('feedbacks', []))
-    )
 
     # Bewertete und eingereichte Aktivitäten aus allen Pflichtaktivitäten
     reviewed_activities = [a for a in all_pflicht_activities if a.get('status', {}).get('status2') == "Bewertet"]
@@ -848,6 +994,33 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
     # Referenzwoche-basierte Berechnung
     expected_pflicht_for_week = math.ceil((total_pflicht_activities / total_weeks) * current_week)
     user_data['assignments']['percent_submitted_timed'] = round((submitted_count / expected_pflicht_for_week) * 100, 2) if expected_pflicht_for_week > 0 else 0
+
+    # --- Stundengewichteter Fortschritt (Quantität) ---
+    # Eine 10-Stunden-Aufgabe wiegt fünfmal so viel wie ein 2-Stunden-Quiz.
+    # Gezählte Aufgaben (oben) bleiben als Nebenangabe erhalten.
+    if plan is not None:
+        geplante = kurs['aufgaben'] if kurs else plan.get_alle_aufgaben()
+        stunden_gesamt = sum(a['stunden'] for a in geplante)
+
+        # "Abgegeben" zählt unabhängig von der Bewertung — wie im Schüler-Dashboard.
+        erledigte_ids = set()
+        for activity in all_pflicht_activities:
+            status = activity.get('status', {}) or {}
+            hat_abgabe = bool(status.get('submission_time'))
+            hat_note = status.get('grade') not in (None, '', '-', 'Nicht bewertet',
+                                                   'Nicht eingereicht', 'Keine Bewertung')
+            if hat_abgabe or hat_note or status.get('status2') == 'Bewertet':
+                erledigte_ids.add(str(activity.get('id', '')).strip())
+
+        stunden_erledigt = sum(a['stunden'] for a in geplante if a['cmid'] in erledigte_ids)
+
+        user_data['assignments']['stunden_gesamt'] = round(stunden_gesamt, 2)
+        user_data['assignments']['stunden_erledigt'] = round(stunden_erledigt, 2)
+        user_data['assignments']['percent_stunden'] = (
+            round((stunden_erledigt / stunden_gesamt) * 100, 2) if stunden_gesamt > 0 else 0
+        )
+        user_data['assignments']['aufgaben_erledigt'] = len(erledigte_ids)
+        user_data['assignments']['aufgaben_gesamt'] = len(geplante)
 
     # Checklisten verarbeiten - nur Pflicht-Checklisten (is_mandatory: true)
     checklists = user['activities'].get('checklists', [])

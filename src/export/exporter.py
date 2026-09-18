@@ -32,8 +32,13 @@ import functools
 # Sichere Konfiguration
 from config.config_manager import config_manager
 from config.logger_config import get_logger
+from src.common.plan_loader import PlanFehler, get_plan
 
 logger = get_logger('exporter')
+
+# Version des Exportformats. 2 = ein Export je Schuljahr mit mehreren Kursen
+# unter "kurse". Das Dashboard lehnt aeltere Formate ab.
+EXPORT_SCHEMA_VERSION = 2
 
 # Checklisten-Export deaktivieren (True = exportieren, False = überspringen)
 EXPORT_CHECKLISTS = False
@@ -1470,54 +1475,39 @@ def cleanup_thread_drivers():
 # Cloud upload functionality removed
 
 
-def main(test_mode=False):
-    # Startzeit des Skripts
-    start_time = time.time()
-    timer = PhaseTimer()
+class ExportValidationError(Exception):
+    """Kritische Luecke in den Daten eines Kurses — dieser Kurs wird nicht gespeichert."""
 
-    test_limit = 5  # Anzahl Items pro Typ im Testmodus
 
-    if test_mode:
-        logger.info("=" * 60)
-        logger.info(f"[TESTMODUS] Export limitiert auf {test_limit} Einträge pro Aktivitätstyp")
-        logger.info(f"[TESTMODUS] Dateiname wird 'test_output_...' sein")
-        logger.info("=" * 60)
+def export_course(driver, course_id, course_title, base_url, username, password,
+                  isheadless, waittime, test_mode, test_limit, timer):
+    """
+    Exportiert einen einzelnen Moodle-Kurs.
 
-    logger.info("Starte Mebis-Datenexport...")
-    logger.info(f"Startzeit: {datetime.now().strftime('%H:%M:%S')}")
+    Der Aufrufer haelt Driver und Login; hier wird nur der Kurskontext
+    gesetzt. Dadurch teilen sich alle Kurse eine Sitzung.
 
-    # Lade Konfiguration über config_manager
-    timer.start("Konfiguration laden")
-    credentials = config_manager.get_login_credentials()
-    username = credentials['username']
-    password = credentials['password']
+    Args:
+        driver: eingeloggter WebDriver
+        course_id: Moodle-Kurs-ID
+        course_title: Titel aus plan.json, nur fuer Logausgaben
+        timer: PhaseTimer des Gesamtlaufs
 
-    urls = config_manager.get_urls()
-    base_url = urls['base_url']
+    Returns:
+        dict mit activities_by_category, groups, manual_grade_items, ...
 
-    courses = config_manager.get_courses()
-    course_id = courses.get('course_ifa12')
+    Raises:
+        ExportValidationError: bei kritischen Luecken in den Kursdaten
+    """
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info(f"KURS: {course_title} (ID {course_id})")
+    logger.info("=" * 60)
 
-    mode_settings = config_manager.get_mode_settings()
-    isheadless = str(mode_settings['headless'])
-    waittime = mode_settings['waittime']
-    timer.stop()
-
-    timer.start("WebDriver erstellen & Login")
-    driver = create_webdriver(headless=isheadless)
+    # Kurs-Kontext setzen: die Fortschrittsseite dieses Kurses oeffnen,
+    # damit die folgenden Select-Optionen zum richtigen Kurs gehoeren.
+    timer.start("Kurskontext setzen")
     driver.get(f"{base_url}?course={course_id}")
-
-    logger.info("Führe Login durch...")
-    login(driver, username, password, waittime)
-
-    # Extrahiere den sesskey nach dem Login
-    logger.info("Extrahiere Sesskey...")
-    sesskey = get_sesskey(driver)
-    if not sesskey:
-        logger.error("Sesskey konnte nicht extrahiert werden. Überprüfe den Login-Prozess.")
-        driver.quit()
-        return
-
     timer.stop()
 
     timer.start("Gruppen & Optionen laden")
@@ -1883,8 +1873,9 @@ def main(test_mode=False):
             logger.error("  2. Die Login-Credentials in der Konfiguration")
             logger.error("  3. Die Kurs-ID in der Konfiguration")
             logger.error("  4. Die Logausgaben auf weitere Hinweise")
-            driver.quit()
-            sys.exit(1)
+            raise ExportValidationError(
+                f"Kurs {course_id}: " + "; ".join(critical_errors)
+            )
         else:
             logger.info("Nur Warnungen gefunden, Export wird fortgesetzt.")
     else:
@@ -1929,127 +1920,259 @@ def main(test_mode=False):
         logger.info("[OK] Alle Aktivitäten haben vollständige Daten")
     logger.info("-" * 60)
 
-    timer.start("Daten speichern")
-    save_start_time = time.time()
 
-    # Zeitstempel hinzufügen
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    data["course_id"] = str(course_id)
+    data["titel"] = course_title
+    return data
+
+
+def main(test_mode=False):
+    # Startzeit des Skripts
+    start_time = time.time()
+    timer = PhaseTimer()
+
+    test_limit = 5  # Anzahl Items pro Typ im Testmodus
+
     if test_mode:
-        json_filename = f'test_output_{timestamp}.json'
-    else:
-        json_filename = f'output_{timestamp}.json'
+        logger.info("=" * 60)
+        logger.info(f"[TESTMODUS] Export limitiert auf {test_limit} Eintraege pro Aktivitaetstyp")
+        logger.info(f"[TESTMODUS] Dateiname wird 'test_output_...' sein")
+        logger.info("=" * 60)
 
-    # Hole Export-Ordner aus Konfiguration
-    export_folder = config_manager.get_export_folder()
+    logger.info("Starte Mebis-Datenexport...")
+    logger.info(f"Startzeit: {datetime.now().strftime('%H:%M:%S')}")
 
-    # Make export_folder absolute if it's relative
-    if not os.path.isabs(export_folder):
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        export_folder = os.path.join(project_root, export_folder)
+    # Lade Konfiguration ueber config_manager
+    timer.start("Konfiguration laden")
+    credentials = config_manager.get_login_credentials()
+    username = credentials['username']
+    password = credentials['password']
 
-    local_filename = os.path.join(export_folder, json_filename)
+    urls = config_manager.get_urls()
+    base_url = urls['base_url']
+
+    mode_settings = config_manager.get_mode_settings()
+    isheadless = str(mode_settings['headless'])
+    waittime = mode_settings['waittime']
+
+    # Kurse kommen aus plan.json, nicht mehr aus MEBIS_COURSE_ID.
+    # Gesperrte Kurse werden uebersprungen: ihr Abruf lieferte nur eine
+    # Fehler- oder Anmeldeseite, und das ist kein Verbindungsfehler.
+    try:
+        plan = get_plan()
+    except PlanFehler as e:
+        logger.error("Planungsdatei konnte nicht geladen werden:")
+        for meldung in e.meldungen:
+            logger.error(f"  - {meldung}")
+        sys.exit(1)
+
+    alle_kurse = plan.get_kurse()
+    kurse = plan.get_kurse(nur_offene=True)
+    uebersprungen = [k for k in alle_kurse if k['gesperrt']]
+
+    logger.info(f"Plan: {plan.schuljahr}, {len(alle_kurse)} Kurse, "
+                f"{plan.stunden_gesamt:.2f} geplante Stunden")
+    for kurs in uebersprungen:
+        frei = kurs['freischaltung'].isoformat() if kurs['freischaltung'] else 'offen'
+        logger.info(f"  uebersprungen (gesperrt): {kurs['titel']} "
+                    f"(ID {kurs['moodle_course_id']}), Freischaltung {frei}")
+
+    if not kurse:
+        logger.error("Kein scrapebarer Kurs in plan.json (alle gesperrt).")
+        sys.exit(1)
+
+    timer.stop({"kurse_gesamt": len(alle_kurse), "kurse_offen": len(kurse)})
+
+    # Ein Driver und ein Login fuer alle Kurse.
+    timer.start("WebDriver erstellen & Login")
+    driver = create_webdriver(headless=isheadless)
+    driver.get(f"{base_url}?course={kurse[0]['moodle_course_id']}")
+
+    logger.info("Fuehre Login durch...")
+    login(driver, username, password, waittime)
+
+    logger.info("Extrahiere Sesskey...")
+    sesskey = get_sesskey(driver)
+    if not sesskey:
+        logger.error("Sesskey konnte nicht extrahiert werden. Ueberpruefe den Login-Prozess.")
+        driver.quit()
+        sys.exit(1)
+    timer.stop()
+
+    kurs_daten = {}
+    groups = []
+    fehlende_kurse = []
 
     try:
-        os.makedirs(export_folder, exist_ok=True)
-        json_bytes = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
-        new_file_size = len(json_bytes)
-        with open(local_filename, 'wb') as f:
-            f.write(json_bytes)
-        save_duration = time.time() - save_start_time
-        logger.info(f"Daten erfolgreich lokal gespeichert in {save_duration:.1f}s: {local_filename}")
-        save_success = True
+        for kurs in kurse:
+            course_id = kurs['moodle_course_id']
+            try:
+                daten = export_course(
+                    driver=driver,
+                    course_id=course_id,
+                    course_title=kurs['titel'],
+                    base_url=base_url,
+                    username=username,
+                    password=password,
+                    isheadless=isheadless,
+                    waittime=waittime,
+                    test_mode=test_mode,
+                    test_limit=test_limit,
+                    timer=timer,
+                )
+            except ExportValidationError as e:
+                logger.error(f"Kurs '{kurs['titel']}' uebersprungen: {e}")
+                fehlende_kurse.append(kurs['titel'])
+                continue
 
-        # =====================================================
-        # GRÖSSENVERGLEICH: Prüfe ob neuer Export kleiner ist
-        # (Nur im normalen Modus – im Testmodus überspringen)
-        # =====================================================
-        logger.info(f"Größe der neuen Datei: {new_file_size:,} bytes ({new_file_size / 1024:.1f} KB)")
+            # Die Gruppen sind kursuebergreifend dieselben Personen. Wir
+            # uebernehmen sie vom ersten Kurs, der sie liefert, und halten
+            # sie aus den Kursdaten heraus.
+            if not groups:
+                groups = daten.get("groups", [])
+            daten.pop("groups", None)
+            kurs_daten[str(course_id)] = daten
 
+        if not kurs_daten:
+            logger.error("Kein Kurs konnte exportiert werden.")
+            sys.exit(1)
+
+        data = {
+            "schema": EXPORT_SCHEMA_VERSION,
+            "exported_at": datetime.now().isoformat(timespec='seconds'),
+            "schuljahr": plan.schuljahr,
+            "kurse": kurs_daten,
+            "groups": groups,
+        }
+
+        if fehlende_kurse:
+            logger.warning(f"Unvollstaendig: {len(fehlende_kurse)} Kurs(e) fehlen "
+                           f"im Export: {', '.join(fehlende_kurse)}")
+
+        timer.start("Daten speichern")
+        save_start_time = time.time()
+
+        # Zeitstempel hinzufügen
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if test_mode:
-            logger.info("[TESTMODUS] Größenvergleich übersprungen")
+            json_filename = f'test_output_{timestamp}.json'
         else:
-            # Finde vorherige Export-Dateien
-            import glob
-            previous_exports = glob.glob(os.path.join(export_folder, 'output_*.json'))
-            previous_exports = [f for f in previous_exports if f != local_filename]  # Schließe neue Datei aus
+            json_filename = f'output_{timestamp}.json'
 
-            if previous_exports:
-                # Sortiere nach Erstellungsdatum (neueste zuerst)
-                previous_exports.sort(key=os.path.getctime, reverse=True)
-                latest_previous = previous_exports[0]
-                previous_file_size = os.path.getsize(latest_previous)
+        # Hole Export-Ordner aus Konfiguration
+        export_folder = config_manager.get_export_folder()
 
-                logger.info(f"Größe der vorherigen Datei: {previous_file_size:,} bytes ({previous_file_size / 1024:.1f} KB)")
-                logger.info(f"Vorherige Datei: {os.path.basename(latest_previous)}")
+        # Make export_folder absolute if it's relative
+        if not os.path.isabs(export_folder):
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            export_folder = os.path.join(project_root, export_folder)
 
-                # Berechne Differenz
-                size_diff = new_file_size - previous_file_size
-                size_diff_percent = (size_diff / previous_file_size) * 100 if previous_file_size > 0 else 0
+        local_filename = os.path.join(export_folder, json_filename)
 
-                logger.info(f"Differenz: {size_diff:+,} bytes ({size_diff_percent:+.1f}%)")
+        try:
+            os.makedirs(export_folder, exist_ok=True)
+            json_bytes = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+            new_file_size = len(json_bytes)
+            with open(local_filename, 'wb') as f:
+                f.write(json_bytes)
+            save_duration = time.time() - save_start_time
+            logger.info(f"Daten erfolgreich lokal gespeichert in {save_duration:.1f}s: {local_filename}")
+            save_success = True
 
-                # Warnung bei kleineren Exporten
-                if new_file_size < previous_file_size:
-                    logger.warning("=" * 60)
-                    logger.warning("WARNUNG: NEUER EXPORT IST KLEINER!")
-                    logger.warning("=" * 60)
-                    logger.warning(f"Der neue Export ist {abs(size_diff):,} bytes ({abs(size_diff_percent):.1f}%) kleiner.")
-                    logger.warning(f"Dies könnte auf einen unvollständigen Export hinweisen.")
-                    logger.warning(f"Neue Datei:      {new_file_size:>12,} bytes  {os.path.basename(local_filename)}")
-                    logger.warning(f"Vorherige Datei: {previous_file_size:>12,} bytes  {os.path.basename(latest_previous)}")
+            # =====================================================
+            # GRÖSSENVERGLEICH: Prüfe ob neuer Export kleiner ist
+            # (Nur im normalen Modus – im Testmodus überspringen)
+            # =====================================================
+            logger.info(f"Größe der neuen Datei: {new_file_size:,} bytes ({new_file_size / 1024:.1f} KB)")
 
-                    # Prüfe ob stdin interaktiv ist (Terminal vorhanden)
-                    is_interactive = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
+            if test_mode:
+                logger.info("[TESTMODUS] Größenvergleich übersprungen")
+            else:
+                # Finde vorherige Export-Dateien
+                import glob
+                previous_exports = glob.glob(os.path.join(export_folder, 'output_*.json'))
+                previous_exports = [f for f in previous_exports if f != local_filename]  # Schließe neue Datei aus
 
-                    if is_interactive:
-                        # Interaktiver Modus: Frage Benutzer
-                        logger.info("[INTERAKTIV] Sie werden um Bestätigung gebeten.")
-                        try:
-                            response = input("Möchten Sie den neuen (kleineren) Export behalten? (j/n): ").strip().lower()
-                            if response not in ['j', 'ja', 'y', 'yes']:
+                if previous_exports:
+                    # Sortiere nach Erstellungsdatum (neueste zuerst)
+                    previous_exports.sort(key=os.path.getctime, reverse=True)
+                    latest_previous = previous_exports[0]
+                    previous_file_size = os.path.getsize(latest_previous)
+
+                    logger.info(f"Größe der vorherigen Datei: {previous_file_size:,} bytes ({previous_file_size / 1024:.1f} KB)")
+                    logger.info(f"Vorherige Datei: {os.path.basename(latest_previous)}")
+
+                    # Berechne Differenz
+                    size_diff = new_file_size - previous_file_size
+                    size_diff_percent = (size_diff / previous_file_size) * 100 if previous_file_size > 0 else 0
+
+                    logger.info(f"Differenz: {size_diff:+,} bytes ({size_diff_percent:+.1f}%)")
+
+                    # Warnung bei kleineren Exporten
+                    if new_file_size < previous_file_size:
+                        logger.warning("=" * 60)
+                        logger.warning("WARNUNG: NEUER EXPORT IST KLEINER!")
+                        logger.warning("=" * 60)
+                        logger.warning(f"Der neue Export ist {abs(size_diff):,} bytes ({abs(size_diff_percent):.1f}%) kleiner.")
+                        logger.warning(f"Dies könnte auf einen unvollständigen Export hinweisen.")
+                        logger.warning(f"Neue Datei:      {new_file_size:>12,} bytes  {os.path.basename(local_filename)}")
+                        logger.warning(f"Vorherige Datei: {previous_file_size:>12,} bytes  {os.path.basename(latest_previous)}")
+
+                        # Prüfe ob stdin interaktiv ist (Terminal vorhanden)
+                        is_interactive = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
+
+                        if is_interactive:
+                            # Interaktiver Modus: Frage Benutzer
+                            logger.info("[INTERAKTIV] Sie werden um Bestätigung gebeten.")
+                            try:
+                                response = input("Möchten Sie den neuen (kleineren) Export behalten? (j/n): ").strip().lower()
+                                if response not in ['j', 'ja', 'y', 'yes']:
+                                    logger.info("[ABBRUCH] Export wird verworfen...")
+                                    os.remove(local_filename)
+                                    logger.info(f"Datei gelöscht: {local_filename}")
+                                    logger.info("Der vorherige Export bleibt erhalten.")
+                                    save_success = False
+                                else:
+                                    logger.info("[OK] Neuer Export wird behalten.")
+                            except (KeyboardInterrupt, EOFError):
                                 logger.info("[ABBRUCH] Export wird verworfen...")
+                                os.remove(local_filename)
+                                logger.info(f"Datei gelöscht: {local_filename}")
+                                save_success = False
+                        else:
+                            # Nicht-interaktiver Modus: Ablehnen wenn >1% kleiner (sollte nicht vorkommen)
+                            if abs(size_diff_percent) > 1:
+                                logger.warning("[NICHT-INTERAKTIV] Export ist kleiner als vorher – wird automatisch abgelehnt.")
+                                logger.info("[ABBRUCH] Export wird verworfen (automatisch)...")
                                 os.remove(local_filename)
                                 logger.info(f"Datei gelöscht: {local_filename}")
                                 logger.info("Der vorherige Export bleibt erhalten.")
                                 save_success = False
                             else:
-                                logger.info("[OK] Neuer Export wird behalten.")
-                        except (KeyboardInterrupt, EOFError):
-                            logger.info("[ABBRUCH] Export wird verworfen...")
-                            os.remove(local_filename)
-                            logger.info(f"Datei gelöscht: {local_filename}")
-                            save_success = False
+                                logger.info(f"[NICHT-INTERAKTIV] Kleinerer Export akzeptiert (nur {abs(size_diff_percent):.1f}% Differenz)")
+
+                        logger.info("=" * 60)
+                    elif size_diff_percent > 50:
+                        logger.info(f"Export ist signifikant größer (+{size_diff_percent:.1f}%). Dies ist normal bei mehr Daten.")
                     else:
-                        # Nicht-interaktiver Modus: Ablehnen wenn >1% kleiner (sollte nicht vorkommen)
-                        if abs(size_diff_percent) > 1:
-                            logger.warning("[NICHT-INTERAKTIV] Export ist kleiner als vorher – wird automatisch abgelehnt.")
-                            logger.info("[ABBRUCH] Export wird verworfen (automatisch)...")
-                            os.remove(local_filename)
-                            logger.info(f"Datei gelöscht: {local_filename}")
-                            logger.info("Der vorherige Export bleibt erhalten.")
-                            save_success = False
-                        else:
-                            logger.info(f"[NICHT-INTERAKTIV] Kleinerer Export akzeptiert (nur {abs(size_diff_percent):.1f}% Differenz)")
-
-                    logger.info("=" * 60)
-                elif size_diff_percent > 50:
-                    logger.info(f"Export ist signifikant größer (+{size_diff_percent:.1f}%). Dies ist normal bei mehr Daten.")
+                        logger.info("[OK] Dateigröße ist plausibel.")
                 else:
-                    logger.info("[OK] Dateigröße ist plausibel.")
-            else:
-                logger.info("Kein vorheriger Export gefunden, Größenvergleich übersprungen.")
+                    logger.info("Kein vorheriger Export gefunden, Größenvergleich übersprungen.")
 
-    except Exception as e:
-        logger.error(f"Lokale Speicherung fehlgeschlagen: {e}")
-        save_success = False
+        except Exception as e:
+            logger.error(f"Lokale Speicherung fehlgeschlagen: {e}")
+            save_success = False
 
-    timer.stop()
+        timer.stop()
 
-    # Cleanup: Schließe alle WebDriver-Instanzen
-    driver.quit()
-
-    # Cleanup aller Thread-spezifischen WebDriver
-    cleanup_thread_drivers()
+    finally:
+        # Cleanup: Schliesse alle WebDriver-Instanzen
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        # Cleanup aller Thread-spezifischen WebDriver
+        cleanup_thread_drivers()
 
     # Endzeit des Skripts
     end_time = time.time()
@@ -2057,9 +2180,19 @@ def main(test_mode=False):
     duration_minutes = duration / 60  # Umrechnung von Sekunden in Minuten
 
     # Performance-Statistiken
-    total_activities = len(activities["assignments"]) + len(activities["checklists"]) + len(activities["quizzes"])
-    total_groups = len(data["groups"])
-    total_users = sum(len(group["users"]) for group in data["groups"])
+    def _count(kurs_daten, feld):
+        return sum(
+            len(kat.get(feld, []))
+            for daten in kurs_daten.values()
+            for kat in daten.get("activities_by_category", [])
+        )
+
+    n_assignments = _count(kurs_daten, "assignments")
+    n_checklists = _count(kurs_daten, "checklists")
+    n_quizzes = _count(kurs_daten, "quizzes")
+    total_activities = n_assignments + n_checklists + n_quizzes
+    total_groups = len(groups)
+    total_users = sum(len(group["users"]) for group in groups)
 
     logger.info("")
     logger.info("=" * 60)
@@ -2072,7 +2205,10 @@ def main(test_mode=False):
         logger.error("EXPORT FEHLGESCHLAGEN ODER ABGEBROCHEN")
     logger.info("=" * 60)
     logger.info(f"Gesamtdauer: {duration_minutes:.2f} Minuten ({duration:.1f} Sekunden)")
-    logger.info(f"Aktivitaeten: {total_activities} ({len(activities['assignments'])} Assignments, {len(activities['checklists'])} Checklists, {len(activities['quizzes'])} Quizzes)")
+    logger.info(f"Kurse: {len(kurs_daten)} exportiert" + (f", {len(fehlende_kurse)} fehlgeschlagen" if fehlende_kurse else ""))
+    for cid, daten in kurs_daten.items():
+        logger.info(f"  - {daten.get('titel', cid)} (ID {cid})")
+    logger.info(f"Aktivitaeten: {total_activities} ({n_assignments} Assignments, {n_checklists} Checklists, {n_quizzes} Quizzes)")
     logger.info(f"Gruppen: {total_groups} mit insgesamt {total_users} Benutzern")
     if total_activities > 0:
         logger.info(f"Durchschnitt: {(duration / total_activities):.1f}s pro Aktivitaet")
