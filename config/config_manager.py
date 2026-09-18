@@ -110,10 +110,34 @@ class ConfigManager:
         """
         Holt die Mebis Course ID aus der Umgebungsvariable.
 
+        DEPRECATED: Die Kurse stehen seit 2026/27 in plan.json. Nur noch als
+        Rückfallebene für Skripte, die noch nicht auf den Plan umgestellt sind.
+
         Returns:
             Course ID als String
         """
         return os.getenv('MEBIS_COURSE_ID', '')
+
+    def get_plan_json_path(self) -> str:
+        """
+        Holt den Pfad zur Planungsdatei plan.json.
+
+        Die Datei ist die gemeinsame Stammdatenquelle von Schüler- und
+        Lehrkräfte-Dashboard: Kurse, Pflichtaufgaben, geplante Stunden,
+        Schulwochenkalender und Notenschlüssel.
+
+        Returns:
+            Pfad zur plan.json
+        """
+        pfad = os.getenv('PLAN_JSON_PATH', '')
+        if pfad:
+            return os.path.expandvars(os.path.expanduser(pfad))
+
+        # Default: Nachbar-Repo des Schüler-Dashboards
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.normpath(os.path.join(
+            project_root, '..', 'AEuP12', 'BYCS_Lernplattform_Dashboard', 'plan.json'
+        ))
 
     def get_ignored_groups(self) -> set:
         """
