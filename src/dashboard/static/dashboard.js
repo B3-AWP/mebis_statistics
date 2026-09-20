@@ -2084,17 +2084,24 @@ function updateReferenceWeek(week) {
     updateDashboard();
 }
 
-// Auf aktuelle Woche setzen
+// Auf aktuelle Woche setzen — maßgeblich ist der Blockwochen-Kalender
+// der Schiene, nicht der Abstand zum Schuljahresbeginn: Blöcke liegen weit
+// auseinander, eine Hochrechnung aus dem Kalenderdatum wäre immer falsch.
 function setToCurrentWeek() {
     const slider = document.getElementById('referenceWeekSlider');
-    const currentDate = new Date();
-    // Einfache Berechnung der Schulwoche (könnte verfeinert werden)
-    const schoolStart = new Date(currentDate.getFullYear(), 8, 1); // 1. September
-    const weeksDiff = Math.ceil((currentDate - schoolStart) / (7 * 24 * 60 * 60 * 1000));
-    const calculatedWeek = Math.max(1, Math.min(parseInt(slider.max), weeksDiff));
+    if (!slider) return;
 
-    slider.value = calculatedWeek;
-    updateReferenceWeek(calculatedWeek);
+    const track = getTrackForGroup(currentGroup) || (plan && Object.keys(plan.schienen)[0]);
+    const min = parseInt(slider.min);
+    const max = parseInt(slider.max);
+
+    // Dieselbe Klammerung wie in updateWeekSlider(): liegt die laufende
+    // Woche außerhalb des angezeigten Halbjahres, gilt dessen Ende.
+    const jetzt = getCurrentReferenceWeekForTrack(track);
+    const wert = (jetzt >= min && jetzt <= max) ? jetzt : max;
+
+    slider.value = wert;
+    updateReferenceWeek(wert);
 }
 
 // Checklisten-Tab laden

@@ -85,6 +85,22 @@ Moodle fehlt, bleibt darin und gilt als nicht begonnen.
 - `group_utils.py`: Klassenkürzel per Muster statt als Präfix
 - `exporter.py`: Quiz-Index als dritte Aktivitätsquelle
 
+### 🐛 Bugfixes
+
+#### „Aktuelle Woche“ folgt wieder dem Blockwochen-Kalender
+Der Button im Wochen-Slider rechnete die Schulwoche als
+`ceil((heute − 1. September) / 7 Tage)` — eine Kalendernäherung, die den
+Blockwochen-Kalender ignorierte. Am 20.09.2026 ergab das Woche 3, obwohl
+auf Schiene 3 gerade Woche 1 lief und auf Schiene 1 noch gar kein Block
+begonnen hatte. Da Blöcke weit auseinanderliegen, war der Wert praktisch
+immer falsch.
+
+Die Schaltfläche nutzt jetzt `getCurrentReferenceWeekForTrack()` —
+dieselbe Funktion, mit der `updateWeekSlider()` den Slider beim Laden
+stellt — samt derselben Klammerung auf das angezeigte Halbjahr. Damit
+führt der Button zurück auf genau den Zustand, den das Dashboard beim
+Öffnen zeigt, und rechnet schienengenau.
+
 ### ✅ Im Betrieb erprobt
 
 Erster Vollexport am 18.09.2026 gegen Kurs 2491549: 6:41 Minuten,
