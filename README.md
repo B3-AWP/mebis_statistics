@@ -107,8 +107,7 @@ mebis_statistics/
 │   │   ├── backend.py
 │   │   └── static/              # HTML/JS/CSS
 │   ├── export/               # Export-Module
-│   │   ├── exporter.py
-│   │   └── pdf_multi.py
+│   │   └── exporter.py
 │   ├── report/               # Schüler-Übersichtsberichte
 │   │   └── report_generator.py
 │   └── exam/                 # Exam-Scraper & PDF-Generator
