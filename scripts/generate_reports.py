@@ -27,7 +27,7 @@ def main():
         '--cutoff-date',
         metavar='YYYY-MM-DD',
         default=None,
-        help='Referenztermin für Pflichtaufgaben-Filter (überschreibt CLASS_TO_TRACK). '
+        help='Referenztermin für Pflichtaufgaben-Filter. '
              'Nur Abgaben NACH diesem Datum werden angezeigt.'
     )
     args = parser.parse_args()

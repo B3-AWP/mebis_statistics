@@ -1,60 +1,142 @@
 # Dokumentation für die Mebis Statistik
 
 ## Inhaltsverzeichnis
-- [Dokumentation für die Mebis Statistik](#dokumentation-für-die-mebis-statistik)
-  - [Inhaltsverzeichnis](#inhaltsverzeichnis)
-  - [Idee](#idee)
-  - [Projektstruktur](#projektstruktur)
-  - [Voraussetzungen](#voraussetzungen)
-  - [Konfiguration](#konfiguration)
-  - [Verwendung](#verwendung)
+- [Idee](#idee)
+- [Wie das Dashboard rechnet](#wie-das-dashboard-rechnet)
+- [Projektstruktur](#projektstruktur)
+- [Voraussetzungen](#voraussetzungen)
+- [Konfiguration](#konfiguration)
+- [Verwendung](#verwendung)
+- [Features](#features)
+- [Troubleshooting](#troubleshooting)
 
 ## Idee
 Dieses Projekt bietet mehrere Tools für die Arbeit mit Mebis-Kursen:
-- **Dashboard**: Visualisiert Checklisten und Aufgaben eines Mebis-Kurses
+- **Dashboard**: Visualisiert den Lernfortschritt einer Klasse
 - **Exam Scraper**: Scrapt Quiz-Daten und generiert individuelle PDFs für Schüler
+- **Report-Generator**: Erstellt Schüler-Übersichtsberichte als PDF
 - **Export**: Exportiert Kursdaten als JSON
+
+---
+
+## Wie das Dashboard rechnet
+
+Zwei Entscheidungen prägen alles Weitere. Wer nur die Bedienung sucht,
+kann diesen Abschnitt überspringen — wer die Zahlen verstehen will, nicht.
+
+### `plan.json` ist die Stammdatenquelle
+
+Kurse, Pflichtaufgaben, geplante Stunden, Schulwochenkalender und
+Notenschlüssel stehen **nicht** in der `.env`, sondern in der Planungsdatei
+`plan.json`. Sie wird mit dem Schüler-Dashboard geteilt, damit beide Seiten
+dieselben Zahlen zeigen.
+
+Daraus folgt: **Der Plan bestimmt, was zählt.**
+
+- Eine Aufgabe ist genau dann Pflichtaufgabe, wenn ihre `cmid` im Plan steht —
+  nicht, weil sie in einer bestimmten Moodle-Kategorie liegt.
+- Eine Aufgabe, die im Plan steht, in Moodle aber fehlt, bleibt im Nenner und
+  gilt als nicht begonnen. Das hält das Soll stabil, statt es bei jeder
+  Kursänderung springen zu lassen. Das Dashboard **warnt beim Laden**, wenn
+  solche Aufgaben auftauchen — dann ist zu prüfen, ob die `cmid` noch stimmt.
+- Eine Aufgabe, die in Moodle existiert, aber nicht im Plan steht, zählt nicht
+  für den Fortschritt.
+
+### Quantität ist stundengewichtet
+
+```
+Ist   = Σ Stunden abgegebener Aufgaben / Σ Stunden aller Aufgaben
+Soll  = Σ Stunden der Blockwochen 1..w / Σ Stunden aller Wochen
+Delta = (Ist − Soll) × Σ Stunden gesamt        → in Unterrichtsstunden
+```
+
+Eine 10-Stunden-Aufgabe wiegt fünfmal so viel wie ein 2-Stunden-Quiz. Beim
+bloßen Zählen wären beide gleich viel wert — mit teils umgekehrtem Ergebnis:
+
+| | Aufgaben | Stunden | gezählt | gewichtet |
+|---|---|---|---|---|
+| Person A | 1 | 10 h | 7,1 % | **17,1 %** |
+| Person B | 4 | 9 h | 28,6 % | **15,4 %** |
+
+Das **Soll folgt dem Wochenkalender**, nicht der Wochennummer: Woche 1 hat
+10 Stunden, die übrigen 14. Eine lineare Näherung (`Woche / Anzahl Wochen`)
+wäre schon innerhalb eines Halbjahres falsch.
+
+**Qualität bleibt bewusst ungewichtet** — der schlichte Durchschnitt der
+Bewertungen. Eine gut gemachte kleine Aufgabe ist so viel wert wie eine gut
+gemachte große. Nur die Quantität ist stundengewichtet.
+
+Die Formeln sind aus `js/bilanz.js` des Schüler-Dashboards portiert und per
+Test gegen dessen Werte abgesichert (`tests/test_plan_loader.py`).
+
+### Halbjahre sind Kurse
+
+Das Schuljahr besteht aus zwei Moodle-Kursen mit je eigener Aufgabenliste.
+Der Halbjahr-Umschalter im Dashboard wählt einen Kurs — keine Notenstufe.
+Ein noch gesperrter Kurs erscheint als deaktivierter Tab mit Freischaltdatum;
+der Exporter überspringt ihn.
+
+Je Halbjahr gibt es **eine** Mitarbeitsnote aus Quantität und Qualität.
+
+### Klassen statt Teams
+
+Gruppen sind Klassen; eine Team-Ebene gibt es nicht mehr. Die Moodle-Namen
+kommen in unterschiedlicher Form (`K - IFA12A (6072)`, `IFA12A`); das
+Klassenkürzel wird per Muster daraus gezogen. Klassen, die nicht in
+`plan.json` stehen — im Kurs liegen auch fremde —, werden übersprungen.
+
+---
 
 ## Projektstruktur
 
 ```
 mebis_statistics/
 ├── scripts/               # CLI Entry Points
-│   ├── scrape_exams.py       # Exam-Scraper starten
-│   ├── generate_pdfs.py      # PDF-Generator starten
 │   ├── export_data.py        # Daten-Export starten
 │   ├── start_dashboard.py    # Dashboard starten
+│   ├── generate_reports.py   # Schüler-Übersichtsberichte
+│   ├── scrape_exams.py       # Exam-Scraper starten
+│   ├── generate_pdfs.py      # PDF-Generator starten
 │   └── *.bat/*.cmd           # Windows-Shortcuts
 │
 ├── src/                   # Hauptcode
-│   ├── exam/                 # Exam-Scraper & PDF-Generator
-│   │   ├── scraper.py
-│   │   ├── pdf_generator.py
-│   │   ├── utils.py
-│   │   └── README.md
+│   ├── common/               # Gemeinsame Utils
+│   │   ├── plan_loader.py       # plan.json laden, Wochen-/Stundenrechnung
+│   │   └── group_utils.py       # Klassenkürzel aus Gruppennamen
 │   ├── dashboard/            # Dashboard-Module
 │   │   ├── backend.py
-│   │   └── static/          # HTML/JS/CSS
+│   │   └── static/              # HTML/JS/CSS
 │   ├── export/               # Export-Module
 │   │   ├── exporter.py
 │   │   └── pdf_multi.py
-│   └── common/               # Gemeinsame Utils
-│       └── group_utils.py
+│   ├── report/               # Schüler-Übersichtsberichte
+│   │   └── report_generator.py
+│   └── exam/                 # Exam-Scraper & PDF-Generator
+│       ├── scraper.py
+│       ├── pdf_generator.py
+│       ├── utils.py
+│       └── README.md
 │
 ├── data/                  # Alle Daten (nicht in Git)
 │   ├── quiz_data/            # Gescrapte Quiz-Daten
-│   ├── export/               # JSON-Export-Dateien
-│   └── LNW/                  # Generierte PDFs
+│   ├── LNW/                  # Generierte Quiz-PDFs
+│   └── report/               # Schüler-Übersichtsberichte
 │
 ├── config/                # Konfiguration
-│   ├── .env                  # Credentials (nicht in Git)
-│   ├── .env.template         # Vorlage
+│   ├── .env                  # Credentials & Betrieb (nicht in Git)
 │   ├── config_manager.py
 │   └── logger_config.py
 │
 ├── tests/                 # Tests
+│   ├── test_plan_loader.py       # Plan, Wochen, Stunden (Python)
+│   ├── test_frontend.js          # Rechenpfade des Dashboards (Node)
+│   ├── make_fixture.py           # Testdaten aus der echten plan.json
+│   └── run_refactoring_tests.sh  # alle vier Stufen
 └── venv/                  # Python Virtual Environment
 ```
+
+Die Planungsdatei `plan.json` liegt **außerhalb** dieses Repos, im
+Schüler-Dashboard (`../AEuP12/BYCS_Lernplattform_Dashboard/plan.json`).
 
 ## Voraussetzungen
 1. Python Virtual Environment erstellen:
@@ -71,68 +153,75 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
+4. Zugriff auf `plan.json` sicherstellen (siehe Konfiguration).
+
 ## Konfiguration
 
-Die Anwendung nutzt **Environment Variables** für die Konfiguration. Diese können auf zwei Wegen bereitgestellt werden:
+Die Konfiguration verteilt sich auf zwei Dateien mit klarer Trennung:
 
-1. **`.env` Datei** (empfohlen für lokale Entwicklung)
-2. **System-Umgebungsvariablen** (empfohlen für Server/Produktion)
+| Datei | Inhalt |
+|---|---|
+| `plan.json` | **Stammdaten**: Kurse, Aufgaben, Stunden, Schulwochen, Klassen, Notenschlüssel |
+| `config/.env` | **Betrieb**: Zugangsdaten, Pfade, Flask, Selenium |
 
-### 1. Erstelle die .env Datei
+Kurs- oder Aufgaben-IDs stehen also **nicht** mehr in der `.env`.
 
-```bash
-cp config/.env.template config/.env
-```
+### 1. `.env` anlegen
 
-Für Windows:
-```cmd
-copy config\.env.template config\.env
-```
-
-**Alternative: System-Umgebungsvariablen**
-
-Statt einer `.env` Datei können die Werte auch als System-Umgebungsvariablen gesetzt werden. Dies ist besonders für Server-Deployments oder CI/CD-Pipelines nützlich.
-
-### 2. Pflichtfelder konfigurieren
-
-Öffne `config/.env` und passe folgende **ERFORDERLICHE** Werte an:
+Die Datei `config/.env` ist nicht in Git (sie enthält Zugangsdaten). Minimal
+nötig sind:
 
 ```env
-# Mebis Login-Daten
+# Mebis Login-Daten (ERFORDERLICH)
 MEBIS_USERNAME=dein_mebis_username
 MEBIS_PASSWORD=dein_mebis_passwort
 
-# Kurs-ID (findest du in der Mebis-Kurs-URL)
-MEBIS_COURSE_ID=deine_kurs_id
-
-# Export-Ordner für JSON-Dateien
+# Export-Ordner für die JSON-Dateien
 EXPORT_FOLDER=data/export
 ```
 
 **Hinweis zum Export-Ordner:**
-- Standard ist `data/export` (wird automatisch erstellt)
-- Kann ein absoluter Pfad sein (z.B. `G:\Meine Ablage\Exports`)
+- Kann ein absoluter Pfad sein (z.B. `G:\Meine Ablage\Exports_2026_27`)
 - Bei relativem Pfad wird vom Projekt-Root ausgegangen
+- Wird bei Bedarf automatisch erstellt
+- Pro Schuljahr ein eigener Ordner erspart Verwechslungen
 
-### 3. Optionale Konfigurationen
+### 2. Pfad zur Planungsdatei
 
-Alle verfügbaren Einstellungen sind in `config/.env.template` ausführlich dokumentiert:
+Ohne Angabe wird das Nachbar-Repo des Schüler-Dashboards erwartet:
+`../AEuP12/BYCS_Lernplattform_Dashboard/plan.json`
 
-- **Flask Environment** - `FLASK_ENV=production` oder `development`
-- **Logging Level** - `LOG_LEVEL=INFO` (DEBUG/INFO/WARN/ERROR)
-- **Selenium Modi** - `MODE_HEADLESS=True`, `MODE_WAITTIME=1`
-- **Export-Ordner** - `EXPORT_FOLDER=export` (beliebiger Pfad)
-- **Ignorierte Gruppen** - `MEBIS_IGNORED_GROUPS=IT_Lehrkraft,Test Team`
-- **Grade Mapping** - JSON-Format für Bewertungsstufen
-- **Server-Einstellungen** - `FLASK_HOST`, `FLASK_PORT`
+Liegt die Datei woanders:
+
+```env
+PLAN_JSON_PATH=C:\Pfad\zu\plan.json
+```
+
+Eine lokale Kopie ist bewusst nicht vorgesehen — zwei Wahrheiten wären genau
+das Problem, das die gemeinsame Datei löst. Wer dort die `stunden` ändert,
+verschiebt damit auch die Auswertung im Lehrkräfte-Dashboard.
+
+### 3. Optionale Einstellungen
+
+```env
+FLASK_ENV=production          # oder development
+FLASK_PORT=5555
+LOG_LEVEL=INFO                # DEBUG/INFO/WARN/ERROR
+MODE_HEADLESS=True            # Browser beim Export unsichtbar
+MODE_WAITTIME=5               # Wartezeit in Sekunden
+MEBIS_IGNORED_GROUPS=IT_Lehrkraft, Verkuerzt
+RECENT_SUBMISSION_DAYS=5      # Zeitfenster "Letzte Abgaben"
+INACTIVE_THRESHOLD_DAYS=2     # ab wann eine Klasse als inaktiv gilt
+GRADE_MAPPING={"0": "* Nicht akzeptabel", "70": "** Verbesserungsbedarf", "90": "*** Solide Umsetzung", "100": "**** Exzellent"}
+```
 
 ### 4. Optionale Dateien
 
-- `config/exclude_names.txt` - Liste mit ausgeschlossenen Benutzernamen (ein Name pro Zeile)
+- `config/exclude_names.txt` — ausgeschlossene Benutzernamen, ein Name pro Zeile
 
 ## Verwendung
 
-**WICHTIG:** Vor der ersten Verwendung müssen Daten aus Mebis exportiert werden!
+**WICHTIG:** Vor der ersten Verwendung müssen Daten aus Mebis exportiert werden.
 
 ### 1. Daten exportieren (erforderlich!)
 
@@ -146,14 +235,29 @@ python scripts/export_data.py
 scripts\export_data.cmd
 ```
 
-Dies lädt alle Daten aus Mebis und speichert sie als JSON-Datei im konfigurierten `EXPORT_FOLDER` (Standard: `data/export`).
+Der Export läuft über alle nicht gesperrten Kurse aus `plan.json` und legt
+eine JSON-Datei im `EXPORT_FOLDER` ab. Dauer: etwa 6–7 Minuten je Kurs bei
+~50 Aktivitäten und ~65 Personen.
+
+Zum Ausprobieren gibt es einen Testmodus mit 5 Aktivitäten je Typ:
+
+```bash
+python scripts/export_data.py --test
+```
+
+**Woher die Aktivitäten kommen** (drei Quellen, in dieser Reihenfolge):
+1. Fortschrittsseite (`report/progress`) — nur Aktivitäten mit aktivierter
+   Abschlussverfolgung
+2. Notenbuch — ergänzt dort fehlende Elemente
+3. Quiz-Index (`mod/quiz/index.php`) — kennt **alle** Quizze des Kurses
+
+Quelle 3 ist nötig, weil Quizze ohne Abschlussverfolgung sonst unsichtbar
+blieben und ihre Stunden im Soll fehlten.
 
 **Abgabedatum-Ermittlung (Priorität):**
 1. Feedback-Datum aus dem Singleview-Bewertungsbericht (wenn eingetragen)
 2. „Zuletzt geändert (Abgabe)"-Datum der Bewertungsseite
 3. Bewertungshistorie (Fallback für manuell eingetragene Noten)
-
-⚠️ **Ohne diesen Schritt kann das Dashboard nicht gestartet werden!**
 
 ### 2. Dashboard starten
 
@@ -167,147 +271,159 @@ python scripts/start_dashboard.py
 scripts\start_dashboard.bat
 ```
 
-Dieser Befehl:
-- Prüft die Konfiguration (`.env` Datei)
-- Validiert Login-Credentials
-- Prüft ob Export-Daten vorhanden sind
-- Startet das Flask-Dashboard
-- Öffnet automatisch den Browser
+Dieser Befehl prüft die Konfiguration, validiert die Login-Credentials,
+kontrolliert ob Export-Daten vorhanden sind, startet Flask und öffnet den
+Browser. Erreichbar unter `http://localhost:5555` (bzw. `FLASK_PORT`).
 
-Das Dashboard ist dann erreichbar unter: `http://localhost:5000`
+**Tipp:** Den Export kannst du auch direkt aus dem Dashboard starten —
+Button **„Aktualisieren"** oben.
 
-**Tipp:** Du kannst den Datenexport auch direkt aus dem Dashboard starten! Klicke auf den **"Aktualisieren"**-Button oben im Dashboard. Der Export läuft dann im Hintergrund und zeigt den Fortschritt an.
-
-### 3. Exam-Scraper & PDF-Generator
-
-Zum Scrapen von Quizzes und Erstellen von PDFs siehe die detaillierte Dokumentation: [src/exam/README.md](src/exam/README.md)
-
-**Schnellstart:**
+### 3. Schüler-Übersichtsberichte
 
 ```bash
-# Quizzes scrapen (3 parallele Worker, ~3x schneller)
+python scripts/generate_reports.py
+python scripts/generate_reports.py --cutoff-date 2026-12-10
+```
+
+Erzeugt je Schüler ein PDF unter `data/report/{Klasse}/`, dazu Übersichten
+je Pflichtaufgabe. `--cutoff-date` blendet Abgaben vor dem Stichtag aus.
+
+### 4. Exam-Scraper & PDF-Generator
+
+Details: [src/exam/README.md](src/exam/README.md)
+
+```bash
+# Quizzes scrapen (3 parallele Worker)
 python scripts/scrape_exams.py
 
-# Schneller scrapen mit mehr Workers
+# Schneller mit mehr Workers
 python scripts/scrape_exams.py --max-workers 5
 
 # PDFs generieren (nur falsche Antworten)
 python scripts/generate_pdfs.py --only-incorrect
 ```
 
-**Neue Features (November 2025):**
-- ⚡ **Paralleles Scraping**: 3x schneller durch Multi-Threading (3 parallele Browser)
-- 📸 **Multianswer-Screenshots**: Automatische Screenshots für Lückentext-Fragen
-- 🎯 **Intelligente Filterung**: Bei "nur falsche Fragen" werden auch richtige Teilantworten ausgeblendet
-- 📝 **Verbesserte Kommentare**: HTML-Parsing für strukturierte Darstellung
-- ⏱️ **Zeitanzeige**: Gesamtdauer wird am Ende angezeigt
-
-PDFs werden im Verzeichnis `data/LNW/` nach Gruppenpräfix und Quiz organisiert.
+PDFs landen in `data/LNW/`, nach Klasse und Quiz sortiert.
 
 ### Workflow
 
 ```
-1. Konfiguration erstellen (config/.env)
+1. config/.env anlegen, Zugriff auf plan.json sicherstellen
    ↓
 2. Daten exportieren (scripts/export_data.py)
    ↓
 3. Dashboard starten (scripts/start_dashboard.py)
    ↓
-4. Dashboard im Browser nutzen (http://localhost:5000)
+4. Im Browser nutzen (http://localhost:5555)
    ↓
-5. (Optional) Daten aktualisieren über "Aktualisieren"-Button im Dashboard
+5. Später: "Aktualisieren"-Button im Dashboard
 ```
 
-**Hinweis:** Du musst Schritt 2 nur beim ersten Mal manuell ausführen. Danach kannst du Daten bequem über den "Aktualisieren"-Button im Dashboard aktualisieren.
+### Tests
+
+```bash
+bash tests/run_refactoring_tests.sh
+```
+
+Prüft in vier Stufen: `plan_loader` samt Abgleich mit der JS-Referenz des
+Schüler-Dashboards, Testdatenerzeugung, Backend-API und die Rechenpfade des
+Frontends. Für Stufe 4 wird Node benötigt.
 
 ## Features
 
-### Datenexport über Dashboard
+### Datenexport über das Dashboard
 
-Der Export kann direkt aus dem Dashboard heraus gestartet werden:
+1. Button **„Aktualisieren"** oben im Dashboard
+2. Fortschritts-Panel erscheint am rechten Rand
+3. Live-Anzeige von Prozent, verarbeiteten Aktivitäten und Restzeit
+4. Nach Abschluss lädt das Dashboard die neuen Daten
 
-1. Klicke auf den **"Aktualisieren"**-Button oben im Dashboard
-2. Ein Fortschritts-Panel erscheint am rechten Bildschirmrand
-3. Der Export zeigt live an:
-   - Fortschritt in Prozent
-   - Anzahl verarbeiteter Assignments, Checklists und Quizzes
-   - Geschätzte Restzeit
-4. Nach Abschluss wird das Dashboard automatisch mit den neuen Daten aktualisiert
+Der Export läuft im Hintergrund (Headless), das Dashboard bleibt bedienbar.
 
-**Vorteile:**
-- Kein manuelles Ausführen von exportData.py nötig
-- Live-Fortschrittsanzeige
-- Export läuft im Hintergrund (Headless-Mode)
-- Dashboard bleibt bedienbar während Export läuft
+### Halbjahr-Umschalter
+
+Die Tabs wählen den auszuwertenden Kurs. „Gesamt" erscheint erst, wenn mehr
+als ein Kurs Daten hat; die Gewichtung der Halbjahre ergibt sich dann von
+selbst aus der Stundensumme. Der Wochen-Slider folgt dem Zeitraum des
+aktiven Halbjahres.
+
+Die Schienen starten zu unterschiedlichen Terminen — mit der Klasse ändert
+sich daher auch die laufende Woche.
 
 ### Ignorierte Gruppen
 
-Bestimmte Gruppen können vom Dashboard und Exam-Scraper ausgeschlossen werden.
-
-**Konfiguration in `config/.env`:**
 ```env
-MEBIS_IGNORED_GROUPS=IT_Lehrkraft,Test Team,Demo Gruppe
+MEBIS_IGNORED_GROUPS=IT_Lehrkraft, Verkuerzt
 ```
 
-**Filterung:**
-- **Dashboard**: Ignorierte Gruppen erscheinen nicht in der Anzeige
-- **Exam-Scraper**: Ignorierte Gruppen werden nicht zur Auswahl angeboten
-- **Data Export**: Gruppen werden weiterhin in den Export-Daten erfasst (vollständige Daten)
+Unabhängig davon werden Klassen ohne Eintrag in `plan.json` ohnehin nicht
+ausgewertet. Die `.env`-Liste ist für Gruppen gedacht, die ein Klassenkürzel
+tragen, aber trotzdem nicht erscheinen sollen.
 
 ### Ausgeschlossene Benutzer
 
-Einzelne Benutzer können von der Statistik ausgeschlossen werden.
+`config/exclude_names.txt`, ein Name pro Zeile:
 
-**Datei:** `config/exclude_names.txt`
 ```
 Max Mustermann
 Test User
-Demo Account
 ```
-
-Ein Name pro Zeile. Diese Benutzer erscheinen nicht im Dashboard.
 
 ### Bewertungsstufen anpassen
 
-Das Grade Mapping kann in der `.env` Datei angepasst werden:
-
 ```env
-GRADE_MAPPING={"0": "* Nicht akzeptabel", "70": "** Verbesserungsbedarf", "100": "*** Solide Umsetzung", "130": "**** Exzellent"}
+GRADE_MAPPING={"0": "* Nicht akzeptabel", "70": "** Verbesserungsbedarf", "90": "*** Solide Umsetzung", "100": "**** Exzellent"}
 ```
 
-Format: JSON mit Punktzahl als Key (String) und Bewertungstext als Value.
+JSON mit Punktzahl als Key (String) und Bewertungstext als Value. Die
+Prozentwerte der Skala stehen zusätzlich in `plan.json` (`skalen.sterne4`).
 
 ## Troubleshooting
 
-**Problem: "No export files found!"**
-- Lösung: Führe zuerst `python scripts/export_data.py` aus um Daten zu exportieren
-- Prüfe ob der `EXPORT_FOLDER` Pfad in `.env` korrekt ist (Standard: `data/export`)
+**„Planungsdatei nicht gefunden"**
+- `plan.json` liegt nicht am erwarteten Ort. Pfad per `PLAN_JSON_PATH` setzen
+  oder das Schüler-Dashboard-Repo danebenlegen.
 
-**Problem: "Login credentials not found"**
-- Lösung: Prüfe ob `MEBIS_USERNAME` und `MEBIS_PASSWORD` in `config/.env` gesetzt sind
+**„Export hat Schema X, erwartet wird 2"**
+- Die Datei stammt aus dem Vorjahr. Altformate werden bewusst nicht gelesen —
+  einen neuen Export erzeugen.
 
-**Problem: "Export folder not found"**
-- Lösung: Erstelle den Ordner oder passe `EXPORT_FOLDER` in `.env` an
+**Warnung „N Aufgabe(n) aus plan.json fehlen im Kurs"**
+- Die genannten `cmid`s sind in Moodle nicht auffindbar. Entweder die Aufgabe
+  ist noch nicht angelegt (dann ist alles korrekt, sie zählt als nicht
+  begonnen), oder die `cmid` im Plan ist veraltet. Die Meldung nennt Stunden
+  und Anteil am Soll, damit die Tragweite sichtbar ist.
 
-**Problem: Dashboard zeigt veraltete Daten**
-- Lösung: Klicke auf den "Aktualisieren"-Button im Dashboard oder führe `python scripts/export_data.py` manuell aus
+**Eine Klasse fehlt im Dashboard**
+- Steht sie in `klassenZuSchiene` in `plan.json`? Ohne Eintrag gibt es keine
+  Schiene und damit kein Soll — die Klasse wird übersprungen.
+- Steht sie in `MEBIS_IGNORED_GROUPS`?
 
-**Problem: Export-Button im Dashboard funktioniert nicht**
-- Lösung 1: Prüfe die Browser-Konsole auf Fehlermeldungen
-- Lösung 2: Erhöhe `MODE_WAITTIME` in `.env` auf 5 oder 10 Sekunden
-- Lösung 3: Setze `MODE_HEADLESS=False` in `.env` um zu sehen, was passiert
-- Lösung 4: Prüfe die Logs in der Konsole wo `scripts/start_dashboard.py` läuft
+**Ein Quiz fehlt in der Auswertung**
+- Wahrscheinlich ohne aktivierte Abschlussverfolgung. Der Exporter fängt das
+  über den Quiz-Index ab; falls es dennoch fehlt, prüfen ob die `cmid` im Plan
+  mit der in der Kurs-URL übereinstimmt.
 
-**Problem: ImportError beim Starten**
-- Lösung: Stelle sicher, dass du dich im Projekt-Root befindest (nicht in `scripts/`)
-- Die Scripts verwenden relative Imports und müssen vom Root ausgeführt werden
+**„No export files found!"**
+- Erst `python scripts/export_data.py` ausführen. `EXPORT_FOLDER` prüfen.
 
-**Problem: Exam-Scraper ist langsam**
-- Lösung 1: Erhöhe die Anzahl paralleler Workers: `python scripts/scrape_exams.py --max-workers 5`
-- Lösung 2: Standard ist 3 Worker, maximal empfohlen: 5 Worker (erfordert mehr RAM)
-- Lösung 3: Bei wenig RAM: Reduziere auf 1-2 Worker: `--max-workers 1`
+**„Login credentials not found"**
+- `MEBIS_USERNAME` und `MEBIS_PASSWORD` in `config/.env` setzen.
 
-**Problem: Screenshots sind abgeschnitten oder fehlen**
-- Lösung 1: Die Screenshot-Funktionalität wurde verbessert (November 2025)
-- Lösung 2: Screenshots nutzen automatisch Viewport-Prüfung und Fallback-Strategien
-- Lösung 3: Bei weiterhin fehlenden Screenshots: Setze `MODE_HEADLESS=False` und prüfe den Browser
+**Dashboard zeigt veraltete Daten**
+- „Aktualisieren" im Dashboard oder `python scripts/export_data.py`.
+
+**Export-Button funktioniert nicht**
+- Browser-Konsole prüfen
+- `MODE_WAITTIME` auf 5–10 erhöhen
+- `MODE_HEADLESS=False` setzen, um zuzusehen
+- Logs in der Konsole prüfen, wo `start_dashboard.py` läuft
+
+**ImportError beim Starten**
+- Vom Projekt-Root ausführen, nicht aus `scripts/`.
+
+**Exam-Scraper ist langsam**
+- `--max-workers 5` (mehr RAM nötig), Standard ist 3, bei wenig RAM 1–2.
+
+**Screenshots fehlen oder sind abgeschnitten**
+- `MODE_HEADLESS=False` setzen und den Browser beobachten.

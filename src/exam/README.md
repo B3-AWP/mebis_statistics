@@ -80,21 +80,25 @@ steht in
 • ❌ <title>Meine Seite> - fehlendes öffnendes < beim schließenden Tag
 ```
 
-### 🗂️ Gruppen-basierte Organisation (NEU - November 2025)
-- **Struktur geändert**: Jetzt `quiz_data/{group_prefix}/{quiz_name}/` statt `{quiz_name}/{prefix}/`
-- **Vorteil**: Alle Quizzes einer Gruppe sind in einem Ordner
-- **Mehrere Teams**: Alle Teams eines Präfixes in einem Ordner
+### 🗂️ Klassen-basierte Organisation
+- **Struktur**: `quiz_data/{klasse}/{quiz_name}/`
+- **Vorteil**: Alle Quizzes einer Klasse liegen in einem Ordner
+- **Mehrere Moodle-Gruppen** derselben Klasse landen im selben Ordner;
+  die Gruppen-ID bleibt im Dateinamen
 - **Beispiel**:
   ```
   quiz_data/
-  └── IFA12A/                    # Gruppenpräfix
+  └── IFA12A/                    # Klassenkürzel
       ├── Frontend/              # Quiz 1
-      │   ├── data_479509.json   (IFA12A - Team 1)
-      │   └── data_479512.json   (IFA12A - Team 2)
+      │   └── data_573229.json
       └── PHP Grundlagen/        # Quiz 2
-          ├── data_479509.json
-          └── data_479512.json
+          └── data_573229.json
   ```
+
+> Seit 2026/27 gibt es keine Team-Ebene mehr; das Klassenkürzel wird per
+> Muster aus dem Moodle-Gruppennamen gezogen (`K - IFA12A (6072)` → `IFA12A`).
+> Ältere Beispiele in diesem Dokument zeigen noch Team-Namen — die Struktur
+> ist dieselbe.
 
 ### 📅 Datumsfilter (NEU - November 2025)
 - **Interaktiver Dialog**: Fragt nach Startdatum beim Scraping
@@ -411,15 +415,17 @@ Bitte beachten Sie die Definition im Skript.
 
 ## Konfiguration
 
+> **Hinweis:** Die Kurse stehen seit 2026/27 in `plan.json`, nicht mehr in
+> `MEBIS_COURSE_ID`. Ohne Angabe nimmt der Scraper den ersten offenen Kurs;
+> ein anderer lässt sich per `QuizScraper(course_id=...)` wählen.
+
+
 Die Konfiguration erfolgt über `.env`:
 
 ```ini
 # Mebis-Zugangsdaten
 MEBIS_USERNAME=your_username
 MEBIS_PASSWORD=your_password
-
-# Kurs-ID
-MEBIS_COURSE_ID=2036416
 
 # Browser-Einstellungen
 MODE_HEADLESS=True

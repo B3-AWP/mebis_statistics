@@ -22,8 +22,10 @@ Punkte: [REFACTORING_PLAN.md](REFACTORING_PLAN.md).
   (Quantität, Qualität, Mitarbeitsnote, Sonstiges, Eingereichte Aufgaben)
   gibt es nicht mehr. Die Werte werden ausschließlich berechnet; der
   Export scrapet sie nicht mehr, was ihn zusätzlich beschleunigt.
-- **`PROGNOSIS_ASSIGNMENTS` ist neu zu befüllen**, falls Review-Talk oder
-  Code-Review genutzt werden — die IDs sind kursspezifisch. Optional.
+- **`PROGNOSIS_ASSIGNMENTS` entfällt.** Review-Talk und Code-Review gibt es
+  im neuen Kurs nicht. Die Mitarbeitsnote besteht aus Quantität und
+  Qualität — beide berechnet. Damit braucht die `.env` überhaupt keine
+  kursspezifischen IDs mehr.
 
 ### 🚀 Neue Struktur
 
@@ -80,14 +82,37 @@ Moodle fehlt, bleibt darin und gilt als nicht begonnen.
 - `dashboard.js`: Kurs-Scope-Ebene, Wochen-Slider folgt dem Halbjahr
 - `report_generator.py`: flache Sicht über alle Kurse
 - `exam/scraper.py`: Kurs aus `plan.json` statt `MEBIS_COURSE_ID`
+- `group_utils.py`: Klassenkürzel per Muster statt als Präfix
+- `exporter.py`: Quiz-Index als dritte Aktivitätsquelle
 
-### ⚠️ Vor dem ersten Lauf zu erledigen
+### ✅ Im Betrieb erprobt
 
-1. `EXPORT_FOLDER` zeigt auf `Exports_2026_27` — Ordner anlegen
-2. Optional: `PROGNOSIS_ASSIGNMENTS` eintragen, falls Review-Talk oder
-   Code-Review als Komponenten zählen sollen
+Erster Vollexport am 18.09.2026 gegen Kurs 2491549: 6:41 Minuten,
+53 Aktivitäten, 65 Personen, alle 14 Plan-Aufgaben gefunden.
 
-Die Klassen sind IFA12A–D; IFA12E gibt es nicht mehr.
+Die Klassen sind IFA12A–D; IFA12E gibt es nicht mehr. IFA12C war beim
+ersten Export noch nicht eingeschrieben — sie erscheint automatisch,
+sobald sie im Kurs auftaucht, ohne Konfigurationsänderung.
+
+### 🔍 Was der erste Export zutage förderte
+
+Drei Punkte, die erst der Kontakt mit dem echten Kurs zeigte:
+
+**Gruppennamen im Format `K - IFA12A (6072)`.** Die frühere Präfix-Regel
+hätte `"K"` für jede Klasse geliefert — keine Schienenzuordnung, kein
+Soll, und zwar ohne Fehlermeldung. `extract_group_prefix()` zieht das
+Kürzel jetzt per Muster aus dem Namen.
+
+**Fremde Klassen im Kurs** (IF10B, IF10C, IF11A, IF11C, IF11J, eine
+Testgruppe). Klassen ohne Eintrag in `plan.json` werden übersprungen.
+
+**Vier Quizze fehlten im Export.** Die Fortschrittsseite listet nur
+Aktivitäten mit aktivierter Abschlussverfolgung (21 Quizze), der
+Quiz-Index kennt 25. Betroffen war unter anderem `Pflicht: OOP - SOLID`
+— 8 der 58,5 Plan-Stunden, also 13,7 % des Halbjahres-Solls.
+`get_activity_urls()` liest seither `mod/quiz/index.php` als dritte
+Quelle; `_warne_bei_planabweichung()` meldet fehlende Plan-Aufgaben beim
+Laden mit Stundenzahl und Anteil am Soll.
 
 ## [Unreleased] - 2026-03-16 (2)
 

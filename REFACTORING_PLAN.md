@@ -1,7 +1,19 @@
 # Refactoring-Plan: Lehrkräfte-Dashboard auf Kursstruktur 2026/27
 
-Stand: 2026-09-18 · Betrifft: `mebis_statistics` (Lehrkräfte-Dashboard)
+Geplant: 2026-09-18 · Umgesetzt: 2026-09-18 · Betrifft: `mebis_statistics`
 Referenz-Stammdaten: `AEuP12/BYCS_Lernplattform_Dashboard/plan.json` (schemaVersion 3)
+
+> ## ✅ Umgesetzt
+>
+> Dieses Dokument ist der **Plan vor der Umsetzung** und bleibt als Begründung
+> der Architekturentscheidungen erhalten. Die Formulierungen stehen deshalb
+> im Futur. Was tatsächlich gebaut wurde, steht im
+> [CHANGELOG](CHANGELOG.md); wie das Ergebnis zu bedienen ist und wie es
+> rechnet, in der [README](README.md#wie-das-dashboard-rechnet).
+>
+> **Abweichungen vom Plan** sind in [Abschnitt 6](#6-was-bei-der-umsetzung-anders-kam)
+> festgehalten — vor allem das, was erst der erste echte Export zutage
+> gefördert hat.
 
 > **Grüne Wiese.** Neues Schuljahr, neue Schüler, neuer Kurs. Es wird **nichts migriert**:
 > keine Rückwärtskompatibilität des Exportformats, keine Altdaten im `EXPORT_FOLDER`,
@@ -389,25 +401,18 @@ MA2-Prognose-Arithmetik und die Grouping-Ebene wiegen schwerer als der neue Load
 
 ---
 
-## 5. Offene Punkte (vor Implementierungsbeginn zu klären)
+## 5. Offene Punkte
 
-### Jetzt zu klären (blockieren den Start)
+### Noch offen (nach Freischaltung 11.01.2027)
 
-1. **Gruppennamen** in Kurs 2491549 — exakt `IFA12A` oder mit Zusatz?
-2. **`PROGNOSIS_ASSIGNMENTS` für Kurs 2491549** — welche Aufgabe ist der Review-Talk,
-   welche das Code-Review? Im Plan sehe ich dafür keine offensichtlichen Kandidaten.
-   Optional: ohne Eintrag entfallen die beiden Komponenten.
+1. **Kategorienamen und Aufgabenzuschnitt in Kurs 2491870** — erst nach der
+   Freischaltung prüfbar. Die `cmid`s stehen bereits im Plan; ob sie stimmen,
+   zeigt der erste Export gegen diesen Kurs.
+2. **Reports** — je Halbjahr getrennt oder kombiniert? Derzeit fassen sie das
+   Schuljahr zusammen.
 3. **Stunden-Pflege** — `plan.json` ist die einzige Quelle der `stunden`-Werte und
    liegt im Schüler-Dashboard-Repo. Bei einer Änderung dort verschiebt sich auch die
-   Lehrkräfte-Auswertung. Das ist gewollt, sollte dir aber bewusst sein.
-
-Ein Probe-Export gegen Kurs 2491549 beantwortet Punkt 1 von selbst.
-
-### Später zu klären (nach Freischaltung 11.01.2027)
-
-4. **Review-Talk/Code-Review für Kurs 2491870** — analog zu 2.
-5. **Kategorienamen in Kurs 2491870.**
-6. **Reports** — je Halbjahr getrennt oder kombiniert?
+   Lehrkräfte-Auswertung. Das ist gewollt, sollte aber bewusst sein.
 
 ### Erledigt
 
@@ -420,3 +425,60 @@ Ein Probe-Export gegen Kurs 2491549 beantwortet Punkt 1 von selbst.
 - **Manuelle Notenbuch-Elemente** — entfallen ersatzlos. Quantität und Qualität
   werden ausschließlich berechnet; damit gibt es keine Übersteuerung mehr und
   auch keine kursspezifischen Item-IDs zu pflegen.
+- **Review-Talk und Code-Review** — existieren im neuen Kurs nicht; die
+  Komponenten und `PROGNOSIS_ASSIGNMENTS` sind entfallen.
+- **Gruppennamen** — geklärt durch den Probe-Export, siehe Abschnitt 6.
+
+---
+
+## 6. Was bei der Umsetzung anders kam
+
+Drei Dinge hat erst der Kontakt mit dem echten Kurs gezeigt. Alle drei wären
+im Betrieb unangenehm aufgefallen, keines davon war aus dem Code absehbar.
+
+### Die Gruppennamen haben ein anderes Format
+
+**Erwartet:** `IFA12A` · **Real:** `K - IFA12A (6072)`
+
+Der Plan ging davon aus, dass die bestehende Präfix-Logik (`bis zum ersten " - "`)
+weiter trägt. Sie hätte für **jede** Klasse `"K"` geliefert — keine
+Schienenzuordnung, kein Wochenkalender, kein Soll. Und zwar lautlos: keine
+Fehlermeldung, nur überall Striche.
+
+`extract_group_prefix()` zieht das Klassenkürzel jetzt per Muster
+(`\b[A-Z]{2,4}\d{2}[A-Z]\b`) aus dem Namen statt als Präfix. Das deckt alle
+drei vorkommenden Formen ab und ist gegen künftige Formatwechsel robust.
+
+### Der Kurs enthält fremde Klassen
+
+Neben IFA12A/B/D liegen dort IF10B, IF10C, IF11A, IF11C, IF11J und eine
+Testgruppe. Das Backend wertet nur Klassen aus, die in `plan.json` stehen —
+die übrigen werden übersprungen. Ein Nebeneffekt der Plan-als-Quelle-Regel,
+der hier genau richtig fällt.
+
+### Der Exporter übersah vier Quizze
+
+Die Erfassung lief über die Fortschrittsseite (`report/progress`), die nur
+Aktivitäten mit aktivierter **Abschlussverfolgung** listet: 21 Quizze. Der
+Quiz-Index kennt 25.
+
+Betroffen war unter anderem `Pflicht: OOP - SOLID` — **8 der 58,5 Plan-Stunden,
+also 13,7 % des Halbjahres-Solls**, die niemand je hätte erreichen können.
+
+Der erste Verdacht fiel auf eine veraltete `cmid` in `plan.json`. Das war
+falsch: Geprüft worden war nur, ob die `cmid` *im Export* vorkommt, nicht ob
+sie *im Kurs* existiert. Erst der Aufruf der Quiz-URL zeigte den Unterschied.
+
+`get_activity_urls()` liest seither zusätzlich `mod/quiz/index.php` als dritte
+Quelle. Ergänzend meldet `_warne_bei_planabweichung()` beim Laden jede
+Plan-Aufgabe, die im Kurs fehlt — mit Stundenzahl und Anteil am Soll, damit
+die Tragweite sichtbar ist statt still weitergerechnet zu werden.
+
+### Was der Plan richtig vorhergesehen hat
+
+- Der Exporter war besser vorbereitet als erwartet: `course_id` lief bereits
+  durch alle Scraping-Funktionen, nur `main()` musste umgebaut werden.
+- Die Team-Ebene steckte fast ausschließlich im Frontend.
+- Die Codebasis ist netto kleiner geworden.
+- Der Python-Port der Rechenfunktionen liefert exakt dieselben Werte wie die
+  JS-Referenz — nachgewiesen und als Test fixiert.

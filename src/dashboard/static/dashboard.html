@@ -127,13 +127,6 @@
                             <span>Aktuelle Woche</span>
                         </button>
 
-                        <button id="pdfReviewBtn" class="nav-btn" onclick="openPdfReviewModal()" title="Code-Review PDF erstellen">
-                            <svg class="icon" width="18" height="18" aria-hidden="true">
-                                <use href="#icon-pdf"></use>
-                            </svg>
-                            <span class="tab-text">Code-Review PDF</span>
-                        </button>
-
                         <button id="csvExportBtn" class="nav-btn" onclick="openCsvExportModal()" title="CSV Export erstellen">
                             <svg class="icon" width="18" height="18" aria-hidden="true">
                                 <use href="#icon-csv"></use>
@@ -470,14 +463,6 @@
             <circle cx="12" cy="15" r="2" fill="currentColor"/>
         </symbol>
 
-        <symbol id="icon-pdf" viewBox="0 0 24 24">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M10 13h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M10 17h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </symbol>
-
-        <symbol id="icon-folder-open" viewBox="0 0 24 24">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M2 10h20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </symbol>
@@ -490,58 +475,6 @@
         </symbol>
     </svg>
 
-    <!-- PDF Review Modal -->
-    <div id="pdfReviewModal" class="pdf-modal">
-        <div class="pdf-modal-content">
-            <div class="pdf-modal-header">
-                <h2>Code-Review PDF erstellen</h2>
-                <button class="pdf-modal-close" onclick="closePdfReviewModal()">&times;</button>
-            </div>
-            <div class="pdf-modal-body">
-                <form id="pdfReviewForm" onsubmit="event.preventDefault(); generatePdfReview();">
-                    <div class="pdf-form-group">
-                        <label>Review-Nr:</label>
-                        <div class="pdf-review-nr-buttons">
-                            <button type="button" class="pdf-review-nr-btn active" data-review="1" onclick="selectReviewNr(1)">1</button>
-                            <button type="button" class="pdf-review-nr-btn" data-review="2" onclick="selectReviewNr(2)">2</button>
-                            <button type="button" class="pdf-review-nr-btn" data-review="3" onclick="selectReviewNr(3)">3</button>
-                            <button type="button" class="pdf-review-nr-btn" data-review="4" onclick="selectReviewNr(4)">4</button>
-                        </div>
-                    </div>
-
-                    <div class="pdf-form-group">
-                        <label for="reviewDate">Review-Termin:</label>
-                        <input type="date" id="reviewDate" class="pdf-input" required>
-                    </div>
-
-                    <div class="pdf-form-group">
-                        <label for="pdfWeekSlider">Referenzwoche:</label>
-                        <div class="pdf-week-slider-container">
-                            <span class="pdf-slider-value">1</span>
-                            <input type="range" id="pdfWeekSlider" min="1" max="9" value="9" class="pdf-week-slider"
-                                   oninput="updatePdfSliderProgress(this)">
-                            <span class="pdf-slider-value" id="pdfWeekSliderMax">9</span>
-                            <span class="pdf-current-week-display">Woche <span id="pdfCurrentWeekDisplay">9</span></span>
-                        </div>
-                    </div>
-
-                    <div class="pdf-form-group">
-                        <label>Personen:</label>
-                        <div class="pdf-persons-list" id="pdfPersonsList">
-                            <!-- Personen werden hier dynamisch eingefügt -->
-                        </div>
-                    </div>
-
-                    <div class="pdf-modal-footer">
-                        <button type="button" class="pdf-btn pdf-btn-secondary" onclick="closePdfReviewModal()">Abbrechen</button>
-                        <button type="submit" class="pdf-btn pdf-btn-primary" id="generatePdfBtn">PDF erstellen</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- CSV Export Modal -->
     <div id="csvExportModal" class="pdf-modal">
         <div class="pdf-modal-content">
             <div class="pdf-modal-header">
@@ -617,7 +550,6 @@
     </div>
 
     <script src="dashboard.js"></script>
-    <script src="pdf_functions.js"></script>
     <script src="csv_export.js"></script>
 </body>
 
