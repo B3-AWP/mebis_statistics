@@ -330,6 +330,43 @@ Frontends. Für Stufe 4 wird Node benötigt.
 
 ## Features
 
+### Aufbau der Oberfläche
+
+Das Dashboard ist auf wenige Zeilen verdichtet:
+
+1. **Toolbar** — Klassenauswahl, Ansicht (Übersicht, Pflichtaufgaben,
+   Leistungsnachweise) und rechts „Datei laden" / „Aktualisieren".
+2. **Steuerleiste** — Schulwochen-Slider, „Aktuelle Woche", „CSV Export"
+   und der Halbjahr-Umschalter.
+3. **Kennzahlenleiste** — Ø Pflichtaufgaben, Durchschnittsnote, Ø Note
+   Pflichtaufgaben, Quantität, Delta, Qualität und Mitarbeitsnote in
+   einer geteilten Zeile.
+4. Darunter **Letzte Abgaben je Gruppe** und die Detailtabelle der
+   gewählten Klasse — welche das ist, bestimmt der Halbjahr-Umschalter.
+
+### Pflichtaufgaben-Tabelle
+
+Die Übersicht ist eine Matrix: **je Zeile eine Person, je Spalte eine
+Pflichtaufgabe**, sortiert nach Aufgabennummer. Die Zeilen stehen
+standardmäßig nach Vorname sortiert; ein Klick auf eine Spaltenüberschrift
+sortiert um.
+
+Die Aufgabenspalten sind bewusst schmal — bei 15 bis 20 Aufgaben wäre die
+Tabelle sonst unlesbar breit. Deshalb:
+
+- Das Präfix **„Pflicht: " wird ausgeblendet**; es steht in jeder Spalte
+  und trägt nichts bei.
+- Der Titel bricht über **bis zu drei Zeilen** um und wird danach
+  abgeschnitten.
+- Der **vollständige Titel** samt Typ und Kategorie erscheint **beim
+  Überfahren mit der Maus**.
+
+Ganz rechts steht je Person die Durchschnittsnote aus ihren bewerteten
+Pflichtaufgaben. Die Personenspalte bleibt beim seitlichen Scrollen stehen.
+
+Die Filter (Status, Typ, Abgabezeitraum) blenden **Aufgabenspalten** aus;
+die Klassenliste in den Zeilen bleibt dabei vollständig.
+
 ### Datenexport über das Dashboard
 
 1. Button **„Aktualisieren"** oben im Dashboard
@@ -341,10 +378,38 @@ Der Export läuft im Hintergrund (Headless), das Dashboard bleibt bedienbar.
 
 ### Halbjahr-Umschalter
 
-Die Tabs wählen den auszuwertenden Kurs. „Gesamt" erscheint erst, wenn mehr
-als ein Kurs Daten hat; die Gewichtung der Halbjahre ergibt sich dann von
-selbst aus der Stundensumme. Der Wochen-Slider folgt dem Zeitraum des
-aktiven Halbjahres.
+Der Umschalter in der Steuerleiste wählt den auszuwertenden Kurs:
+
+| Auswahl | Datengrundlage |
+|---|---|
+| **Gesamt** | alle Kurse zusammen |
+| **1. Halbjahr** | nur der erste Kurs |
+| **2. Halbjahr** | nur der zweite Kurs |
+
+Die **Darstellung ist in allen drei Stellungen gleich** — dieselbe Tabelle,
+dieselben Spalten, nur andere Zahlen:
+
+| Spalte | Bedeutung |
+|---|---|
+| Quantität Pflicht (%) | erreichte Stunden am Soll der gewählten Woche |
+| Delta (Std.) | Vorsprung bzw. Rückstand in Unterrichtsstunden |
+| Note | aus der Quantität (92/81/67/50/30 %) |
+| Qualität (%) | Durchschnitt der Bewertungen |
+| Eingereichte Aufgaben | Anzahl |
+| Note Pflichtaufgaben | Durchschnitt der bewerteten Pflichtaufgaben |
+| Mitarbeitsnote | (Quantität + Qualität) / 2 |
+
+Über 100 % in der Quantität heißt: dem Plan voraus. Für die Mitarbeitsnote
+wird sie bei 100 % gekappt, damit ein Vorsprung keine schwache Qualität
+ausgleicht.
+
+„Gesamt" steht an erster Stelle und ist immer wählbar — hat erst ein Kurs
+Daten, zeigt es eben nur dessen Zahlen. Sobald beide Halbjahre Daten haben,
+ergibt sich ihre Gewichtung von selbst aus der Stundensumme.
+
+In der Ansicht **„Alle Klassen"** steht unabhängig davon der
+Klassenvergleich. Der Wochen-Slider folgt dem Zeitraum des aktiven
+Halbjahres.
 
 Die Schienen starten zu unterschiedlichen Terminen — mit der Klasse ändert
 sich daher auch die laufende Woche.

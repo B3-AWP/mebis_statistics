@@ -142,14 +142,14 @@ if (ma) {
 
 console.log('\n== Rendering (Laufzeitfehler-Test) ==');
 try {
-    G('generateHalbjahresnotenTable')(users);
-    const html = elements['groupHalbjahresnotenTable'].innerHTML;
+    G('generateGroupProgressTable')(users);
+    const html = elements['groupProgressTable'].innerHTML;
     pruefe('Tabelle erzeugt', html.length > 0, `${html.length} Zeichen`);
-    pruefe('enthaelt maTable', html.includes('maTable'));
+    pruefe('enthaelt individualProgressTable', html.includes('individualProgressTable'));
     pruefe('enthaelt Delta-Spalte', html.includes('Delta'));
     pruefe('kein MA2-Rest', !html.includes('Prognose') && !html.includes('ma2Table'));
     pruefe('alle drei Personen', users.every(u => html.includes(u.name)));
-} catch (e) { pruefe('generateHalbjahresnotenTable', false, e.message); }
+} catch (e) { pruefe('generateGroupProgressTable', false, e.message); }
 
 try {
     G('updateHalbjahrCards')(users);
@@ -164,8 +164,35 @@ try {
     const nav = elements['halbjahrNav'].innerHTML;
     pruefe('Navigation erzeugt', nav.includes('1. Halbjahr') && nav.includes('2. Halbjahr'));
     pruefe('gesperrter Kurs disabled', nav.includes('disabled'));
-    pruefe('kein "Gesamt" bei nur einem Kurs', !nav.includes('>Gesamt<'));
+    // "Gesamt" steht dauerhaft an erster Stelle — nur dort gibt es die
+    // Tabelle "Gesamtfortschritt pro Person", auch bei nur einem Kurs.
+    pruefe('"Gesamt" vorhanden', nav.includes('>Gesamt<'));
+    pruefe('"Gesamt" steht vor dem 1. Halbjahr',
+           nav.indexOf('>Gesamt<') < nav.indexOf('>1. Halbjahr<'));
 } catch (e) { pruefe('updateCourseScopeUI', false, e.message); }
+
+// Alle drei Umschalter-Stellungen zeigen dieselbe Tabelle mit denselben
+// Spalten; nur der zugrunde liegende Datensatz wechselt.
+console.log('\n== Einheitliche Tabelle in jeder Umschalter-Stellung ==');
+try {
+    setG('currentGroup', 'IFA12A');
+    const nutzer = () => G('dashboardData').groups['IFA12A'].users;
+    const spalten = ['Quantität Pflicht (%)', 'Delta (Std.)', 'Note',
+                     'Qualität (%)', 'Eingereichte Aufgaben',
+                     'Note Pflichtaufgaben', 'Mitarbeitsnote'];
+
+    ['gesamt', 'halbjahr-1'].forEach(scope => {
+        G('selectCourseScope')(scope);
+        G('generateGroupProgressTable')(nutzer());
+        const html = elements['groupProgressTable'].innerHTML;
+        pruefe(`${scope}: eine Tabelle`, html.includes('individualProgressTable'));
+        pruefe(`${scope}: alle sieben Spalten`,
+               spalten.every(sp => html.includes(sp)),
+               spalten.filter(sp => !html.includes(sp)).join(', ') || 'vollstaendig');
+        pruefe(`${scope}: keine zweite Tabelle`,
+               elements['groupHalbjahresnotenTable'].innerHTML === '');
+    });
+} catch (e) { pruefe('Einheitliche Tabelle', false, e.message); }
 
 console.log('\n== Wechsel auf gesperrtes Halbjahr ==');
 try {

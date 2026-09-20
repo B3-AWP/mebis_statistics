@@ -2,85 +2,79 @@
 
 /* Verbesserte Tabellen-Darstellung für Dashboard */
 .dashboard-table {
-    font-size: 0.9rem;
-    margin: 20px 0;
+    font-size: var(--font-size-sm);
+    margin: var(--spacing-sm) 0 0;
 }
 
 .dashboard-table th {
-    padding: 8px 6px !important;
+    padding: 6px 10px !important;
     white-space: nowrap;
     text-align: center;
-    background: var(--primary-dark);
-    color: var(--light-color) !important;
-    transition: all 0.2s ease;
+    background: var(--surface-muted);
+    color: var(--text-faint) !important;
 }
 
 .dashboard-table th:hover {
-    background: var(--light-color);
-    color: var(--primary-dark) !important;
+    background: #EDEFF3;
+    color: var(--text-muted) !important;
 }
 
 .dashboard-table td {
-    padding: 6px 4px !important;
-    /* text-align: center; */
+    padding: 7px 10px !important;
     vertical-align: middle;
 }
 
 .dashboard-table .checklist-name-cell {
     text-align: left !important;
-    padding: 8px 12px !important;
+    padding: 7px 10px !important;
     min-width: 200px;
 }
 
 /* Gruppierte Header-Styling - Einheitlich */
 .group-header-pflicht {
-    background: var(--primary-dark) !important;
-    color: var(--light-color) !important;
-    font-weight: bold;
-    transition: all 0.2s ease;
+    background: var(--surface-muted) !important;
+    color: var(--text-faint) !important;
+    font-weight: 700;
 }
 
 .group-header-pflicht:hover {
-    background: var(--light-color) !important;
-    color: var(--primary-dark) !important;
+    background: #EDEFF3 !important;
+    color: var(--text-muted) !important;
 }
 
 .group-header-gesamt {
-    background: var(--primary-dark) !important;
-    color: var(--light-color) !important;
-    font-weight: bold;
-    transition: all 0.2s ease;
+    background: var(--surface-muted) !important;
+    color: var(--text-faint) !important;
+    font-weight: 700;
 }
 
 .group-header-gesamt:hover {
-    background: var(--light-color) !important;
-    color: var(--primary-dark) !important;
+    background: #EDEFF3 !important;
+    color: var(--text-muted) !important;
 }
 
 .sub-header-pflicht {
-    background: var(--primary-dark) !important;
-    color: var(--light-color) !important;
-    font-size: 0.75rem;
-    font-weight: 500;
-    transition: all 0.2s ease;
+    background: var(--surface-muted) !important;
+    color: var(--text-faint) !important;
+    font-size: 10px;
+    font-weight: 600;
 }
 
 .sub-header-pflicht:hover {
-    background: var(--light-color) !important;
-    color: var(--primary-dark) !important;
+    background: #EDEFF3 !important;
+    color: var(--text-muted) !important;
 }
 
 .sub-header-gesamt {
-    background: var(--primary-dark) !important;
-    color: var(--light-color) !important;
-    font-size: 0.75rem;
-    font-weight: 500;
-    transition: all 0.2s ease;
+    background: var(--surface-muted) !important;
+    color: var(--text-faint) !important;
+    font-size: 10px;
+    font-weight: 600;
 }
 
 .sub-header-gesamt:hover {
-    background: var(--light-color) !important;
-    color: var(--primary-dark) !important;
+    background: #EDEFF3 !important;
+    color: var(--text-muted) !important;
 }
 
 /* Responsive Verbesserungen */
@@ -106,50 +100,74 @@
 /* Fortschritts-Zellen Verbesserungen */
 .progress-cell {
     min-width: 60px;
-    font-weight: 600;
-    font-size: 0.8rem;
+    font-weight: 500;
+    font-size: var(--font-size-sm);
+}
+
+/* .comparison-table/.overview-table zentrieren alle Zellen — Zahlen sollen
+   aber in Flucht stehen, deshalb hier wieder rechtsbuendig. Die zugehoerige
+   Kopfzelle folgt der Spalte, sonst steht die Beschriftung woanders als
+   der Wert darunter. */
+.comparison-table td.progress-cell,
+.overview-table td.progress-cell,
+.dashboard-table td.progress-cell,
+.comparison-table td.text-center,
+.overview-table td.text-center {
+    text-align: right;
+}
+
+/* Nur die Kopfzellen der Zahlenspalten; Texttabellen wie "Letzte Abgaben"
+   behalten ihre linksbuendigen Ueberschriften. */
+.comparison-table th:not(:first-child),
+.overview-table th:not(:first-child) {
+    text-align: right !important;
 }
 
 /* Übersichts-Tabelle spezielle Styling */
 .overview-table {
     max-width: 100%;
-    margin-top: 15px;
+    margin-top: var(--spacing-sm);
 }
 
 .overview-table th {
-    background: var(--primary-dark) !important;
-    color: var(--light-color) !important;
-    padding: 10px 8px !important;
-    transition: all 0.2s ease;
+    background: var(--surface-muted) !important;
+    color: var(--text-faint) !important;
+    padding: 6px 10px !important;
 }
 
 .overview-table th:hover {
-    background: var(--light-color) !important;
-    color: var(--primary-dark) !important;
+    background: #EDEFF3 !important;
+    color: var(--text-muted) !important;
 }
 
 .overview-table td {
-    padding: 8px !important;
+    padding: 7px 10px !important;
 }
 
 .overview-table .person-name {
-    font-weight: bold;
+    font-weight: 500;
     text-align: left !important;
+}
+
+/* Namen stehen im Entwurf in normaler Staerke; das <strong> im Markup
+   bleibt als Semantik erhalten, traegt hier aber kein Fettgewicht. */
+.overview-table .person-name strong {
+    font-weight: 500;
 }
 
 /* Gruppen-Vergleichstabelle spezielle Styling */
 .comparison-table {
     max-width: 100%;
-    margin-top: 15px;
-    font-size: 0.85rem;
+    margin-top: var(--spacing-sm);
+    font-size: var(--font-size-sm);
 }
 
 .comparison-table th {
-    background: var(--primary-dark) !important;
-    color: var(--light-color) !important;
-    padding: 8px 4px !important;
+    background: var(--surface-muted) !important;
+    color: var(--text-faint) !important;
+    padding: 6px 10px !important;
     text-align: center !important;
-    font-size: 0.75rem;
+    font-size: 10.5px;
     font-weight: 600;
     line-height: 1.2;
     vertical-align: middle;
@@ -161,12 +179,12 @@
 }
 
 .comparison-table th:hover {
-    background: var(--light-color) !important;
-    color: var(--primary-dark) !important;
+    background: #EDEFF3 !important;
+    color: var(--text-muted) !important;
 }
 
 .comparison-table td {
-    padding: 6px 4px !important;
+    padding: 7px 10px !important;
     text-align: center;
     vertical-align: middle;
 }
@@ -176,8 +194,8 @@
     padding: 8px 12px !important;
     min-width: 120px;
     max-width: 200px;
-    font-weight: bold;
-    background: rgba(5, 150, 105, 0.05);
+    font-weight: 600;
+    color: var(--success-dark);
     white-space: normal;
     word-wrap: break-word;
 }
@@ -185,8 +203,8 @@
 .comparison-table .progress-cell {
     min-width: 50px;
     max-width: 70px;
-    font-weight: 600;
-    font-size: 0.8rem;
+    font-weight: 500;
+    font-size: var(--font-size-sm);
 }
 
 /* Responsive Design für Vergleichstabelle */
@@ -260,8 +278,8 @@
 }
 
 .sortable-header:hover {
-    background: var(--light-color) !important;
-    color: var(--primary-dark) !important;
+    background: #EDEFF3 !important;
+    color: var(--text-muted) !important;
 }
 
 .sortable-header::after {
@@ -282,13 +300,13 @@
 .sortable-header.sort-asc::after {
     content: "↑";
     opacity: 1;
-    color: #fff;
+    color: var(--accent);
 }
 
 .sortable-header.sort-desc::after {
     content: "↓";
     opacity: 1;
-    color: #fff;
+    color: var(--accent);
 }
 
 /* Anpassungen für verschiedene Tabellentypen */
@@ -316,19 +334,14 @@
     }
 }
 
-/* Zebra-Streifen für bessere Lesbarkeit */
-.dashboard-table tbody tr:nth-child(even) {
-    background-color: rgba(0, 0, 0, 0.02);
-}
-
-.dashboard-table tbody tr:nth-child(odd) {
-    background-color: rgba(0, 0, 0, 0.01);
+/* Der Entwurf trennt Zeilen durch feine Linien statt durch Zebra-Streifen. */
+.dashboard-table tbody tr {
+    border-bottom: 1px solid var(--line-row);
 }
 
 /* Hover-Effekte */
 .dashboard-table tbody tr:hover {
-    background-color: rgba(79, 70, 229, 0.08) !important;
-    transform: none; /* Override scaling */
+    background-color: var(--surface-hover) !important;
 }
 
 /* Pflichtaufgaben erste Spalte linksbündig - nur für Spalten ohne checklist-name-cell class */
@@ -495,118 +508,121 @@
     color: #1a73e8;
 }
 
-/* Group Navigation Tabs */
+/* Klassenauswahl als Segmented Control: die Knoepfe liegen gemeinsam in
+   einer grauen Rille, der aktive traegt die Klassenfarbe. */
 .group-nav-container {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 8px;
-    padding: 12px 16px;
-    background: linear-gradient(135deg, #f8f9fa, #e9ecef);
-    border-radius: 0;
-    border-bottom: 2px solid #e9ecef;
+    gap: 14px;
+    padding: 0;
+    background: transparent;
+    border: none;
     margin-bottom: 0;
 }
 
 .group-nav-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     flex-wrap: wrap;
 }
 
 .group-nav-icon {
-    color: #4f46e5;
+    width: 13px;
+    height: 13px;
+    color: var(--text-faint);
     flex-shrink: 0;
 }
 
 .group-nav-label {
+    font-size: 12px;
     font-weight: 600;
-    color: #374151;
-    font-size: 0.9rem;
+    color: var(--text-light);
     flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* Die Rille umschliesst "Alle Klassen" und die dynamischen Klassen-Tabs. */
+.group-nav-segment {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    background: var(--surface-sunken);
+    border-radius: var(--radius-lg);
+    padding: 3px;
 }
 
 .group-tabs-dynamic {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     flex-wrap: wrap;
 }
 
 .group-nav-btn {
-    background: linear-gradient(145deg, #ffffff, #f8f9fa);
-    color: #374151;
-    padding: 8px 16px;
-    border-radius: 6px;
-    border: 1px solid #d1d5db;
+    background: transparent;
+    color: var(--text-light);
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    border: none;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-weight: 500;
-    font-size: 0.85rem;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    transition: all 0.15s ease;
+    font-weight: 600;
+    font-size: var(--font-size-sm);
+    font-family: inherit;
+    transition: background 0.15s ease, color 0.15s ease;
     white-space: nowrap;
 }
 
-.group-nav-btn:hover {
-    background: linear-gradient(145deg, #f3f4f6, #e5e7eb);
-    border-color: #9ca3af;
-    transform: translateY(-1px);
-    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+.group-nav-btn:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.75);
+    color: var(--text-muted);
 }
 
 .group-nav-btn.active {
-    background: linear-gradient(145deg, #4f46e5, #6366f1);
-    color: white;
-    border-color: #4f46e5;
-    box-shadow: 0 3px 6px rgba(79, 70, 229, 0.3);
+    background: var(--class-accent);
+    color: #fff;
 }
 
 .group-nav-btn.active:hover {
-    background: linear-gradient(145deg, #4338ca, #5b21b6);
-    border-color: #4338ca;
+    background: var(--class-accent);
+    filter: brightness(0.93);
 }
 
 /* File Info Display */
 .file-info-container {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    background: rgba(249, 250, 251, 0.9);
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    font-size: 0.75rem;
-    color: #6b7280;
+    gap: 6px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    font-size: 11.5px;
+    color: var(--text-faint);
     white-space: nowrap;
 }
 
 .file-info-label {
     font-weight: 600;
-    color: #374151;
+    color: var(--text-light);
 }
 
 .file-info-text {
-    font-family: 'Courier New', Monaco, monospace;
-    background: white;
+    font-family: var(--font-mono);
+    background: var(--surface-muted);
     padding: 2px 6px;
-    border-radius: 4px;
-    border: 1px solid #d1d5db;
-    color: #1f2937;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+    color: var(--text-muted);
 }
 
 .group-tab-text {
-    font-size: 0.85rem;
-    line-height: 1;
-}
-
-/* Adjust main nav container spacing */
-.nav-container {
-    border-radius: 0 0 8px 8px;
-    margin-top: 0;
+    font-size: var(--font-size-sm);
+    line-height: 1.4;
 }
 
 /* Responsive design for grouping and group tabs */
@@ -789,50 +805,198 @@
 .badge {
     display: inline-block;
     padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 0.8rem;
+    border-radius: var(--radius-full);
+    font-size: 11.5px;
     font-weight: 600;
     white-space: nowrap;
 }
 
 .badge-success {
-    background: #d4edda;
-    color: #155724;
+    background: #DCFCE7;
+    color: #15803D;
 }
 
 .badge-warning {
-    background: #fff3cd;
-    color: #856404;
+    background: #FEF3C7;
+    color: #B45309;
 }
 
 .badge-danger {
-    background: #f8d7da;
-    color: #721c24;
+    background: #FEE2E2;
+    color: #B91C1C;
 }
 
 .badge-secondary {
-    background: #e2e3e5;
-    color: #383d41;
+    background: #EEF0F3;
+    color: var(--text-light);
 }
 
-#recentSubmissionsDataTable tr.recent-inactive td {
-    background-color: #fff8f0;
+/* Gruppenstatus: statt flaechiger Tönung nur ein Farbstrich am linken Rand —
+   die Aussage traegt ohnehin das Status-Badge in der letzten Spalte. */
+#recentSubmissionsDataTable tr.recent-group-header td:first-child {
+    box-shadow: inset 3px 0 0 var(--status-marker, transparent);
 }
 
-#recentSubmissionsDataTable tr.recent-no-subs td {
-    background-color: #fff0f0;
+#recentSubmissionsDataTable tr.recent-active {
+    --status-marker: var(--success-color);
 }
 
-#recentSubmissionsDataTable tr.recent-active td {
-    background-color: #f0fff4;
+#recentSubmissionsDataTable tr.recent-inactive {
+    --status-marker: #F59E0B;
 }
 
-/* Ausrichtung Abgabedatum und Aufgabe */
+#recentSubmissionsDataTable tr.recent-no-subs {
+    --status-marker: #DC2626;
+}
+
+/* Folgezeilen einer Gruppe ohne eigene Trennlinie — sie gehoeren zusammen. */
+#recentSubmissionsDataTable tr.recent-sub-row:not(:last-child) td {
+    border-bottom-color: transparent;
+}
+
+#recentSubmissionsDataTable tr.recent-group-header td {
+    border-top: 1px solid var(--line-row);
+}
+
+/* Ausrichtung Abgabedatum, Aufgabe und Kategorie (Textspalten) */
 #recentSubmissionsDataTable th:nth-child(2),
 #recentSubmissionsDataTable td:nth-child(2),
 #recentSubmissionsDataTable th:nth-child(3),
-#recentSubmissionsDataTable td:nth-child(3)
+#recentSubmissionsDataTable td:nth-child(3),
 #recentSubmissionsDataTable th:nth-child(4),
-#recentSubmissionsDataTable td:nth-child(4)  {
+#recentSubmissionsDataTable td:nth-child(4) {
     text-align: left;
+}
+
+/* Zahlenspalten: Bewertung, Tage, Schultage */
+#recentSubmissionsDataTable th:nth-child(5),
+#recentSubmissionsDataTable th:nth-child(6),
+#recentSubmissionsDataTable th:nth-child(7) {
+    text-align: right;
+}
+
+#recentSubmissionsDataTable td:nth-child(5),
+#recentSubmissionsDataTable td:nth-child(6),
+#recentSubmissionsDataTable td:nth-child(7) {
+    text-align: right !important;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Statusspalte mittig unter ihrer Ueberschrift */
+#recentSubmissionsDataTable th:last-child,
+#recentSubmissionsDataTable td:last-child {
+    text-align: center;
+}
+
+/* ==========================================================================
+   Pflichtaufgaben-Matrix: Zeilen = Personen, Spalten = Aufgaben
+   ========================================================================== */
+
+/* Die Aufgabenspalten sind bewusst schmal — bei 20+ Aufgaben wuerde eine
+   Tabelle mit voller Titelbreite sonst unlesbar breit. Der vollstaendige
+   Titel steht im title-Attribut und erscheint beim Hovern. */
+.pflicht-matrix {
+    table-layout: fixed;
+    width: auto;
+}
+
+.pflicht-matrix th.pflicht-task-col {
+    width: 90px;
+    min-width: 90px;
+    max-width: 90px;
+    vertical-align: bottom;
+    text-align: center !important;
+    padding: 6px 4px !important;
+    cursor: help;
+    /* .info-table th setzt nowrap und Versalien — beides macht die
+       schmalen Aufgabenspalten unlesbar. */
+    white-space: normal !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+}
+
+/* Titel ueber hoechstens drei Zeilen, danach mit Auslassungspunkten. Die
+   feste Hoehe haelt alle Kopfzellen auf einer Linie. */
+.pflicht-matrix .pflicht-task-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.25;
+    max-height: 3.75em;
+    overflow-wrap: anywhere;
+    text-align: center;
+}
+
+.pflicht-matrix .pflicht-task-icon {
+    margin-right: 2px;
+}
+
+/* Header-Links sind sonst fast weiss (--light-color) und damit im hellen
+   Kopfbereich unsichtbar. */
+.pflicht-matrix th.pflicht-task-col a.pflicht-task-title,
+.pflicht-matrix th.pflicht-task-col:hover a.pflicht-task-title {
+    color: var(--text-color) !important;
+}
+
+.pflicht-matrix th.pflicht-task-col:hover a.pflicht-task-title {
+    text-decoration: underline;
+}
+
+.pflicht-matrix td.pflicht-task-cell {
+    width: 90px;
+    min-width: 90px;
+    max-width: 90px;
+    text-align: center !important;
+    font-size: var(--font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+/* Personenspalte: breit genug fuer "Vorname Nachname" in einer Zeile */
+.pflicht-matrix th.pflicht-person-col,
+.pflicht-matrix td.pflicht-person-col {
+    width: 180px;
+    min-width: 180px;
+    max-width: 180px;
+    text-align: left !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Notenspalte am Zeilenende */
+.pflicht-matrix th.pflicht-grade-col,
+.pflicht-matrix td.pflicht-grade-col {
+    width: 120px;
+    min-width: 120px;
+    text-align: center !important;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    border-left: 2px solid var(--info-color);
+    white-space: nowrap;
+}
+
+.pflicht-matrix th.pflicht-grade-col {
+    cursor: help;
+}
+
+@media (max-width: 768px) {
+    .pflicht-matrix th.pflicht-person-col,
+    .pflicht-matrix td.pflicht-person-col {
+        width: 130px;
+        min-width: 130px;
+        max-width: 130px;
+    }
+
+    .pflicht-matrix th.pflicht-task-col,
+    .pflicht-matrix td.pflicht-task-cell {
+        width: 74px;
+        min-width: 74px;
+        max-width: 74px;
+    }
 }

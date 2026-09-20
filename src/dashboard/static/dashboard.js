@@ -20,6 +20,43 @@ window.maxSchoolweeks = maxSchoolweeks;
 window.gradeMapping = gradeMapping;
 window.mitarbeitsnoteConfig = mitarbeitsnoteConfig;
 
+// ============================================================================
+// Namen: einheitliche Sortierung nach Vorname
+// ============================================================================
+
+/**
+ * Vergleicht zwei Personennamen. Moodle liefert "Vorname Nachname";
+ * verglichen wird von links, der Vorname entscheidet also zuerst, bei
+ * gleichem Vornamen der Nachname.
+ * @param {string} a - Erster Name
+ * @param {string} b - Zweiter Name
+ * @returns {number} Vergleichswert fuer Array.prototype.sort
+ */
+function compareByVorname(a, b) {
+    return (a || '').localeCompare(b || '', 'de', { sensitivity: 'base' });
+}
+
+/**
+ * Liest den Anzeigenamen aus einem Benutzerobjekt — je nach Quelle heisst
+ * das Feld im Export anders.
+ * @param {Object} user - Benutzerobjekt aus dem Export
+ * @returns {string} Name oder 'Unbekannt'
+ */
+function getUserName(user) {
+    if (!user) return 'Unbekannt';
+    return user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
+}
+
+/**
+ * Sortiert Benutzerobjekte nach Vorname. Liefert eine Kopie, damit die
+ * Reihenfolge im geladenen Export unangetastet bleibt.
+ * @param {Array} users - Benutzerobjekte aus dem Export
+ * @returns {Array} Nach Vorname sortierte Kopie
+ */
+function sortUsersByVorname(users) {
+    return [...(users || [])].sort((a, b) => compareByVorname(getUserName(a), getUserName(b)));
+}
+
 // Tab-Management
 function showTab(tabName) {
     // Alle Tabs verstecken
@@ -465,13 +502,15 @@ function updateCourseScopeUI() {
              + `title="${titel}">${c.titel}</button>`;
     });
 
-    // "Gesamt" lohnt sich erst, wenn mehr als ein Kurs Daten hat.
-    if (anzahlVerfuegbar > 1) {
-        const aktiv = currentHalbjahr === 'gesamt' ? ' active' : '';
-        knoepfe.splice(1, 0,
-            `<button class="halbjahr-nav-btn${aktiv}" onclick="selectHalbjahr('gesamt')" `
-            + `title="Beide Halbjahre zusammen">Gesamt</button>`);
-    }
+    // "Gesamt" steht dauerhaft an erster Stelle und fasst alle Kurse
+    // zusammen. Hat erst ein Kurs Daten, zeigt es eben nur dessen Zahlen.
+    const gesamtAktiv = currentHalbjahr === 'gesamt' ? ' active' : '';
+    const gesamtTitel = anzahlVerfuegbar > 1
+        ? 'Alle Kurse zusammen'
+        : 'Alle Kurse zusammen (derzeit nur der laufende)';
+    knoepfe.unshift(
+        `<button class="halbjahr-nav-btn${gesamtAktiv}" onclick="selectHalbjahr('gesamt')" `
+        + `title="${gesamtTitel}">Gesamt</button>`);
 
     nav.innerHTML = knoepfe.join('');
 
@@ -738,16 +777,17 @@ function updateDashboard() {
 function getSelectedUsers() {
     if (!dashboardData || !dashboardData.groups) return [];
 
+    // Tabellen zeigen Personen standardmaessig nach Vorname sortiert.
     if (currentGroup === 'all') {
         // Alle Personen aus allen Klassen
         let allUsers = [];
         Object.values(dashboardData.groups).forEach(group => {
             allUsers = allUsers.concat(group.users);
         });
-        return allUsers;
+        return sortUsersByVorname(allUsers);
     } else {
         // Benutzer aus spezifischer Gruppe
-        return dashboardData.groups[currentGroup]?.users || [];
+        return sortUsersByVorname(dashboardData.groups[currentGroup]?.users);
     }
 }
 
@@ -1576,75 +1616,6 @@ function renderGradeCell(grade, overall = null) {
     return `<td class="text-center text-bold" style="color: ${getGradeColor(grade)};">${grade.toFixed(1)}${overallStr}</td>`;
 }
 
-// Generiert die Mitarbeitsnoten-Tabelle des aktiven Halbjahres.
-// Frueher zwei Abschnitte (1. Note + Prognose der 2.); seit 2026/27 einer.
-function generateHalbjahresnotenTable(users) {
-    const container = document.getElementById('groupHalbjahresnotenTable');
-    if (!container) return;
-    container.innerHTML = '';
-
-    if (currentGroup === 'all') return;
-
-    const track = getTrackForGroup(currentGroup);
-    const wochen = getSchulwochenForScope(track);
-    const sliderWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 0);
-    const autoWeek = getCurrentReferenceWeekForTrack(track);
-    const woche = sliderWeek > 0 ? sliderWeek : autoWeek;
-
-    const kurs = currentHalbjahr && currentHalbjahr !== 'gesamt' ? getCourse(currentHalbjahr) : null;
-    const zeitraum = kurs ? kurs.titel : 'Schuljahr';
-    const sollPct = Math.round(sollAnteil(wochen, woche) * 1000) / 10;
-
-    let html = '';
-    html += `<div style="margin-top: 24px;">`;
-    html += `<div class="stats-group-title" style="margin-bottom: 8px;">`;
-    html += `<span>Mitarbeitsnote – ${zeitraum} (Woche ${woche} von ${wochen.length}, `
-          + `Soll ${sollPct.toFixed(1)} %, Schiene: ${track || '–'})</span>`;
-    html += `</div>`;
-    html += `<table id="maTable" class="info-table dashboard-table overview-table">`;
-    html += `<thead><tr class="sticky-header">`;
-    html += `<th class="person-name">Person</th>`;
-    html += `<th title="Stundengewichtet: Summe der Stunden abgegebener Aufgaben">Quantität<br>(%)</th>`;
-    html += `<th title="Vorsprung bzw. Rückstand in Unterrichtsstunden">Delta<br>(Std.)</th>`;
-    html += `<th title="Ungewichteter Durchschnitt der Bewertungen">Qualität<br>(%)</th>`;
-    html += `<th>Ø Mitarbeitsnote</th>`;
-    html += `</tr></thead><tbody>`;
-
-    const colCount = 4;
-
-    users.forEach(user => {
-        const ma = calculateMitarbeitsnote(user, currentGroup, woche);
-        html += `<tr><td class="person-name">${user.name}</td>`;
-        if (!ma) {
-            html += `<td class="text-center" colspan="${colCount}" style="color:#6C757D;">–</td></tr>`;
-            return;
-        }
-
-        const stundenLabel = ma.quantitaetPoints
-            ? `${ma.quantitaetPoints.actual} / ${ma.quantitaetPoints.expected} Std.`
-            : null;
-        html += renderPctCell(ma.quantitaet, 'progress-color-info', null, 1, stundenLabel);
-
-        // Delta: positiv = voraus, negativ = im Rueckstand.
-        if (ma.deltaStunden === null || ma.deltaStunden === undefined) {
-            html += `<td class="text-center" style="color:#6C757D;">–</td>`;
-        } else {
-            const farbe = ma.deltaStunden >= 0 ? '#1e7e34' : '#dc3545';
-            const vz = ma.deltaStunden >= 0 ? '+' : '';
-            html += `<td class="text-center text-bold" style="color:${farbe};">`
-                  + `${vz}${ma.deltaStunden.toFixed(1)}</td>`;
-        }
-
-        html += renderPctCell(ma.qualitaet, 'progress-color-warning', null, 1);
-        html += renderGradeCell(ma.grade, ma.overall);
-        html += `</tr>`;
-    });
-
-    html += `</tbody></table></div>`;
-    container.innerHTML = html;
-    makeTableSortable('maTable');
-}
-
 // Generiert die Fortschritts-Tabelle für die Übersicht
 function generateGroupProgressTable(users) {
     const container = document.getElementById('groupProgressTable');
@@ -1652,8 +1623,15 @@ function generateGroupProgressTable(users) {
     const halbjahresContainer = document.getElementById('groupHalbjahresnotenTable');
 
     // Ohne Daten (gesperrter Kurs) bleibt die Ansicht leer; der Hinweis
-    // ueber der Navigation nennt den Grund.
+    // ueber der Navigation nennt den Grund. Der Titel zieht trotzdem mit,
+    // sonst bliebe der des zuvor gewaehlten Kurses stehen.
     if (dashboardData && dashboardData.verfuegbar === false) {
+        const gesperrt = currentHalbjahr && currentHalbjahr !== 'gesamt'
+            ? getCourse(currentHalbjahr) : null;
+        const titelEl = document.getElementById('groupDetailTitle');
+        if (titelEl) {
+            titelEl.textContent = `${gesperrt ? gesperrt.titel : 'Alle Kurse'} – ${currentGroup}`;
+        }
         container.innerHTML = '';
         if (halbjahresContainer) halbjahresContainer.innerHTML = '';
         return;
@@ -1666,42 +1644,80 @@ function generateGroupProgressTable(users) {
         return;
     }
 
-    // Titel für individuelle Gruppe aktualisieren
+    // Die Tabelle sieht in allen drei Umschalter-Stellungen gleich aus;
+    // nur der zugrunde liegende Datensatz wechselt: "Gesamt" fasst alle
+    // Kurse zusammen, ein Halbjahr zeigt genau seinen Kurs.
+    const kurs = currentHalbjahr && currentHalbjahr !== 'gesamt'
+        ? getCourse(currentHalbjahr) : null;
+    const zeitraum = kurs ? kurs.titel : 'Alle Kurse';
+
     const titleElement = document.getElementById('groupDetailTitle');
     if (titleElement) {
-        titleElement.textContent = `Gesamtfortschritt pro Person - ${currentGroup}`;
+        titleElement.textContent = `${zeitraum} – ${currentGroup}`;
     }
 
     if (users.length === 0) {
         container.innerHTML = '<p><em>Keine Daten verfügbar.</em></p>';
+        if (halbjahresContainer) halbjahresContainer.innerHTML = '';
         return;
     }
 
-    let html = '<table id="individualProgressTable" class="info-table dashboard-table overview-table">';
+    // Bezugswoche: der Slider, sonst die laufende Woche der Schiene.
+    const track = getTrackForGroup(currentGroup);
+    const wochen = getSchulwochenForScope(track);
+    const sliderWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 0);
+    const woche = sliderWeek > 0 ? sliderWeek : getCurrentReferenceWeekForTrack(track);
+    const sollPct = Math.round(sollAnteil(wochen, woche) * 1000) / 10;
+
+    let html = '';
+    html += `<div class="stats-group-title" style="margin-bottom: 8px;">`;
+    html += `<span>${zeitraum} (Woche ${woche} von ${wochen.length}, `
+          + `Soll ${sollPct.toFixed(1)} %, Schiene: ${track || '–'})</span>`;
+    html += `</div>`;
+    html += '<table id="individualProgressTable" class="info-table dashboard-table overview-table">';
     html += '<thead><tr class="sticky-header">';
     html += '<th class="person-name">Person</th>';
-    html += '<th>Quantität Pflicht (%)</th>';
-    html += '<th>Ø Note</th>';
-    html += '<th>Quantität Gesamt (%)</th>';
+    html += '<th title="Erreichte Stunden gemessen am Soll der gewählten Woche — über 100 % heißt: dem Plan voraus">Quantität Pflicht (%)</th>';
+    html += '<th title="Vorsprung bzw. Rückstand in Unterrichtsstunden">Delta (Std.)</th>';
+    html += '<th title="Note aus der Quantität (Schwellen 92/81/67/50/30 %)">Note</th>';
+    html += '<th title="Ungewichteter Durchschnitt der Bewertungen">Qualität (%)</th>';
     html += '<th>Eingereichte Aufgaben</th>';
     html += '<th>Note Pflichtaufgaben</th>';
+    html += '<th title="(Quantität + Qualität) / 2 — die Quantität dafür bei 100 % gekappt">Mitarbeitsnote</th>';
     html += '</tr></thead>';
     html += '<tbody>';
 
-
     users.forEach(user => {
-        const selectedWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || maxSchoolweeks);
-        const pflichtResult = calculatePflichtaufgabenProgressGesamt(user, selectedWeek);
-        const displayPflichtProgress = pflichtResult ? pflichtResult.value : 0;
-        const displayGesamtProgress = displayPflichtProgress;
-        const pflichtPoints = pflichtResult ? { actual: pflichtResult.actual, expected: pflichtResult.expected } : null;
+        // Quantitaet relativ zum Soll der Woche — kann ueber 100 % gehen,
+        // wer dem Plan voraus ist.
+        const pflichtResult = calculatePflichtaufgabenProgressGesamt(user, woche);
+        const quantitaet = pflichtResult ? pflichtResult.value : 0;
+        const pflichtPoints = pflichtResult
+            ? { actual: pflichtResult.actual, expected: pflichtResult.expected }
+            : null;
 
-        // Berechne Note basierend auf Pflicht %
-        const gradeText = calculateGradeFromPflichtProgress(displayPflichtProgress);
+        // Delta und Qualitaet stammen aus derselben Rechnung wie bisher.
+        const ma = calculateMitarbeitsnote(user, currentGroup, woche);
+        const qualitaet = ma ? ma.qualitaet : null;
+        const deltaStunden = ma ? ma.deltaStunden : null;
 
-        // Berechne Pflichtaufgaben-Note
+        // Note aus der Quantitaet (Schwellen 92/81/67/50/30 %).
+        const gradeText = calculateGradeFromPflichtProgress(quantitaet);
+
+        // Mitarbeitsnote: Mittel aus Quantitaet und Qualitaet. Die
+        // Quantitaet wird dafuer bei 100 % gekappt — ein Vorsprung soll
+        // eine schwache Qualitaet nicht rechnerisch ausgleichen.
+        const quantFuerNote = Math.min(quantitaet, 100);
+        const maKomponenten = [quantFuerNote, qualitaet]
+            .filter(v => v !== null && v !== undefined);
+        const maOverall = maKomponenten.length > 0
+            ? maKomponenten.reduce((a, b) => a + b, 0) / maKomponenten.length
+            : null;
+        const maGrade = maOverall !== null ? convertPercentToIHKGrade(maOverall) : null;
+
+        // Note der bewerteten Pflichtaufgaben
         const pflichtGradeResult = calculatePflichtaufgabenGradeForUserByName(user.name, currentGroup);
-        let pflichtGradeText = '-';
+        let pflichtGradeText = '–';
         let pflichtGradeColor = '#6C757D';
         if (pflichtGradeResult && pflichtGradeResult.grade !== null) {
             pflichtGradeText = `${pflichtGradeResult.grade.toFixed(0)} (${pflichtGradeResult.percent.toFixed(0)}%, N=${pflichtGradeResult.count})`;
@@ -1710,12 +1726,29 @@ function generateGroupProgressTable(users) {
 
         html += '<tr>';
         html += `<td class="person-name"><strong>${user.name}</strong></td>`;
-        const pflichtSub = pflichtPoints ? `<span class="cell-points">${Math.round(pflichtPoints.actual)} / ${Math.round(pflichtPoints.expected)}</span>` : '';
-        html += `<td class="progress-cell progress-color-info" style="--progress-width: ${displayPflichtProgress}%;">${displayPflichtProgress.toFixed(0)}%${pflichtSub}</td>`;
+
+        const stundenSub = pflichtPoints
+            ? `<span class="cell-points">${Math.round(pflichtPoints.actual)} / ${Math.round(pflichtPoints.expected)} Std.</span>`
+            : '';
+        html += `<td class="progress-cell progress-color-info" style="--progress-width: ${Math.min(quantitaet, 100)}%;">`
+              + `${quantitaet.toFixed(0)}%${stundenSub}</td>`;
+
+        // Delta: positiv = voraus, negativ = im Rueckstand.
+        if (deltaStunden === null || deltaStunden === undefined) {
+            html += `<td class="text-center" style="color:#6C757D;">–</td>`;
+        } else {
+            const farbe = deltaStunden >= 0 ? '#1e7e34' : '#dc3545';
+            const vz = deltaStunden >= 0 ? '+' : '';
+            html += `<td class="text-center text-bold" style="color:${farbe};">`
+                  + `${vz}${deltaStunden.toFixed(1)}</td>`;
+        }
+
         html += `<td class="text-center text-bold">${gradeText}</td>`;
-        html += `<td class="progress-cell progress-color-secondary" style="--progress-width: ${displayGesamtProgress}%;">${displayGesamtProgress.toFixed(0)}%</td>`;
-        html += `<td class="progress-cell progress-color-warning" style="--progress-width: ${user.assignments.percent_submitted}%;">${user.assignments.submitted_count}</td>`;
-        html += `<td class="text-center text-bold" style="color: ${pflichtGradeColor};" title="Durchschnitt aus ${pflichtGradeResult ? pflichtGradeResult.count : 0} bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
+        html += renderPctCell(qualitaet, 'progress-color-warning', null, 1);
+        html += `<td class="progress-cell progress-color-secondary" style="--progress-width: ${user.assignments.percent_submitted}%;">${user.assignments.submitted_count}</td>`;
+        html += `<td class="text-center text-bold" style="color: ${pflichtGradeColor};" `
+              + `title="Durchschnitt aus ${pflichtGradeResult ? pflichtGradeResult.count : 0} bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
+        html += renderGradeCell(maGrade, maOverall);
         html += '</tr>';
     });
 
@@ -1725,12 +1758,11 @@ function generateGroupProgressTable(users) {
     // Tabelle sortierbar machen
     makeTableSortable('individualProgressTable');
 
-    // Mitarbeitsnote des aktiven Halbjahres
-    generateHalbjahresnotenTable(users);
+    // Es gibt nur noch diese eine Tabelle je Ansicht.
+    if (halbjahresContainer) halbjahresContainer.innerHTML = '';
 
     // Scroll-Wrapper anwenden
     setTimeout(() => wrapTableWithScrollContainer('groupProgressTable'), 50);
-    setTimeout(() => wrapTableWithScrollContainer('groupHalbjahresnotenTable'), 50);
 }
 // Letzte Abgaben je Gruppe anzeigen
 // Standardsortierung: Status (inaktive zuerst), sekundär alphabetisch
@@ -1949,13 +1981,12 @@ function toggleProgressType() {
 function selectHalbjahr(scope) {
     selectCourseScope(scope);
 
+    // Den Titel der Einzelklassen-Ansicht setzt generateGroupProgressTable
+    // selbst; hier nur der Klassenvergleich, der von dort nicht kommt.
     const titleEl = document.getElementById('groupDetailTitle');
-    if (titleEl) {
+    if (titleEl && currentGroup === 'all') {
         const kurs = scope !== 'gesamt' ? getCourse(scope) : null;
-        const zeitraum = kurs ? kurs.titel : 'Schuljahr';
-        titleEl.textContent = currentGroup === 'all'
-            ? `Klassenvergleich – ${zeitraum}`
-            : `Gesamtfortschritt pro Person – ${zeitraum}`;
+        titleEl.textContent = `Klassenvergleich – ${kurs ? kurs.titel : 'Alle Kurse'}`;
     }
 
     populateGroupSelectors();
@@ -2317,6 +2348,162 @@ function getSchoolDaysDiff(fromDate, toDate) {
 }
 
 // Pflichtaufgaben-Tabelle generieren (Zeilen = Aufgaben, Spalten = Personen)
+// ============================================================================
+// Pflichtaufgaben-Tabelle: Zeilen = Personen, Spalten = Aufgaben
+// ============================================================================
+
+/**
+ * Entfernt das "Pflicht: "-Praefix aus einem Aufgabentitel. Die Zugehoerigkeit
+ * ergibt sich aus dem Tab; in jeder Spalte wiederholt waere es nur Rauschen.
+ * \param {string} titel - Aufgabentitel aus Moodle
+ * \returns {string} Titel ohne Praefix
+ */
+function entfernePflichtPraefix(titel) {
+    return (titel || '').replace(/^Pflicht:\s*/i, '');
+}
+
+/**
+ * Zieht die fuehrende Aufgabennummer ("1.2") als sortierbare Zahl aus einem
+ * Titel. Ohne Nummerierung bleibt null, dann wird alphabetisch sortiert.
+ * \param {string} titel - Aufgabentitel, ggf. mit "Pflicht: "-Praefix
+ * \returns {number|null} Sortierzahl (1.2 -> 1.02) oder null
+ */
+function aufgabenNummer(titel) {
+    const treffer = entfernePflichtPraefix(titel).match(/^(\d+)\.(\d+)/);
+    if (!treffer) return null;
+    return parseInt(treffer[1]) + parseInt(treffer[2]) / 100;
+}
+
+/**
+ * Sortiert Aktivitaeten nach Aufgabennummer, sonst alphabetisch. Nummerierte
+ * Aufgaben stehen vor unnummerierten.
+ * \param {Array} aktivitaeten - Aufgaben/Quizzes aus dem Export
+ * \returns {Array} Sortierte Kopie
+ */
+function sortiereAufgaben(aktivitaeten) {
+    return [...(aktivitaeten || [])].sort((a, b) => {
+        const na = aufgabenNummer(a.title);
+        const nb = aufgabenNummer(b.title);
+        if (na !== null && nb !== null) return na - nb;
+        if (na !== null) return -1;
+        if (nb !== null) return 1;
+        return entfernePflichtPraefix(a.title)
+            .localeCompare(entfernePflichtPraefix(b.title), 'de');
+    });
+}
+
+/**
+ * Maskiert Text fuer die Verwendung in einem HTML-Attribut.
+ * \param {string} text - Rohtext
+ * \returns {string} Maskierter Text
+ */
+function escapeAttribut(text) {
+    return (text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '&#10;');
+}
+
+/**
+ * Maskiert Text fuer die Verwendung im HTML-Inhalt.
+ * \param {string} text - Rohtext
+ * \returns {string} Maskierter Text
+ */
+function escapeHtml(text) {
+    return (text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+/**
+ * Baut die Kopfzelle einer Aufgabenspalte. Der Titel steht ohne
+ * "Pflicht: "-Praefix und bricht ueber bis zu drei Zeilen um, damit die
+ * Tabelle bei vielen Aufgaben schmal bleibt; der vollstaendige Titel samt
+ * Typ und Kategorie steht im Tooltip.
+ * \param {Object} aktivitaet - Aufgabe oder Quiz
+ * \returns {string} HTML der Kopfzelle
+ */
+function pflichtSpaltenKopf(aktivitaet) {
+    const icon = aktivitaet.activity_type === 'quiz' ? '🧭' : '📝';
+    const typ = aktivitaet.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe';
+    const kurzTitel = entfernePflichtPraefix(aktivitaet.title);
+    const tooltip = escapeAttribut(
+        aktivitaet.title + '\n' + 'Typ: ' + typ
+        + ' | Kategorie: ' + (aktivitaet.category_name || 'Unbekannt')
+    );
+
+    return `<th class="pflicht-task-col" title="${tooltip}"`
+         + ` data-activity-type="${aktivitaet.activity_type}">`
+         + `<a href="${aktivitaet.url}" target="_blank" class="pflicht-task-title">`
+         + `<span class="pflicht-task-icon">${icon}</span>`
+         + `<span class="pflicht-task-name">${escapeHtml(kurzTitel)}</span></a></th>`;
+}
+
+/**
+ * Sucht den Status einer Person zu einer Aktivitaet. Moodle liefert je nach
+ * Quelle nur die ID oder nur den Namen, deshalb beide Wege.
+ * \param {Object} aktivitaet - Aufgabe oder Quiz
+ * \param {string} userId - Moodle-Benutzer-ID
+ * \param {string} userName - Anzeigename
+ * \returns {Object|null} Statusobjekt oder null
+ */
+function findeUserStatus(aktivitaet, userId, userName) {
+    if (!aktivitaet.user_status) return null;
+    return aktivitaet.user_status.find(s =>
+        (s.user_id && userId && s.user_id === userId) ||
+        (s.user_name && userName && s.user_name === userName)
+    ) || null;
+}
+
+/**
+ * Baut eine Statuszelle der Pflichtaufgaben-Tabelle.
+ * \param {Object|null} status - Status der Person zu dieser Aufgabe
+ * \param {Object} aktivitaet - Aufgabe oder Quiz
+ * \param {string} groupId - Moodle-Gruppen-ID fuer den Bewertungslink
+ * \returns {string} HTML der Zelle
+ */
+function pflichtStatusZelle(status, aktivitaet, groupId) {
+    let cellContent = '';
+    let bgColor = '';
+
+    if (status && status.grade && status.grade !== '-') {
+        cellContent = `<strong>${formatStarGrade(status.grade)}</strong>`;
+        bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+    } else if (status && status.rating && status.rating !== '-') {
+        cellContent = `<strong>${formatStarGrade(status.rating)}</strong>`;
+        bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+    } else if (status && status.score && status.score !== '-') {
+        cellContent = `<strong>${status.score}</strong>`;
+        bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+    } else if (status && status.status === 'Zur Bewertung abgegeben') {
+        // Nur Aufgaben lassen sich direkt bewerten, Quizzes nicht.
+        if (aktivitaet.activity_type !== 'quiz' && groupId) {
+            const url = aktivitaet.url.includes('?')
+                ? `${aktivitaet.url}&group=${groupId}`
+                : `${aktivitaet.url}?group=${groupId}`;
+            cellContent = `<a href="${url}" target="_blank" class="status-text-warning">bewertbar</a>`;
+        } else {
+            cellContent = '<span class="status-text-warning">bewertbar</span>';
+        }
+        bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
+    } else {
+        cellContent = '❌';
+        bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
+    }
+
+    const zeit = formatSubmissionTime(status?.submission_time);
+    if (zeit) {
+        cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${zeit}</small>`;
+    }
+
+    return `<td class="progress-cell pflicht-task-cell" style="${bgColor} text-align: center;"`
+         + ` data-submission-time="${status?.submission_time || ''}"`
+         + ` data-activity-type="${aktivitaet.activity_type}">${cellContent}</td>`;
+}
+
 function generatePflichtTable() {
     const container = document.getElementById('pflichtData');
     if (!container || !dashboardData) return;
@@ -3003,75 +3190,26 @@ function generateAllGroupsPflichtTable() {
     });
     const allUsers = Array.from(allUsersSet).map(str => JSON.parse(str));
 
-    let html = '<table id="allGroupsPflichtTable" class="info-table dashboard-table">';
-    html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
+    // Tabelle transponiert: Zeilen = Personen, Spalten = Aufgaben.
+    const sortierteAufgaben = sortiereAufgaben(assignments);
+    const sortierteUser = [...allUsers].sort((a, b) => compareByVorname(a.name, b.name));
 
-    // Header für alle Benutzer
-    allUsers.forEach(user => {
-        const displayName = user.name.replace(' ', '<br>'); // Line break after first space
-        html += `<th style="text-align: center;">${displayName}</th>`;
+    let html = '<table id="allGroupsPflichtTable" class="info-table dashboard-table pflicht-matrix">';
+    html += '<thead><tr><th class="person-name pflicht-person-col">Person</th>';
+    sortierteAufgaben.forEach(aktivitaet => {
+        html += pflichtSpaltenKopf(aktivitaet);
     });
     html += '</tr></thead><tbody>';
 
-    // Zeilen für jede Pflichtaufgabe/Quiz
-    assignments.forEach(assignment => {
+    // Eine Zeile je Person, eine Spalte je Aufgabe. In der Gesamtsicht gibt
+    // es keine Gruppen-ID, deshalb fuehrt der Bewertungslink auf group=0.
+    sortierteUser.forEach(user => {
         html += '<tr>';
-        html += `<td style="min-width: 250px;">`;
-        const activityIcon = assignment.activity_type === 'quiz' ? '🧭' : '📝';
-        const activityType = assignment.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe';
-        html += `<a href="${assignment.url}" target="_blank">${activityIcon} ${assignment.title}</a>`;
-        html += `<br><small class="status-text-muted">Typ: ${activityType} | Kategorie: ${assignment.category_name || 'Unbekannt'}</small>`;
-        html += `</td>`;
+        html += `<td class="person-name pflicht-person-col">${escapeHtml(user.name)}</td>`;
 
-        // Status für jeden Benutzer
-        allUsers.forEach(user => {
-            // Finde den Status für diesen Benutzer in diesem Assignment
-            let status = null;
-            if (assignment.user_status) {
-                status = assignment.user_status.find(s => s.user_id === user.id);
-            }
-
-            let cellContent = '';
-            let cellClass = 'progress-cell';
-            let bgColor = '';
-
-            if (status && status.grade && status.grade !== '-') {
-                // Grade vorhanden - zeige Grade-Wert
-                cellContent = `<strong>${formatStarGrade(status.grade)}</strong>`;
-                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
-            } else if (status && status.rating && status.rating !== '-') {
-                // Alternative: Rating field for assignments
-                cellContent = `<strong>${formatStarGrade(status.rating)}</strong>`;
-                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
-            } else if (status && status.score && status.score !== '-') {
-                // Alternative: Score field for assignments
-                cellContent = `<strong>${status.score}</strong>`;
-                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
-            } else if (status && status.status === 'Zur Bewertung abgegeben') {
-                // Zur Bewertung abgegeben - zeige "bewertbar" als Link für Aufgaben
-                // For "all groups" view, use group=0
-                if (assignment.activity_type !== 'quiz') {
-                    const assignmentUrl = assignment.url.includes('?')
-                        ? `${assignment.url}&group=0`
-                        : `${assignment.url}?group=0`;
-                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning">bewertbar</a>`;
-                } else {
-                    cellContent = '<span class="status-text-warning">bewertbar</span>';
-                }
-                bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
-            } else {
-                // Nicht eingereicht
-                cellContent = '❌';
-                bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
-            }
-
-            // Füge Zeitstempel hinzu, wenn vorhanden
-            const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
-            if (submissionTimeFormatted) {
-                cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
-            }
-
-            html += `<td class="${cellClass}" style="${bgColor} text-align: center;" data-submission-time="${status?.submission_time || ''}">${cellContent}</td>`;
+        sortierteAufgaben.forEach(aktivitaet => {
+            const status = findeUserStatus(aktivitaet, user.id, user.name);
+            html += pflichtStatusZelle(status, aktivitaet, '0');
         });
 
         html += '</tr>';
@@ -3082,46 +3220,19 @@ function generateAllGroupsPflichtTable() {
 
     // Tabelle sortierbar machen
     makeTableSortable('allGroupsPflichtTable');
-    
+
     // Scroll-Wrapper anwenden
     setTimeout(() => wrapTableWithScrollContainer('pflichtData'), 50);
 
     // Notenberechnung für Pflichtaufgaben hinzufügen
     addPflichtaufgabenGradeCalculationForAllGroups();
 
-    // Sofortige numerische Sortierung nach Aufgabennummer
+    // Standardsortierung: erste Spalte (Person) aufsteigend nach Vorname
     const table = document.getElementById('allGroupsPflichtTable');
     if (table) {
-        const tbody = table.querySelector('tbody');
-        if (tbody) {
-            const rows = Array.from(tbody.querySelectorAll('tr'));
-            // Sortiere Zeilen numerisch nach Aufgabennummer (falls vorhanden), sonst alphabetisch
-            rows.sort((a, b) => {
-                const aVal = getSortValue(a, 0);
-                const bVal = getSortValue(b, 0);
-
-                // Prüfe ob beide Werte numerische Sortierstrings sind (Dezimalzahlen für Aufgabennummern)
-                if (aVal.match(/^\d+(\.\d+)?$/) && bVal.match(/^\d+(\.\d+)?$/)) {
-                    // Numerischer Vergleich für Aufgabennummern
-                    return parseFloat(aVal) - parseFloat(bVal);
-                } else {
-                    // Alphabetischer Vergleich für andere Werte
-                    return aVal.localeCompare(bVal);
-                }
-            });
-
-            // Zeilen in sortierter Reihenfolge einfügen
-            rows.forEach(row => tbody.appendChild(row));
-
-            // Header als sortiert markieren
-            const headers = table.querySelectorAll('th');
-            if (headers[0]) {
-                headers[0].classList.add('sort-asc');
-            }
-
-            // Sortierstatus setzen
-            sortState['allGroupsPflichtTable_0'] = 'asc';
-        }
+        const headers = table.querySelectorAll('thead th');
+        if (headers[0]) headers[0].classList.add('sort-asc');
+        sortState['allGroupsPflichtTable_0'] = 'asc';
     }
 }
 
@@ -3232,6 +3343,54 @@ function applyPflichtFilters() {
 }
 
 // Status- und Typ-Filter für Pflichtaufgaben anwenden
+/**
+ * Prueft, ob ein Abgabezeitpunkt zum gewaehlten Zeitfilter passt.
+ * @param {string} submissionTime - ISO-Zeitstempel der Abgabe (ggf. leer)
+ * @param {string} filterValue - Wert des Abgabezeitraum-Filters
+ * @param {Date} now - Bezugszeitpunkt
+ * @returns {boolean} true, wenn die Zelle dem Filter entspricht
+ */
+function passtZuAbgabezeitraum(submissionTime, filterValue, now) {
+    if (filterValue === 'notSubmitted') {
+        return !submissionTime;
+    }
+
+    if (filterValue === 'custom') {
+        const von = document.getElementById('customDateFrom')?.value;
+        const bis = document.getElementById('customDateTo')?.value;
+        if (!submissionTime || !von || !bis) return false;
+
+        const abgabe = new Date(submissionTime);
+        const vonDatum = new Date(von);
+        const bisDatum = new Date(bis);
+        vonDatum.setHours(0, 0, 0, 0);
+        bisDatum.setHours(23, 59, 59, 999);
+
+        return abgabe >= vonDatum && abgabe <= bisDatum;
+    }
+
+    if (!submissionTime) return false;
+
+    const schultage = getSchoolDaysDiff(new Date(submissionTime), now);
+
+    switch (filterValue) {
+        case 'less1day':   return schultage < 1;
+        case 'less2days':  return schultage < 2;
+        case 'less3days':  return schultage < 3;
+        case 'less4days':  return schultage < 4;
+        case 'less5days':  return schultage < 5;
+        case 'less1week':  return schultage < 5;
+        case 'less2weeks': return schultage < 10;
+        default:           return false;
+    }
+}
+
+/**
+ * Status- und Typ-Filter fuer die Pflichtaufgaben-Tabelle. Seit der
+ * Transponierung stehen Aufgaben in den Spalten: die Filter blenden deshalb
+ * Spalten aus, nicht mehr Zeilen. Personen-Zeilen bleiben immer sichtbar,
+ * damit die Klassenliste vollstaendig bleibt.
+ */
 function applyPflichtViewFilters() {
     const statusFilter = document.getElementById('pflichtStatusFilter');
     const typeFilter = document.getElementById('pflichtTypeFilter');
@@ -3246,251 +3405,50 @@ function applyPflichtViewFilters() {
     const table = document.getElementById('pflichtTable') || document.getElementById('allGroupsPflichtTable');
     if (!table) return;
 
-    const rows = table.querySelectorAll('tbody tr');
+    const kopfzellen = Array.from(table.querySelectorAll('thead th.pflicht-task-col'));
+    const zeilen = Array.from(table.querySelectorAll('tbody tr'));
+    const now = new Date();
 
-    rows.forEach(row => {
-        let shouldShow = true;
+    // Je Aufgabenspalte entscheiden, ob sie sichtbar bleibt
+    kopfzellen.forEach((kopf, spalte) => {
+        const zellen = zeilen
+            .map(zeile => zeile.querySelectorAll('td.pflicht-task-cell')[spalte])
+            .filter(Boolean);
 
-        // Status-Filter anwenden
-        if (statusValue !== 'all') {
-            const statusCells = row.querySelectorAll('td:not(:first-child)'); // Alle Zellen außer der ersten (Aufgabenname)
-            let hasMatchingStatus = false;
+        let sichtbar = true;
 
-            statusCells.forEach(cell => {
-                const cellText = cell.textContent.trim();
+        // Typ-Filter: Aufgabe oder Quiz
+        if (typeValue !== 'all') {
+            sichtbar = kopf.getAttribute('data-activity-type') === typeValue;
+        }
 
-                if (statusValue === 'completed') {
-                    // Zeige nur Zeilen mit mindestens einer eingereichten Aufgabe
-                    if (cellText.includes('Nicht eingereicht')) {
-                        // Zelle ist nicht eingereicht
-                    } else if (cellText !== '') {
-                        // Zelle hat eine Note/Status, also eingereicht
-                        hasMatchingStatus = true;
-                    }
-                } else if (statusValue === 'pending') {
-                    // Zeige nur Zeilen mit mindestens einer nicht eingereichten Aufgabe
-                    if (cellText.includes('Nicht eingereicht')) {
-                        hasMatchingStatus = true;
-                    }
-                }
+        // Status-Filter: mindestens eine Person mit passendem Status
+        if (sichtbar && statusValue !== 'all') {
+            sichtbar = zellen.some(zelle => {
+                const abgegeben = !!zelle.getAttribute('data-submission-time')
+                    || extractPercentageFromCell(zelle) !== null;
+                return statusValue === 'completed' ? abgegeben : !abgegeben;
             });
-
-            if (!hasMatchingStatus) shouldShow = false;
         }
 
-        // Typ-Filter anwenden
-        if (typeValue !== 'all' && shouldShow) {
-            const firstCell = row.querySelector('td:first-child');
-            if (firstCell) {
-                const cellText = firstCell.textContent.trim();
-
-                if (typeValue === 'quiz') {
-                    if (!cellText.includes('🧭') && !cellText.toLowerCase().includes('quiz')) {
-                        shouldShow = false;
-                    }
-                } else if (typeValue === 'assignment') {
-                    if (!cellText.includes('📝') && !cellText.toLowerCase().includes('aufgabe')) {
-                        shouldShow = false;
-                    }
-                }
-            }
+        // Abgabezeitraum: mindestens eine Person im gewaehlten Zeitraum
+        if (sichtbar && submissionTimeValue !== 'all') {
+            sichtbar = zellen.some(zelle => passtZuAbgabezeitraum(
+                zelle.getAttribute('data-submission-time'), submissionTimeValue, now
+            ));
         }
 
-        // Submission-Time-Filter: Prüfe ob Zeile mindestens eine passende Zelle hat
-        if (submissionTimeValue !== 'all' && shouldShow) {
-            const statusCells = row.querySelectorAll('td:not(:first-child)');
-            let hasMatchingSubmissionTime = false;
-            const now = new Date();
-
-            statusCells.forEach(cell => {
-                const submissionTime = cell.getAttribute('data-submission-time');
-                let cellMatches = false;
-
-                if (submissionTimeValue === 'notSubmitted') {
-                    if (!submissionTime) cellMatches = true;
-                } else if (submissionTimeValue === 'custom') {
-                    // Benutzerdefinierter Datumsbereich
-                    const customDateFrom = document.getElementById('customDateFrom')?.value;
-                    const customDateTo = document.getElementById('customDateTo')?.value;
-
-                    if (submissionTime && customDateFrom && customDateTo) {
-                        const submissionDate = new Date(submissionTime);
-                        const fromDate = new Date(customDateFrom);
-                        const toDate = new Date(customDateTo);
-
-                        // Setze Uhrzeiten für korrekten Vergleich
-                        fromDate.setHours(0, 0, 0, 0);
-                        toDate.setHours(23, 59, 59, 999);
-
-                        if (submissionDate >= fromDate && submissionDate <= toDate) {
-                            cellMatches = true;
-                        }
-                    }
-                } else if (submissionTime) {
-                    const submissionDate = new Date(submissionTime);
-                    const schoolDaysDiff = getSchoolDaysDiff(submissionDate, now);
-
-                    switch (submissionTimeValue) {
-                        case 'less1day':
-                            if (schoolDaysDiff < 1) cellMatches = true;
-                            break;
-                        case 'less2days':
-                            if (schoolDaysDiff < 2) cellMatches = true;
-                            break;
-                        case 'less3days':
-                            if (schoolDaysDiff < 3) cellMatches = true;
-                            break;
-                        case 'less4days':
-                            if (schoolDaysDiff < 4) cellMatches = true;
-                            break;
-                        case 'less5days':
-                            if (schoolDaysDiff < 5) cellMatches = true;
-                            break;
-                        case 'less1week':
-                            if (schoolDaysDiff < 5) cellMatches = true;
-                            break;
-                        case 'less2weeks':
-                            if (schoolDaysDiff < 10) cellMatches = true;
-                            break;
-                    }
-                }
-
-                if (cellMatches) hasMatchingSubmissionTime = true;
-            });
-
-            if (!hasMatchingSubmissionTime) shouldShow = false;
-        }
-
-        row.style.display = shouldShow ? '' : 'none';
+        kopf.style.display = sichtbar ? '' : 'none';
+        zellen.forEach(zelle => {
+            zelle.style.display = sichtbar ? '' : 'none';
+        });
     });
 
-    // Submission-Time-Filter: Zellen markieren und Spalten ausblenden
-    if (submissionTimeValue !== 'all') {
-        const now = new Date();
-
-        // Ermittle welche Spalten mindestens einen Match haben
-        const columnHasMatch = new Set();
-
-        rows.forEach(row => {
-            if (row.style.display === 'none') return; // Überspringe versteckte Zeilen
-
-            const statusCells = row.querySelectorAll('td:not(:first-child)');
-            statusCells.forEach((cell, columnIndex) => {
-                const submissionTime = cell.getAttribute('data-submission-time');
-                let cellMatches = false;
-
-                if (submissionTimeValue === 'notSubmitted') {
-                    if (!submissionTime) cellMatches = true;
-                } else if (submissionTimeValue === 'custom') {
-                    // Benutzerdefinierter Datumsbereich
-                    const customDateFrom = document.getElementById('customDateFrom')?.value;
-                    const customDateTo = document.getElementById('customDateTo')?.value;
-
-                    if (submissionTime && customDateFrom && customDateTo) {
-                        const submissionDate = new Date(submissionTime);
-                        const fromDate = new Date(customDateFrom);
-                        const toDate = new Date(customDateTo);
-
-                        // Setze Uhrzeiten für korrekten Vergleich
-                        fromDate.setHours(0, 0, 0, 0);
-                        toDate.setHours(23, 59, 59, 999);
-
-                        if (submissionDate >= fromDate && submissionDate <= toDate) {
-                            cellMatches = true;
-                        }
-                    }
-                } else if (submissionTime) {
-                    const submissionDate = new Date(submissionTime);
-                    const schoolDaysDiff = getSchoolDaysDiff(submissionDate, now);
-
-                    switch (submissionTimeValue) {
-                        case 'less1day':
-                            if (schoolDaysDiff < 1) cellMatches = true;
-                            break;
-                        case 'less2days':
-                            if (schoolDaysDiff < 2) cellMatches = true;
-                            break;
-                        case 'less3days':
-                            if (schoolDaysDiff < 3) cellMatches = true;
-                            break;
-                        case 'less4days':
-                            if (schoolDaysDiff < 4) cellMatches = true;
-                            break;
-                        case 'less5days':
-                            if (schoolDaysDiff < 5) cellMatches = true;
-                            break;
-                        case 'less1week':
-                            if (schoolDaysDiff < 5) cellMatches = true;
-                            break;
-                        case 'less2weeks':
-                            if (schoolDaysDiff < 10) cellMatches = true;
-                            break;
-                    }
-                }
-
-                if (cellMatches) {
-                    columnHasMatch.add(columnIndex);
-                    // Stelle Zelle wieder her, wenn sie dem Filter entspricht
-                    if (cell.hasAttribute('data-filtered-content')) {
-                        cell.innerHTML = cell.getAttribute('data-filtered-content');
-                        cell.removeAttribute('data-filtered-content');
-                    }
-                } else {
-                    // Speichere Originalinhalt und zeige ❌
-                    if (!cell.hasAttribute('data-filtered-content')) {
-                        cell.setAttribute('data-filtered-content', cell.innerHTML);
-                        cell.innerHTML = '❌';
-                    }
-                }
-            });
-        });
-
-        // Blende Header-Spalten aus, die keinen Match haben
-        const headers = table.querySelectorAll('thead th');
-        headers.forEach((header, index) => {
-            if (index === 0) return; // Erste Spalte (Aufgabenname) nicht ausblenden
-
-            const columnIndex = index - 1; // -1 weil erste Spalte übersprungen wird
-            if (!columnHasMatch.has(columnIndex)) {
-                header.style.display = 'none';
-            } else {
-                header.style.display = '';
-            }
-        });
-
-        // Blende Zellen in Spalten aus, die keinen Match haben
-        rows.forEach(row => {
-            const cells = row.querySelectorAll('td');
-            cells.forEach((cell, index) => {
-                if (index === 0) return; // Erste Spalte nicht ausblenden
-
-                const columnIndex = index - 1;
-                if (!columnHasMatch.has(columnIndex)) {
-                    cell.style.display = 'none';
-                } else {
-                    cell.style.display = '';
-                }
-            });
-        });
-    } else {
-        // Wenn "Alle" ausgewählt ist, stelle alle Spalten und Zellen wieder her
-        const headers = table.querySelectorAll('thead th');
-        headers.forEach(header => {
-            header.style.display = '';
-        });
-
-        rows.forEach(row => {
-            const cells = row.querySelectorAll('td');
-            cells.forEach(cell => {
-                cell.style.display = '';
-                // Stelle Originalinhalt wieder her
-                if (cell.hasAttribute('data-filtered-content')) {
-                    cell.innerHTML = cell.getAttribute('data-filtered-content');
-                    cell.removeAttribute('data-filtered-content');
-                }
-            });
-        });
-    }
+    // Personen-Zeilen bleiben sichtbar; die Notenspalte rechnet ueber alle
+    // Aufgaben, unabhaengig davon welche Spalten gerade eingeblendet sind.
+    zeilen.forEach(zeile => {
+        zeile.style.display = '';
+    });
 }
 
 // Details für Checklisten anzeigen
@@ -3603,6 +3561,9 @@ function sortTable(tableId, columnIndex, dataType = 'auto') {
             } else {
                 result = aVal.localeCompare(bVal);
             }
+        } else if (columnIndex === 0 && istPersonenSpalte(table)) {
+            // Pflicht-Matrix: Spalte 0 listet Personen, sortiert nach Vorname
+            result = compareByVorname(getCellValue(a, 0, 'string'), getCellValue(b, 0, 'string'));
         } else {
             // Für Spalte 0: prüfe ob numerische Sortierstrings vorliegen (Dezimalzahlen für Aufgabennummern)
             if (columnIndex === 0) {
@@ -3628,6 +3589,16 @@ function sortTable(tableId, columnIndex, dataType = 'auto') {
     sortState[tableId + '_' + columnIndex] = newSort;
 }
 
+/**
+ * Erkennt Tabellen, deren erste Spalte Personen listet (transponierte
+ * Pflicht-Matrix) — dort wird Spalte 0 nach Vorname sortiert.
+ * @param {HTMLTableElement} table - Zu pruefende Tabelle
+ * @returns {boolean} true bei einer Personen-Matrix
+ */
+function istPersonenSpalte(table) {
+    return !!table && table.classList.contains('pflicht-matrix');
+}
+
 function getCellValue(row, columnIndex, dataType) {
     const cell = row.cells[columnIndex];
     if (!cell) return '';
@@ -3641,8 +3612,10 @@ function getCellValue(row, columnIndex, dataType) {
 
     let value = cell.textContent.trim();
 
-    // Spezielle Behandlung für Aufgaben-Titel: Emojis entfernen für die Sortierung
-    if (columnIndex === 0) {
+    // Spezielle Behandlung für Aufgaben-Titel: Emojis entfernen für die
+    // Sortierung. Personennamen bleiben unangetastet — eine Nummer am
+    // Namensanfang gibt es nicht, wohl aber Namen mit Sonderzeichen.
+    if (columnIndex === 0 && !cell.classList.contains('person-name')) {
         // Entferne alle Emojis vom Anfang für korrekte alphabetische Sortierung
         value = value.replace(/^[📝🧭✅❌⚠️💻🎯]\s*/, '');
         // Entferne auch Numerierung wie "1.1", "1.2" etc. für bessere alphabetische Sortierung
@@ -3702,7 +3675,11 @@ function makeTableSortable(tableId) {
         if (header.classList.contains('no-sort')) return;
 
         header.classList.add('sortable-header');
-        header.onclick = () => sortTable(tableId, index);
+        header.onclick = (event) => {
+            // Der Aufgabenlink fuehrt nach Moodle — dann nicht zusaetzlich sortieren.
+            if (event?.target?.closest?.('a')) return;
+            sortTable(tableId, index);
+        };
     });
 }
 
@@ -3835,7 +3812,7 @@ function generateExamTable() {
             });
         }
     });
-    const sortedUsers = Array.from(allUsers).sort();
+    const sortedUsers = Array.from(allUsers).sort(compareByVorname);
 
     let html = '<table id="examTable" class="info-table dashboard-table">';
     html += '<thead><tr>';
@@ -4120,9 +4097,9 @@ function generateAllGroupsExamTable() {
 
     // Sortiere Users alphabetisch
     const sortedUsers = Array.from(allUsers.values()).sort((a, b) => {
-        const nameA = `${a.userName} (${a.groupName})`;
-        const nameB = `${b.userName} (${b.groupName})`;
-        return nameA.localeCompare(nameB);
+        // Vorname entscheidet; bei gleichem Namen trennt die Klasse.
+        const nameCmp = compareByVorname(a.userName, b.userName);
+        return nameCmp !== 0 ? nameCmp : compareByVorname(a.groupName, b.groupName);
     });
 
     let html = '<table id="allGroupsexamTable" class="info-table dashboard-table">';
@@ -4332,95 +4309,75 @@ function funExam() {
 }
 
 // Notenberechnung für Pflichtaufgaben hinzufügen
-function addPflichtaufgabenGradeCalculation() {
-    const table = document.getElementById('pflichtTable');
+/**
+ * Haengt die Durchschnittsnote als eigene Spalte an die Pflichtaufgaben-
+ * Tabelle. Seit der Transponierung steht je Person eine Zeile, die Note
+ * gehoert deshalb ans Zeilenende und nicht mehr in eine Kopfzeile.
+ * @param {string} [tableId='pflichtTable'] - ID der Tabelle
+ */
+function addPflichtaufgabenGradeCalculation(tableId = 'pflichtTable') {
+    const table = document.getElementById(tableId);
     if (!table) return;
 
-    // Prüfe ob bereits eine Notenzeile existiert
-    const existingGradeRow = table.querySelector('.pflicht-grade-row');
-    if (existingGradeRow) {
-        existingGradeRow.remove();
-    }
+    // Vorhandene Notenspalte entfernen, damit ein Neuaufbau nicht doppelt
+    table.querySelectorAll('.pflicht-grade-cell').forEach(cell => cell.remove());
 
-    const thead = table.querySelector('thead');
-    if (!thead) return;
+    const headerRow = table.querySelector('thead tr');
+    if (!headerRow) return;
 
-    // Berechne Noten für alle Benutzer und füge sie im Header hinzu
-    const gradeRow = createPflichtaufgabenGradeHeaderRow();
-    thead.appendChild(gradeRow);
-}
+    const kopf = document.createElement('th');
+    kopf.className = 'pflicht-grade-cell pflicht-grade-col';
+    kopf.textContent = '📊 Ø Note';
+    kopf.title = 'Durchschnitt der bewerteten Pflichtaufgaben dieser Person';
+    headerRow.appendChild(kopf);
 
-// Erstelle eine Header-Zeile mit berechneten Noten für Pflichtaufgaben
-function createPflichtaufgabenGradeHeaderRow() {
-    const table = document.getElementById('pflichtTable');
-    const headers = table.querySelectorAll('thead th');
+    // Je Zeile (= Person) die Note aus den Aufgabenzellen dieser Zeile
+    table.querySelectorAll('tbody tr').forEach(row => {
+        const zelle = document.createElement('td');
+        zelle.className = 'pflicht-grade-cell pflicht-grade-col text-bold';
 
-    const row = document.createElement('tr');
-    row.className = 'pflicht-grade-row sticky-header bg-light-blue text-bold';
-    row.style.borderTop = '2px solid var(--info-color)';
+        const note = berechnePflichtnoteFuerZeile(row);
 
-    // Erste Spalte: "Durchschnittsnote"
-    const labelCell = document.createElement('th');
-    labelCell.textContent = '📊 Durchschnittsnote';
-    labelCell.className = 'text-bold';
-    labelCell.style.color = 'var(--info-color)';
-    row.appendChild(labelCell);
-
-    // Für jeden Benutzer eine Note berechnen (alle Spalten außer der ersten)
-    for (let i = 1; i < headers.length; i++) {
-        const gradeCell = document.createElement('th');
-        gradeCell.className = 'text-center text-bold';
-
-        const gradeResult = calculatePflichtaufgabenGradeForUser(i - 1); // i-1 weil erste Spalte der Aufgabenname ist
-
-        if (gradeResult !== null && gradeResult.grade !== null) {
-            gradeCell.textContent = `${gradeResult.grade.toFixed(0)} (${gradeResult.percent.toFixed(0)}%, N=${gradeResult.count})`;
-            gradeCell.style.color = getGradeColor(gradeResult.grade);
-            gradeCell.title = `Durchschnitt: ${gradeResult.percent.toFixed(1)}% aus ${gradeResult.count} bewerteten Aufgaben`;
+        if (note !== null && note.grade !== null) {
+            zelle.textContent = `${note.grade.toFixed(0)} (${note.percent.toFixed(0)}%, N=${note.count})`;
+            zelle.style.color = getGradeColor(note.grade);
+            zelle.title = `Durchschnitt: ${note.percent.toFixed(1)}% aus ${note.count} bewerteten Aufgaben`;
         } else {
-            gradeCell.textContent = 'n/a';
-            gradeCell.style.color = '#6c757d';
-            gradeCell.title = 'Keine bewerteten Aufgaben vorhanden';
+            zelle.textContent = 'n/a';
+            zelle.style.color = '#6c757d';
+            zelle.title = 'Keine bewerteten Aufgaben vorhanden';
         }
 
-        row.appendChild(gradeCell);
-    }
-
-    return row;
+        row.appendChild(zelle);
+    });
 }
 
-// Berechne die Note für einen bestimmten Benutzer basierend auf allen bewerteten Pflichtaufgaben
-function calculatePflichtaufgabenGradeForUser(userIndex) {
-    const table = document.getElementById('pflichtTable');
-    if (!table) return null;
-
-    const rows = table.querySelectorAll('tbody tr:not(.pflicht-grade-row)');
+/**
+ * Berechnet die Durchschnittsnote einer Person aus ihrer Tabellenzeile.
+ * Gemittelt werden die Prozentwerte; erst der Durchschnitt wird in eine
+ * IHK-Note umgesetzt.
+ * @param {HTMLTableRowElement} row - Zeile der Person
+ * @returns {Object|null} {grade, percent, count} oder null
+ */
+function berechnePflichtnoteFuerZeile(row) {
+    const zellen = row.querySelectorAll('td.pflicht-task-cell');
     let totalPercent = 0;
-    let count = 0; // Expliziter Zähler
+    let count = 0;
 
-    rows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        if (cells.length > userIndex + 1) { // +1 weil erste Spalte der Aufgabenname ist
-            const userCell = cells[userIndex + 1];
-            const percent = extractPercentageFromCell(userCell);
-
-            if (percent !== null) {
-                totalPercent += percent;
-                count++; // Zähle jede gefundene Bewertung
-            }
+    zellen.forEach(zelle => {
+        const percent = extractPercentageFromCell(zelle);
+        if (percent !== null) {
+            totalPercent += percent;
+            count++;
         }
     });
 
     if (count === 0) return null;
 
-    // Durchschnitt der Prozentwerte berechnen
     const averagePercent = totalPercent / count;
 
-    // Erst jetzt in IHK-Note umwandeln
-    const grade = convertPercentToIHKGrade(averagePercent);
-
     return {
-        grade: grade,
+        grade: convertPercentToIHKGrade(averagePercent),
         percent: averagePercent,
         count: count
     };
@@ -4889,98 +4846,12 @@ function getGradeColor(grade) {
 }
 
 // Notenberechnung für Pflichtaufgaben hinzufügen (für Alle Gruppen Ansicht)
+/**
+ * Notenspalte fuer die Gesamtsicht ueber alle Klassen. Die Rechnung ist
+ * dieselbe wie bei einer einzelnen Klasse, nur die Tabelle ist eine andere.
+ */
 function addPflichtaufgabenGradeCalculationForAllGroups() {
-    const table = document.getElementById('allGroupsPflichtTable');
-    if (!table) return;
-
-    // Prüfe ob bereits eine Notenzeile existiert
-    const existingGradeRow = table.querySelector('.pflicht-grade-row');
-    if (existingGradeRow) {
-        existingGradeRow.remove();
-    }
-
-    const thead = table.querySelector('thead');
-    if (!thead) return;
-
-    // Berechne Noten für alle Benutzer und füge sie im Header hinzu
-    const gradeRow = createPflichtaufgabenGradeHeaderRowForAllGroups();
-    thead.appendChild(gradeRow);
-}
-
-// Erstelle eine Header-Zeile mit berechneten Noten für Pflichtaufgaben (Alle Gruppen)
-function createPflichtaufgabenGradeHeaderRowForAllGroups() {
-    const table = document.getElementById('allGroupsPflichtTable');
-    const headers = table.querySelectorAll('thead th');
-
-    const row = document.createElement('tr');
-    row.className = 'pflicht-grade-row sticky-header bg-light-blue text-bold';
-    row.style.borderTop = '2px solid var(--info-color)';
-
-    // Erste Spalte: "Durchschnittsnote"
-    const labelCell = document.createElement('th');
-    labelCell.textContent = '📊 Durchschnittsnote';
-    labelCell.className = 'text-bold';
-    labelCell.style.color = 'var(--info-color)';
-    row.appendChild(labelCell);
-
-    // Für jeden Benutzer eine Note berechnen (alle Spalten außer der ersten)
-    for (let i = 1; i < headers.length; i++) {
-        const gradeCell = document.createElement('th');
-        gradeCell.className = 'text-center text-bold';
-
-        const gradeResult = calculatePflichtaufgabenGradeForUserAllGroups(i - 1); // i-1 weil erste Spalte der Aufgabenname ist
-
-        if (gradeResult !== null && gradeResult.grade !== null) {
-            gradeCell.textContent = `${gradeResult.grade.toFixed(1)} (${gradeResult.percent.toFixed(1)}%, n=${gradeResult.count})`;
-            gradeCell.style.color = getGradeColor(gradeResult.grade);
-            gradeCell.title = `Durchschnitt: ${gradeResult.percent.toFixed(1)}% aus ${gradeResult.count} bewerteten Aufgaben`;
-        } else {
-            gradeCell.textContent = 'n/a';
-            gradeCell.style.color = '#6c757d';
-            gradeCell.title = 'Keine bewerteten Aufgaben vorhanden';
-        }
-
-        row.appendChild(gradeCell);
-    }
-
-    return row;
-}
-
-// Berechne die Note für einen bestimmten Benutzer basierend auf allen bewerteten Pflichtaufgaben (Alle Gruppen)
-function calculatePflichtaufgabenGradeForUserAllGroups(userIndex) {
-    const table = document.getElementById('allGroupsPflichtTable');
-    if (!table) return null;
-
-    const rows = table.querySelectorAll('tbody tr:not(.pflicht-grade-row)');
-    let totalPercent = 0;
-    let count = 0; // Expliziter Zähler
-
-    rows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        if (cells.length > userIndex + 1) { // +1 weil erste Spalte der Aufgabenname ist
-            const userCell = cells[userIndex + 1];
-            const percent = extractPercentageFromCell(userCell);
-
-            if (percent !== null) {
-                totalPercent += percent;
-                count++; // Zähle jede gefundene Bewertung
-            }
-        }
-    });
-
-    if (count === 0) return null;
-
-    // Durchschnitt der Prozentwerte berechnen
-    const averagePercent = totalPercent / count;
-
-    // Erst jetzt in IHK-Note umwandeln
-    const grade = convertPercentToIHKGrade(averagePercent);
-
-    return {
-        grade: grade,
-        percent: averagePercent,
-        count: count
-    };
+    addPflichtaufgabenGradeCalculation('allGroupsPflichtTable');
 }
 
 // Neue Funktion für Einzelgruppen basierend auf der bewährten "Alle Gruppen" Logik
@@ -5186,80 +5057,28 @@ function generateSingleGroupPflichtTableFromAllData() {
         return;
     }
 
-    // HTML generieren (gleiche Logik wie einzelne Gruppe)
-    let html = '<table id="pflichtTable" class="info-table dashboard-table">';
-    html += '<thead><tr><th style="min-width: 250px;">Pflichtaufgabe</th>';
+    // Tabelle transponiert: Zeilen = Personen, Spalten = Aufgaben.
+    const sortierteAufgaben = sortiereAufgaben(filteredActivities);
+    const sortierteUser = sortUsersByVorname(groupUsers);
 
-    // Header für alle Benutzer der Gruppe
-    groupUsers.forEach(user => {
-        const userName = user.user_name || user.name || user.username || user.display_name || 'Unbekannt';
-        const displayName = userName.replace(' ', '<br>'); // Line break after first space
-        html += `<th style="text-align: center;">${displayName}</th>`;
+    let html = '<table id="pflichtTable" class="info-table dashboard-table pflicht-matrix">';
+    html += '<thead><tr><th class="person-name pflicht-person-col">Person</th>';
+    sortierteAufgaben.forEach(aktivitaet => {
+        html += pflichtSpaltenKopf(aktivitaet);
     });
     html += '</tr></thead><tbody>';
 
-    // Zeilen für jede Aktivität
-    filteredActivities.forEach(activity => {
+    // Eine Zeile je Person, eine Spalte je Aufgabe
+    sortierteUser.forEach(user => {
+        const userName = getUserName(user);
+        const userId = user.user_id || user.id;
+
         html += '<tr>';
-        html += `<td style="min-width: 250px;">`;
-        const activityIcon = activity.activity_type === 'quiz' ? '🧭' : '📝';
-        const activityType = activity.activity_type === 'quiz' ? 'Quiz' : 'Aufgabe';
-        html += `<a href="${activity.url}" target="_blank">${activityIcon} ${activity.title}</a>`;
-        html += `<br><small class="status-text-muted">Typ: ${activityType} | Kategorie: ${activity.category_name || 'Unbekannt'}</small>`;
-        html += `</td>`;
+        html += `<td class="person-name pflicht-person-col">${escapeHtml(userName)}</td>`;
 
-        // Status für jeden Benutzer der Gruppe
-        groupUsers.forEach(user => {
-            let status = null;
-            if (activity.user_status) {
-                const userId = user.user_id || user.id;
-                const userName = user.user_name || user.name || user.username || user.display_name;
-
-                status = activity.user_status.find(s =>
-                    (s.user_id && userId && s.user_id === userId) ||
-                    (s.user_name && userName && s.user_name === userName)
-                );
-            }
-
-            let cellContent = '';
-            let cellClass = 'progress-cell';
-            let bgColor = '';
-
-            if (status && status.grade && status.grade !== '-') {
-                cellContent = `<strong>${formatStarGrade(status.grade)}</strong>`;
-                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
-            } else if (status && status.rating && status.rating !== '-') {
-                // Alternative: Rating field for assignments
-                cellContent = `<strong>${formatStarGrade(status.rating)}</strong>`;
-                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
-            } else if (status && status.score && status.score !== '-') {
-                // Alternative: Score field for assignments
-                cellContent = `<strong>${status.score}</strong>`;
-                bgColor = '--progress-width: 100%; --progress-color: #28a745;';
-            } else if (status && status.status === 'Zur Bewertung abgegeben') {
-                // For assignments (type "Aufgabe"), create hyperlink with group parameter
-                // Only create link for non-quiz activities (i.e., assignments)
-                if (activity.activity_type !== 'quiz' && groupId) {
-                    const assignmentUrl = activity.url.includes('?')
-                        ? `${activity.url}&group=${groupId}`
-                        : `${activity.url}?group=${groupId}`;
-                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning">bewertbar</a>`;
-                } else {
-                    cellContent = '<span class="status-text-warning">bewertbar</span>';
-                }
-                bgColor = '--progress-width: 50%; --progress-color: #ffc107;';
-            } else {
-                cellContent = '❌';
-                bgColor = '--progress-width: 0%; --progress-color: #dc3545;';
-            }
-
-            // Füge Zeitstempel hinzu, wenn vorhanden
-            const submissionTimeFormatted = formatSubmissionTime(status?.submission_time);
-            if (submissionTimeFormatted) {
-                cellContent += `<br><small class="status-text-muted" style="font-size: 0.75em;">${submissionTimeFormatted}</small>`;
-            }
-
-            html += `<td class="${cellClass}" style="${bgColor} text-align: center;" data-submission-time="${status?.submission_time || ''}">${cellContent}</td>`;
+        sortierteAufgaben.forEach(aktivitaet => {
+            const status = findeUserStatus(aktivitaet, userId, userName);
+            html += pflichtStatusZelle(status, aktivitaet, groupId);
         });
 
         html += '</tr>';
@@ -5273,36 +5092,16 @@ function generateSingleGroupPflichtTableFromAllData() {
 
     // Notenberechnung für Pflichtaufgaben hinzufügen
     addPflichtaufgabenGradeCalculation();
-    
+
     // Scroll-Wrapper anwenden
     setTimeout(() => wrapTableWithScrollContainer('pflichtData'), 50);
 
-    // Sortierung anwenden
+    // Standardsortierung: erste Spalte (Person) aufsteigend nach Vorname
     const table = document.getElementById('pflichtTable');
     if (table) {
-        const tbody = table.querySelector('tbody');
-        if (tbody) {
-            const rows = Array.from(tbody.querySelectorAll('tr'));
-            rows.sort((a, b) => {
-                const aVal = getSortValue(a, 0);
-                const bVal = getSortValue(b, 0);
-
-                if (aVal.match(/^\d+(\.\d+)?$/) && bVal.match(/^\d+(\.\d+)?$/)) {
-                    return parseFloat(aVal) - parseFloat(bVal);
-                } else {
-                    return aVal.localeCompare(bVal);
-                }
-            });
-
-            rows.forEach(row => tbody.appendChild(row));
-
-            const headers = table.querySelectorAll('th');
-            if (headers[0]) {
-                headers[0].classList.add('sort-asc');
-            }
-
-            sortState['pflichtTable_0'] = 'asc';
-        }
+        const headers = table.querySelectorAll('thead th');
+        if (headers[0]) headers[0].classList.add('sort-asc');
+        sortState['pflichtTable_0'] = 'asc';
     }
 }
 

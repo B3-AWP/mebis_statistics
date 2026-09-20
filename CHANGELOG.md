@@ -2,6 +2,96 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [Unreleased] - 2026-09-20 — Frontend-Redesign (kompaktes Layout)
+
+Visuelle Überarbeitung des Dashboards nach dem Entwurf in
+`Dashboard Redesign/Main.dc.html`, dazu eine Verhaltensänderung am
+Halbjahr-Umschalter. **Keine Rechenregel und keine Datenstruktur
+geändert** — die Zahlen entstehen unverändert.
+
+### 🎨 Layout
+
+- **Zwei Navigationszeilen zu einer Toolbar zusammengefasst.** Klasse,
+  Ansicht und die Aktionen „Datei laden"/„Aktualisieren" stehen jetzt in
+  einer Zeile, getrennt durch senkrechte Striche.
+- **Halbjahr-Umschalter nach oben in die Steuerleiste**, neben Schulwoche,
+  „Aktuelle Woche" und „CSV Export". Die eigene Karte darüber entfällt;
+  der Hinweis bei gesperrtem Halbjahr (`#halbjahrHinweis`) bleibt als
+  Zeile darunter erhalten.
+- **Kennzahlen als eine geteilte Zeile** statt sieben Kacheln: Label
+  klein über der Zahl, Spalten durch feine Striche getrennt. Spart etwa
+  eine Bildschirmhöhe.
+- Klassen- und Halbjahr-Auswahl sind **Segmented Controls** (Knöpfe in
+  einer grauen Rille, aktiver Knopf flächig gefärbt).
+
+### 🎨 Stil
+
+- **Flache Palette**: weiße Karten mit 1px-Rahmen auf grauem Grund,
+  keine Farbverläufe, keine Schlagschatten, kein Hover-Anheben. Akzent
+  ist `#2563EB`, die Klassenauswahl `#7C3AED`.
+- **Tabellen** mit hellem, kleinem Kopf statt dunkelblauem Band; Zeilen
+  nur durch feine Linien getrennt (Zebra-Streifen entfallen).
+- **Zahlen in Mono** (`--font-mono`, `tabular-nums`), damit Kommastellen
+  in Flucht stehen; Kopfzellen der Zahlenspalten rechtsbündig wie ihre
+  Werte.
+- **Systemschriften statt IBM Plex** aus dem Entwurf — das Dashboard
+  läuft lokal und soll ohne CDN identisch aussehen.
+- Statustönung in „Letzte Abgaben" durch einen **Farbstrich am linken
+  Rand** ersetzt; die Aussage trägt ohnehin das Badge in der Statusspalte.
+- Die Tabs Pflichtaufgaben, Leistungsnachweise und Checklisten erben
+  Typografie, Buttons, Filterleisten und Tabellenstil aus demselben
+  Token-Satz.
+
+### 🚀 Eine einheitliche Tabelle je Umschalter-Stellung
+
+Der Halbjahr-Umschalter wechselt nur noch den **Datensatz**, nicht die
+Darstellung. „Gesamt", „1. Halbjahr" und „2. Halbjahr" zeigen dieselbe
+Tabelle mit denselben Spalten:
+
+| Spalte | Bedeutung |
+|---|---|
+| Quantität Pflicht (%) | Erreichte Stunden am Soll der gewählten Woche — über 100 % heißt: dem Plan voraus |
+| Delta (Std.) | Vorsprung bzw. Rückstand in Unterrichtsstunden |
+| Note | Aus der Quantität, Schwellen 92/81/67/50/30 % |
+| Qualität (%) | Ungewichteter Durchschnitt der Bewertungen |
+| Eingereichte Aufgaben | Anzahl, Balken nach `percent_submitted` |
+| Note Pflichtaufgaben | Durchschnitt der bewerteten Pflichtaufgaben, mit N |
+| Mitarbeitsnote | (Quantität + Qualität) / 2 |
+
+- **„Gesamt" steht dauerhaft an erster Stelle** und fasst alle Kurse
+  zusammen — auch wenn erst ein Kurs Daten hat. Bisher erschien der Knopf
+  nur bei mehr als einem Kurs und stand zwischen den Halbjahren.
+- Die zweite Tabelle („Mitarbeitsnote") **entfällt**; ihre Spalten Delta,
+  Qualität und Mitarbeitsnote sind in die eine Tabelle gewandert.
+  `generateHalbjahresnotenTable()` ist damit entfallen.
+- **Für die Mitarbeitsnote wird die Quantität bei 100 % gekappt.** Ein
+  Vorsprung soll eine schwache Qualität nicht rechnerisch ausgleichen —
+  in der eigenen Spalte steht weiterhin der ungekappte Wert.
+- Über der Tabelle steht die Bezugszeile „{Zeitraum} (Woche w von n,
+  Soll x %, Schiene: …)".
+- **Unverändert:** In der Ansicht „Alle Klassen" steht weiterhin der
+  Klassenvergleich, in jeder Umschalter-Stellung.
+
+### 🔧 Technische Änderungen
+
+- Design-Tokens in `:root` von [style.css](src/dashboard/static/css/style.css):
+  `--accent`, `--class-accent`, `--surface*`, `--line*`, `--text-*`,
+  `--font-mono`. Bestehende Variablen wie `--primary-color` zeigen auf die
+  neuen Werte, damit nicht umgestellte Stellen mitziehen.
+- Alle IDs und Klassennamen unverändert — `dashboard.js` und
+  `csv_export.js` arbeiten ohne Anpassung weiter.
+- Kaputte Selektorenkette in `dashboard-custom.css` repariert (fehlende
+  Kommas bei der Spaltenausrichtung von `#recentSubmissionsDataTable`).
+- [tests/test_frontend.js](tests/test_frontend.js) prüft, dass jede
+  Umschalter-Stellung dieselbe Tabelle mit allen sieben Spalten erzeugt
+  und dass „Gesamt" vor dem 1. Halbjahr steht. Die alte Zusicherung
+  „kein Gesamt bei nur einem Kurs" ist entfallen.
+- Doppelte Titelvergabe beseitigt: `selectHalbjahr()` setzte den Titel
+  der Einzelklassen-Ansicht abweichend von `generateGroupProgressTable()`
+  und behielt bei einem gesperrten Kurs den alten Text.
+
+---
+
 ## [Unreleased] - 2026-09-18 — Kursstruktur 2026/27
 
 Umfassendes Refactoring auf die neue Kursstruktur. Details und offene

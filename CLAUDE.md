@@ -76,6 +76,10 @@ Delta = (Ist − Soll) × Σ Stunden gesamt        → Unterrichtsstunden
   wäre schon innerhalb eines Halbjahres falsch.
 - **Qualität bleibt bewusst ungewichtet**: schlichter Durchschnitt der
   Bewertungen.
+- **Mitarbeitsnote = (Quantität + Qualität) / 2**, wobei die Quantität
+  dafür **bei 100 % gekappt** wird. In ihrer eigenen Spalte steht der
+  ungekappte Wert (über 100 % = dem Plan voraus) — ein Vorsprung soll
+  sichtbar sein, aber keine schwache Qualität rechnerisch ausgleichen.
 - Die Funktionen in [src/common/plan_loader.py](src/common/plan_loader.py)
   (`soll_anteil`, `aktuelle_woche`, `verteile_unterrichtsstunden`) sind **1:1
   aus `js/bilanz.js` des Schüler-Dashboards portiert** und per Test gegen
@@ -92,6 +96,14 @@ Delta = (Ist − Soll) × Σ Stunden gesamt        → Unterrichtsstunden
 - **Halbjahr = Moodle-Kurs**, keine Notenstufe. Zwei Kurse je Schuljahr mit je
   eigener Aufgabenliste; der Umschalter im Dashboard wählt einen Kurs. Je
   Halbjahr gibt es *eine* Mitarbeitsnote aus Quantität und Qualität.
+  Der Umschalter wechselt **nur den Datensatz, nicht die Darstellung**:
+  „Gesamt" (steht vorne, immer wählbar) fasst alle Kurse zusammen, ein
+  Halbjahr zeigt genau seinen Kurs — in allen drei Stellungen dieselbe
+  Tabelle mit denselben sieben Spalten (Quantität Pflicht, Delta, Note,
+  Qualität, Eingereichte Aufgaben, Note Pflichtaufgaben, Mitarbeitsnote).
+  Bei „Alle Klassen" steht unabhängig davon der Klassenvergleich. Alles in
+  [`generateGroupProgressTable`](src/dashboard/static/dashboard.js), per
+  Test abgesichert.
 - **Gruppe = Klasse.** Seit 2026/27 gibt es keine Team-Ebene mehr. Moodle
   liefert Gruppennamen in wechselnder Form (`K - IFA12A (6072)`,
   `IFA12A - Team 3`, `IFA12A`); das Kürzel zieht
@@ -147,6 +159,14 @@ Testexporte heißen `test_output_*.json` und werden dadurch nicht gefunden).
   explizitem `pfad` arbeiten.
 - Frontend ist **Vanilla JS ohne Build-Schritt** — Dateien in
   `src/dashboard/static/` werden direkt ausgeliefert. Kein npm, kein Bundler.
+- **Farben, Abstände und Schriftgrößen kommen aus den Design-Tokens** in
+  `:root` von [style.css](src/dashboard/static/css/style.css)
+  (`--accent`, `--class-accent`, `--surface*`, `--line*`, `--text-*`,
+  `--font-mono`). Keine neuen Hex-Werte in Regeln oder Inline-Styles; der
+  Entwurf, aus dem sie stammen, liegt in `Dashboard Redesign/Main.dc.html`.
+  Das Layout ist flach: Rahmen statt Schatten, keine Farbverläufe, kein
+  Hover-Anheben. Zahlen in Tabellen und Kennzahlen laufen in `--font-mono`
+  mit `tabular-nums`, damit Kommastellen in Flucht stehen.
 - Selenium-Scraping ist langsam und flaky: `retry`-Decorator und
   `PhaseTimer` in [exporter.py](src/export/exporter.py) nutzen, statt neue
   Wartelogik zu erfinden. Ein voller Export dauert ~6–7 min je Kurs.
