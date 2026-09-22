@@ -1892,8 +1892,7 @@ function generateRecentSubmissionsTable() {
         const fmtBewertbar = (sub, url, type, isBewertbar, gradeDisplay) => {
             const showBewertbar = type === 'assignment' && gradeDisplay == null;
             if (showBewertbar && url && groupId) {
-                const href = url.includes('?') ? `${url}&group=${groupId}` : `${url}?group=${groupId}`;
-                return `<a href="${href}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                return `<a href="${bewertungsUrl(url, groupId)}" target="_blank" class="status-text-warning">bewertbar</a>`;
             }
             if (showBewertbar) {
                 return '<span class="status-text-warning">bewertbar</span>';
@@ -2353,6 +2352,26 @@ function getSchoolDaysDiff(fromDate, toDate) {
 // ============================================================================
 
 /**
+ * Baut den Link auf die Bewertungsuebersicht einer Aufgabe.
+ *
+ * `action=grader` oeffnet direkt die Korrekturansicht statt der
+ * Aufgaben-Startseite; `group` schraenkt auf die gewaehlte Klasse ein.
+ * Welche Abgaben dort gelistet werden, steuert Moodle ueber die
+ * Nutzereinstellung `assign_filter` — die laesst sich nicht per URL
+ * setzen, sie bleibt auf dem zuletzt gewaehlten Wert stehen.
+ *
+ * \param {string} url - Basis-URL der Aufgabe (mod/assign/view.php?id=…)
+ * \param {string} groupId - Moodle-Gruppen-ID der aktuellen Klasse
+ * \returns {string} URL der Bewertungsuebersicht
+ */
+function bewertungsUrl(url, groupId) {
+    if (!url) return '#';
+    const trenner = url.includes('?') ? '&' : '?';
+    const gruppe = groupId ? `${trenner}group=${groupId}` : '';
+    return `${url}${gruppe}${gruppe ? '&' : trenner}action=grader`;
+}
+
+/**
  * Entfernt das "Pflicht: "-Praefix aus einem Aufgabentitel. Die Zugehoerigkeit
  * ergibt sich aus dem Tab; in jeder Spalte wiederholt waere es nur Rauschen.
  * \param {string} titel - Aufgabentitel aus Moodle
@@ -2481,10 +2500,7 @@ function pflichtStatusZelle(status, aktivitaet, groupId) {
     } else if (status && status.status === 'Zur Bewertung abgegeben') {
         // Nur Aufgaben lassen sich direkt bewerten, Quizzes nicht.
         if (aktivitaet.activity_type !== 'quiz' && groupId) {
-            const url = aktivitaet.url.includes('?')
-                ? `${aktivitaet.url}&group=${groupId}`
-                : `${aktivitaet.url}?group=${groupId}`;
-            cellContent = `<a href="${url}" target="_blank" class="status-text-warning">bewertbar</a>`;
+            cellContent = `<a href="${bewertungsUrl(aktivitaet.url, groupId)}" target="_blank" class="status-text-warning">bewertbar</a>`;
         } else {
             cellContent = '<span class="status-text-warning">bewertbar</span>';
         }
@@ -2758,10 +2774,7 @@ function generatePflichtTableFromActivities() {
                 // For assignments (type "Aufgabe"), create hyperlink with group parameter
                 // Only create link for non-quiz activities (i.e., assignments)
                 if (assignment.activity_type !== 'quiz' && groupId) {
-                    const assignmentUrl = assignment.url.includes('?')
-                        ? `${assignment.url}&group=${groupId}`
-                        : `${assignment.url}?group=${groupId}`;
-                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                    cellContent = `<a href="${bewertungsUrl(assignment.url, groupId)}" target="_blank" class="status-text-warning">bewertbar</a>`;
                 } else {
                     cellContent = '<span class="status-text-warning">bewertbar</span>';
                 }
@@ -2880,10 +2893,7 @@ function generatePflichtTableFromStructuredTables() {
                 // For assignments (type "Aufgabe"), create hyperlink with group parameter
                 // Only create link for non-quiz activities (i.e., assignments)
                 if (row.assignment_type !== 'quiz' && groupId) {
-                    const assignmentUrl = row.assignment_url.includes('?')
-                        ? `${row.assignment_url}&group=${groupId}`
-                        : `${row.assignment_url}?group=${groupId}`;
-                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                    cellContent = `<a href="${bewertungsUrl(row.assignment_url, groupId)}" target="_blank" class="status-text-warning">bewertbar</a>`;
                 } else {
                     cellContent = '<span class="status-text-warning">bewertbar</span>';
                 }

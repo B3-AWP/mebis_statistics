@@ -20,6 +20,7 @@ os.chdir(_project_root)
 import json
 import glob
 import math
+import re
 import subprocess
 import threading
 import time as time_module
@@ -218,12 +219,91 @@ def load_ignored_groups():
         logger.error(f"Error loading ignored groups: {e}")
         return set()
 
+# Zeitangabe am Ende eines Moodle-Titels: "(20 Min)", "(ca. 25 Min.)",
+# "(2-3 Std)", "(~25 Min)". Sie nennt die reine Bearbeitungszeit der
+# Aktivitaet, nicht die dafuer eingeplanten Unterrichtsstunden — und ist
+# deshalb nicht die Zahl, mit der das Dashboard rechnet.
+# Die Zeitangabe selbst: "20 Min", "ca. 25 Min.", "2-3 Std", "~25 Min".
+_ZEITANGABE = (r'(?:ca\.?|~|etwa)?\s*[\d.,]+(?:\s*[-–]\s*[\d.,]+)?\s*'
+               r'(?:min|minuten|std|stunden|h)\s*\.?')
+
+# Fall 1: die Klammer am Ende enthaelt nur die Zeit -> ganze Klammer weg.
+_ZEIT_IM_TITEL = re.compile(
+    r'\s*\(\s*' + _ZEITANGABE + r'\s*\)\s*$',
+    re.IGNORECASE)
+
+# Fall 2: die Klammer enthaelt noch anderes ("(Lernzielkontrolle, ~25 Min)")
+# -> nur die Zeit samt vorangehendem Komma entfernen, der Rest bleibt.
+_ZEIT_IN_KLAMMER = re.compile(
+    r'(?<=\()([^()]*?)[,;]?\s*' + _ZEITANGABE + r'\s*(?=\)\s*$)',
+    re.IGNORECASE)
+
+
+def titel_mit_planstunden(titel, cmid, plan_stunden):
+    """
+    Ersetzt die Zeitangabe im Moodle-Titel durch die Planstunden.
+
+    Im Kurs steht die Bearbeitungszeit der Aktivitaet im Namen ("20 Min"),
+    das Dashboard rechnet aber mit den in `plan.json` hinterlegten
+    Unterrichtsstunden. Beides nebeneinander waere verwirrend, also zeigen
+    wir die Zahl, die auch die Quantitaet bestimmt.
+
+    Steht die Aufgabe nicht im Plan (keine Pflichtaufgabe), bleibt der
+    Titel unveraendert — dort gibt es keine Planstunden.
+
+    Args:
+        titel: Titel aus Moodle, ggf. mit Zeitangabe in Klammern
+        cmid: Moodle-Aktivitaets-ID
+        plan_stunden: {cmid: stunden} des aktiven Kurses
+
+    Returns:
+        str: Titel mit Planstunden statt Moodle-Zeit
+    """
+    if not titel:
+        return titel
+
+    stunden = plan_stunden.get(str(cmid).strip())
+    if stunden is None:
+        return titel
+
+    ohne_zeit = _ZEIT_IM_TITEL.sub('', titel).rstrip()
+    if ohne_zeit == titel:
+        # Zeit steckt in einer Klammer mit weiterem Text
+        ohne_zeit = _ZEIT_IN_KLAMMER.sub(r'\1', titel).replace('()', '').rstrip()
+    # 3.0 -> "3", 2.5 -> "2,5" (deutsche Schreibweise)
+    zahl = f"{stunden:g}".replace('.', ',')
+    return f"{ohne_zeit} ({zahl} Std.)"
+
+
+def _titel_auf_planstunden_umstellen(assignments_by_category, plan_stunden):
+    """
+    Schreibt die Titel aller Aktivitaeten einmal zentral um.
+
+    Das Frontend liest an mehreren Stellen direkt aus
+    `activities_by_category` (u.a. der Pflichtaufgaben-Tab), nicht nur ueber
+    `assignment_details`. Wird hier umgeschrieben, ziehen alle nach.
+
+    Args:
+        assignments_by_category: Kategorien aus dem Export (wird veraendert)
+        plan_stunden: {cmid: stunden} des aktiven Kurses
+    """
+    if not plan_stunden:
+        return
+    for category in assignments_by_category or []:
+        for art in ('assignments', 'quizzes', 'checklists', 'feedbacks'):
+            for act in category.get(art, []):
+                if 'title' in act:
+                    act['title'] = titel_mit_planstunden(
+                        act['title'], act.get('id'), plan_stunden)
+
+
 def get_assignment_details(assignments_by_category):
     """
     Erstellt ein Dictionary mit Assignment-Details
 
     Args:
         assignments_by_category: Liste der Kategorien mit Assignments
+            (Titel sind bereits auf Planstunden umgestellt)
 
     Returns:
         dict: Dictionary mit Assignment-Details, indexiert nach ID
@@ -647,6 +727,14 @@ def _process_course_data(data, plan, kurs, source_label=None):
     except Exception as e:
         logger.error(f"Error loading grade_mapping: {e}")
         grade_mapping = {}
+
+    # Die im Moodle-Titel genannte Zeit ist die Bearbeitungsdauer der
+    # Aktivitaet; gerechnet wird aber mit den Planstunden. Die Titel werden
+    # deshalb einmal zentral umgeschrieben — danach sehen alle Auswertungen
+    # (Details, strukturierte Tabellen, Frontend) dieselbe Angabe.
+    geplante_aufgaben = kurs['aufgaben'] if kurs else plan.get_alle_aufgaben()
+    plan_stunden = {str(a['cmid']).strip(): a['stunden'] for a in geplante_aufgaben}
+    _titel_auf_planstunden_umstellen(data.get('activities_by_category', []), plan_stunden)
 
     assignment_details = get_assignment_details(data.get('activities_by_category', []))
 

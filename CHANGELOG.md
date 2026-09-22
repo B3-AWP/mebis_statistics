@@ -2,6 +2,65 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [Unreleased] - 2026-09-22 — Planstunden im Titel, Sprung in die Bewertung
+
+### 🚀 Aufgabentitel nennen die Planstunden
+
+Moodle führt im Namen einer Aktivität die reine Bearbeitungszeit
+(„Quiz HTML Grundlagen (20 Min)"). Gerechnet wird aber mit den `stunden`
+aus `plan.json` — zwei verschiedene Zahlen nebeneinander waren
+verwirrend. Das Backend schreibt die Titel beim Laden deshalb einmal
+zentral um:
+
+```
+Moodle:     Pflicht: Quiz HTML Grundlagen (20 Min)
+Dashboard:  Pflicht: Quiz HTML Grundlagen (3 Std.)
+```
+
+- Neue Funktionen `titel_mit_planstunden()` und
+  `_titel_auf_planstunden_umstellen()` in
+  [backend.py](src/dashboard/backend.py). Die Umstellung passiert **einmal
+  auf `activities_by_category`**, bevor Details und strukturierte Tabellen
+  daraus gebaut werden — der Pflichtaufgaben-Tab liest die Kategorien
+  direkt, deshalb reichte ein Umschreiben in `get_assignment_details()`
+  nicht.
+- Erkannt werden `(20 Min)`, `(10 Min.)`, `(ca. 45 Minuten)`, `(~25 Min)`,
+  `(2-3 Std)`. Steht die Zeit in einer Klammer mit weiterem Text, fällt
+  nur sie weg: „(Lernzielkontrolle, ~25 Min)" → „(Lernzielkontrolle)".
+- **Aktivitäten ohne Plan-Eintrag bleiben unverändert** — für sie gibt es
+  keine Planstunden (Übungen, SD-Übungen behalten ihre Moodle-Zeit).
+- Halbe Stunden deutsch geschrieben: `2.5` → „2,5 Std.".
+- Die Umschreibung ist idempotent, ein zweiter Durchlauf hängt nichts an.
+
+### 🚀 „bewertbar" springt in die Korrekturansicht
+
+Der Link öffnet jetzt direkt Moodles Grader statt der Aufgaben-Startseite:
+
+```
+vorher:  …/mod/assign/view.php?id=91837888&group=625177
+jetzt:   …/mod/assign/view.php?id=91837888&group=625177&action=grader
+```
+
+- Neue Hilfsfunktion `bewertungsUrl()` in
+  [dashboard.js](src/dashboard/static/dashboard.js); sie ersetzt vier
+  Stellen, die den Link zuvor je eigen zusammengebaut haben.
+- Der Filter *„Bewertung erforderlich"* ist eine Moodle-Nutzereinstellung
+  (`assign_filter`), die per POST auf `/api/rest/v2/user/current/preferences`
+  gesetzt wird — **nicht über die URL steuerbar**. Moodle merkt sie sich
+  aber je Nutzer, sodass sie nach einmaligem Setzen im Grader erhalten
+  bleibt.
+
+### 🔧 Technische Änderungen
+
+- `Dashboard Redesign/` entfernt — war nur Ansichtsmaterial für das
+  Frontend-Redesign und wird nicht mehr gebraucht. Der Verweis darauf in
+  CLAUDE.md ist ebenfalls raus.
+- Neue Testdatei
+  [tests/test_titel_planstunden.py](tests/test_titel_planstunden.py)
+  (12 Tests, in Stufe 1 von `run_refactoring_tests.sh` eingehängt).
+
+---
+
 ## [Unreleased] - 2026-09-20 — Frontend-Redesign (kompaktes Layout)
 
 Visuelle Überarbeitung des Dashboards nach dem Entwurf in
@@ -23,6 +82,29 @@ geändert** — die Zahlen entstehen unverändert.
   eine Bildschirmhöhe.
 - Klassen- und Halbjahr-Auswahl sind **Segmented Controls** (Knöpfe in
   einer grauen Rille, aktiver Knopf flächig gefärbt).
+
+### 📋 Pflichtaufgaben-Tabelle
+
+- **Achsen getauscht**: Zeilen sind jetzt **Personen**, Spalten die
+  **Aufgaben** (vorher umgekehrt). Bei 25 Personen und 16 Aufgaben liest
+  sich die Klasse damit von oben nach unten statt von links nach rechts.
+- Das Präfix **„Pflicht: " wird in den Spaltenköpfen ausgeblendet**; der
+  Titel bricht über bis zu drei Zeilen um und wird danach abgeschnitten.
+  Der **vollständige Titel** samt Typ und Kategorie steht im **Tooltip**.
+- Die **Durchschnittsnote** wandert von der Kopfzeile in eine **Spalte am
+  Zeilenende** — je Person eine Note, wie zuvor aus den bewerteten
+  Aufgaben gemittelt (Rechenweg unverändert).
+- Die Filter (Status, Typ, Abgabezeitraum) blenden jetzt
+  **Aufgabenspalten** statt Zeilen aus; die Klassenliste bleibt vollständig.
+- Ein Klick auf einen Aufgabentitel öffnet Moodle und sortiert nicht mehr
+  zusätzlich die Tabelle.
+
+### 🔤 Sortierung
+
+- **Tabellen sortieren Personen standardmäßig nach Vorname.** Moodle
+  liefert „Vorname Nachname"; verglichen wird von links, bei gleichem
+  Vornamen entscheidet der Nachname. Betrifft Mitarbeitsnoten-,
+  Fortschritts-, Leistungsnachweis- und Pflichtaufgaben-Tabelle.
 
 ### 🎨 Stil
 

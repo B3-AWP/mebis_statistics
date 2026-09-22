@@ -10,6 +10,7 @@ trap 'rm -rf "$FIXTURE_DIR"' EXIT
 
 echo "=== 1/4  plan_loader (Python, inkl. Abgleich mit js/bilanz.js) ==="
 python -m unittest tests.test_plan_loader 2>&1 | tail -3
+python -X utf8 -m unittest tests.test_titel_planstunden 2>&1 | tail -3
 
 echo
 echo "=== 2/4  Testdaten erzeugen ==="

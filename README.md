@@ -414,6 +414,35 @@ Halbjahres.
 Die Schienen starten zu unterschiedlichen Terminen — mit der Klasse ändert
 sich daher auch die laufende Woche.
 
+### Zeitangabe im Aufgabentitel
+
+In Moodle steht im Namen einer Aktivität die reine Bearbeitungszeit
+(„Quiz HTML Grundlagen (20 Min)"). Das ist **nicht** die Zeit, mit der das
+Dashboard rechnet — maßgeblich sind die `stunden` aus `plan.json`.
+
+Das Dashboard ersetzt die Angabe deshalb bei der Anzeige:
+
+```
+Moodle:     Pflicht: Quiz HTML Grundlagen (20 Min)
+Dashboard:  Pflicht: Quiz HTML Grundlagen (3 Std.)
+```
+
+Aktivitäten ohne Eintrag in `plan.json` behalten ihren Moodle-Titel — für
+sie gibt es keine Planstunden. Steht die Zeit in einer Klammer mit weiterem
+Text, bleibt nur die Zeit weg: „(Lernzielkontrolle, ~25 Min)" wird zu
+„(Lernzielkontrolle) (8 Std.)".
+
+### Direkt zur Bewertung springen
+
+Ist eine Aufgabe abgegeben, aber noch nicht bewertet, steht in der Tabelle
+**„bewertbar"**. Der Link führt direkt in Moodles Korrekturansicht der
+gewählten Klasse (`…/mod/assign/view.php?id=…&group=…&action=grader`).
+
+Welche Abgaben dort gelistet werden, steuert Moodle über die persönliche
+Einstellung *„Bewertung erforderlich"* — die lässt sich nicht über die URL
+setzen. Einmal im Grader eingestellt, merkt Moodle sie sich für die
+folgenden Aufrufe.
+
 ### Ignorierte Gruppen
 
 ```env

@@ -113,6 +113,16 @@ Delta = (Ist − Soll) × Σ Stunden gesamt        → Unterrichtsstunden
   `klassenZuSchiene` haben kein Soll und werden übersprungen.
 - **LNW** = Leistungsnachweis (benoteter Test), **Pflichtaufgabe** = im Plan
   geführte Aufgabe.
+- **Zeitangabe im Aufgabentitel.** Moodle nennt im Namen die reine
+  Bearbeitungszeit („Quiz HTML Grundlagen (20 Min)"); gerechnet wird aber
+  mit den `stunden` aus `plan.json`. Das Backend schreibt die Titel deshalb
+  beim Laden einmal zentral um
+  ([`_titel_auf_planstunden_umstellen`](src/dashboard/backend.py)) — danach
+  steht überall dieselbe Zahl, mit der auch die Quantität rechnet.
+  Aktivitäten ohne Plan-Eintrag behalten ihren Moodle-Titel, dort gibt es
+  keine Planstunden. Die Umschreibung ist idempotent und per
+  [tests/test_titel_planstunden.py](tests/test_titel_planstunden.py)
+  abgesichert.
 
 ## Aufbau
 
@@ -162,8 +172,7 @@ Testexporte heißen `test_output_*.json` und werden dadurch nicht gefunden).
 - **Farben, Abstände und Schriftgrößen kommen aus den Design-Tokens** in
   `:root` von [style.css](src/dashboard/static/css/style.css)
   (`--accent`, `--class-accent`, `--surface*`, `--line*`, `--text-*`,
-  `--font-mono`). Keine neuen Hex-Werte in Regeln oder Inline-Styles; der
-  Entwurf, aus dem sie stammen, liegt in `Dashboard Redesign/Main.dc.html`.
+  `--font-mono`). Keine neuen Hex-Werte in Regeln oder Inline-Styles.
   Das Layout ist flach: Rahmen statt Schatten, keine Farbverläufe, kein
   Hover-Anheben. Zahlen in Tabellen und Kennzahlen laufen in `--font-mono`
   mit `tabular-nums`, damit Kommastellen in Flucht stehen.
