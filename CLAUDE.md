@@ -55,7 +55,7 @@ Leicht zu verwechseln — es sind verschiedene Dinge:
 
 | Konstante | Wert | Gilt für |
 |---|---|---|
-| `plan_loader.SCHEMA_VERSION` | **3** | `plan.json` (`schemaVersion`) |
+| `plan_loader.SCHEMA_VERSION` | **4** | `plan.json` (`schemaVersion`) |
 | `exporter.EXPORT_SCHEMA_VERSION` / `backend.EXPORT_SCHEMA_VERSION` | **2** | Export-JSON (`schema`) |
 
 Beide werden hart geprüft; Altformate werden **abgelehnt, nicht migriert**.
@@ -74,6 +74,14 @@ Delta = (Ist − Soll) × Σ Stunden gesamt        → Unterrichtsstunden
 - **Quantität ist stundengewichtet**, Soll folgt dem Wochenkalender (Woche 1
   hat 10 Stunden, die übrigen 14) — eine lineare Näherung `Woche / Anzahl`
   wäre schon innerhalb eines Halbjahres falsch.
+- **Innerhalb einer laufenden Blockwoche zählt nur der gehaltene Anteil**,
+  sofern die Klasse ein `stundenraster` hat (`klassenZuRaster` ordnet zu;
+  mehrere Klassen dürfen sich eines teilen, auch über Schienen hinweg). Das
+  Raster gibt die *Form* der Verteilung auf Mo–Fr, die Wochensumme der
+  Schiene die *Höhe* — anteilig gerechnet, damit die verkürzte Woche 1
+  (10 statt 14 Stunden) nicht mehr ausweist als sie hat. Tage außerhalb
+  `start`–`ende` zählen nicht. Ohne Raster zählt die angebrochene Woche
+  ganz, also exakt wie vor der Einführung.
 - **Qualität bleibt bewusst ungewichtet**: schlichter Durchschnitt der
   Bewertungen.
 - **Mitarbeitsnote = (Quantität + Qualität) / 2**, wobei die Quantität

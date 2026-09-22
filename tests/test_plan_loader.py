@@ -32,7 +32,7 @@ from src.common.plan_loader import (  # noqa: E402
 def minimal_plan(**overrides):
     """Kleinster gültiger Plan, für Validierungstests."""
     plan = {
-        'schemaVersion': 3,
+        'schemaVersion': 4,
         'schuljahr': '2026/27',
         'skalen': {
             'sterne4': {
@@ -88,7 +88,7 @@ class TestValidierung(unittest.TestCase):
 
     def test_falsche_schemaversion(self):
         with self.assertRaises(PlanFehler) as ctx:
-            pruefe_plan(minimal_plan(schemaVersion=2))
+            pruefe_plan(minimal_plan(schemaVersion=3))
         self.assertTrue(any('schemaVersion' in m for m in ctx.exception.meldungen))
 
     def test_doppelte_cmid(self):
@@ -185,6 +185,63 @@ class TestSchienen(unittest.TestCase):
                 self.assertIsNone(self.plan.get_track_for_class(name))
 
 
+class TestStundenraster(unittest.TestCase):
+    """
+    Das Raster teilt eine laufende Blockwoche tagesgenau. Es ist optional:
+    ohne Eintrag zaehlt die angebrochene Woche wie bisher ganz.
+    """
+
+    RASTER = {'RasterAB': {'mo': 2, 'di': 5, 'mi': 2, 'do': 3, 'fr': 2}}
+
+    def _plan(self, **overrides):
+        basis = {
+            'stundenraster': self.RASTER,
+            'klassenZuRaster': {'IFA12A': 'RasterAB'},
+        }
+        basis.update(overrides)
+        return pruefe_plan(minimal_plan(**basis))
+
+    def test_raster_zu_klasse(self):
+        plan = self._plan()
+        self.assertEqual(plan.get_raster_for_class('IFA12A')['di'], 5)
+
+    def test_raster_nimmt_moodle_gruppennamen(self):
+        # Wie get_track_for_class: das Kuerzel wird per Muster gezogen.
+        plan = self._plan()
+        self.assertEqual(plan.get_raster_for_class('K - IFA12A (6072)')['di'], 5)
+
+    def test_klasse_ohne_raster(self):
+        self.assertIsNone(self._plan().get_raster_for_class('IFA12Z'))
+
+    def test_raster_ist_optional(self):
+        # Ein Plan ohne die Felder bleibt gueltig — nur ohne Tagesgenauigkeit.
+        plan = pruefe_plan(minimal_plan())
+        self.assertEqual(plan.stundenraster, {})
+        self.assertIsNone(plan.get_raster_for_class('IFA12A'))
+
+    def test_unbekanntes_raster_wird_abgelehnt(self):
+        with self.assertRaises(PlanFehler) as ctx:
+            self._plan(klassenZuRaster={'IFA12A': 'Tippfehler'})
+        self.assertTrue(any('Tippfehler' in m for m in ctx.exception.meldungen))
+
+    def test_negative_stunden_werden_abgelehnt(self):
+        with self.assertRaises(PlanFehler) as ctx:
+            self._plan(stundenraster={'RasterAB': {'mo': -1, 'di': 5}})
+        self.assertTrue(any('mo' in m for m in ctx.exception.meldungen))
+
+    def test_leeres_raster_wird_abgelehnt(self):
+        # Summe 0 koennte das Soll auf null ziehen.
+        with self.assertRaises(PlanFehler) as ctx:
+            self._plan(stundenraster={'RasterAB': {'mo': 0, 'di': 0, 'mi': 0,
+                                                   'do': 0, 'fr': 0}})
+        self.assertTrue(any('0 Stunden' in m for m in ctx.exception.meldungen))
+
+    def test_raster_wandert_ins_frontend(self):
+        d = self._plan().to_dict()
+        self.assertEqual(d['stundenraster']['RasterAB']['di'], 5)
+        self.assertEqual(d['klassen_zu_raster']['IFA12A'], 'RasterAB')
+
+
 class TestKlassenkuerzel(unittest.TestCase):
     """extract_group_prefix gegen die real vorkommenden Namensformen."""
 
@@ -226,6 +283,64 @@ class TestWochenrechnung(unittest.TestCase):
         self.assertAlmostEqual(soll_anteil(self.wochen, 1), 10 / 24, places=6)
         self.assertAlmostEqual(soll_anteil(self.wochen, 2), 1.0, places=6)
         self.assertEqual(soll_anteil(self.wochen, 0), 0.0)
+
+    def test_soll_anteil_ohne_raster_unveraendert(self):
+        # Das Raster ist optional; ohne es bleibt jede Woche ganz gezaehlt,
+        # auch wenn ein Stichtag mitten im Block liegt.
+        for w in range(0, 3):
+            self.assertAlmostEqual(
+                soll_anteil(self.wochen, w),
+                soll_anteil(self.wochen, w, None, date(2026, 10, 6)),
+                places=9,
+            )
+
+    def test_soll_anteil_teilt_laufende_woche_tagesgenau(self):
+        # Woche 2 (Mo 05.10.-Fr 09.10.) hat 14 Stunden, Raster 2/3/2/5/2.
+        # Am Dienstag sind 5 von 14 gehalten: 10 + 5 = 15 von 24.
+        raster = {'mo': 2, 'di': 3, 'mi': 2, 'do': 5, 'fr': 2}
+        self.assertAlmostEqual(
+            soll_anteil(self.wochen, 2, raster, date(2026, 10, 6)), 15 / 24, places=6
+        )
+        # Montag: nur 2 von 14 gehalten.
+        self.assertAlmostEqual(
+            soll_anteil(self.wochen, 2, raster, date(2026, 10, 5)), 12 / 24, places=6
+        )
+        # Am letzten Tag zaehlt die Woche wieder ganz.
+        self.assertAlmostEqual(
+            soll_anteil(self.wochen, 2, raster, date(2026, 10, 9)), 1.0, places=6
+        )
+
+    def test_soll_anteil_raster_skaliert_auf_wochensumme(self):
+        # Woche 1 hat nur 10 statt 14 Stunden. Das Raster gibt die Form,
+        # die Wochensumme die Hoehe — am Ende der Woche exakt 10 Stunden,
+        # nie die 14 des Rasters.
+        raster = {'mo': 2, 'di': 3, 'mi': 2, 'do': 5, 'fr': 2}
+        gesamt = sum(w['stunden'] for w in self.wochen)
+        self.assertAlmostEqual(
+            soll_anteil(self.wochen, 1, raster, date(2026, 10, 2)) * gesamt, 10.0,
+            places=6,
+        )
+        # Mittwoch: (2+3+2)/14 * 10 Stunden.
+        self.assertAlmostEqual(
+            soll_anteil(self.wochen, 1, raster, date(2026, 9, 30)) * gesamt,
+            7 / 14 * 10, places=6,
+        )
+
+    def test_soll_anteil_vor_blockbeginn_zaehlt_woche_nicht(self):
+        raster = {'mo': 2, 'di': 3, 'mi': 2, 'do': 5, 'fr': 2}
+        # Stichtag vor Woche 2, aber Woche 2 abgefragt: nur Woche 1 zaehlt.
+        self.assertAlmostEqual(
+            soll_anteil(self.wochen, 2, raster, date(2026, 10, 1)), 10 / 24, places=6
+        )
+
+    def test_soll_anteil_leeres_raster_faellt_zurueck(self):
+        # Ein Raster ohne Stunden in dieser Woche darf das Soll nicht auf
+        # null ziehen — dann gilt die volle Wochensumme.
+        self.assertAlmostEqual(
+            soll_anteil(self.wochen, 2, {'mo': 0, 'di': 0, 'mi': 0, 'do': 0, 'fr': 0},
+                        date(2026, 10, 6)),
+            1.0, places=6,
+        )
 
     def test_ist_im_block(self):
         self.assertTrue(ist_im_block(self.wochen, 1, date(2026, 9, 30)))

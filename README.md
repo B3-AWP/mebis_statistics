@@ -62,6 +62,35 @@ Das **Soll folgt dem Wochenkalender**, nicht der Wochennummer: Woche 1 hat
 10 Stunden, die übrigen 14. Eine lineare Näherung (`Woche / Anzahl Wochen`)
 wäre schon innerhalb eines Halbjahres falsch.
 
+### Innerhalb einer Blockwoche zählt nur, was schon gehalten wurde
+
+Steht in `plan.json` ein **Stundenraster** für die Klasse, wächst das Soll
+während einer laufenden Blockwoche tagesgenau, statt am Montag auf die volle
+Woche zu springen:
+
+```json
+"stundenraster": {
+  "RasterAB": { "mo": 2, "di": 5, "mi": 2, "do": 3, "fr": 2 },
+  "RasterCD": { "mo": 2, "di": 3, "mi": 2, "do": 5, "fr": 2 }
+},
+"klassenZuRaster": {
+  "IFA12A": "RasterAB", "IFA12B": "RasterAB",
+  "IFA12C": "RasterCD", "IFA12D": "RasterCD"
+}
+```
+
+Mehrere Klassen dürfen sich ein Raster teilen, auch über Schienen hinweg —
+die Termine stehen in der Schiene, das Raster sagt nur, wie sich die
+Wochenstunden auf Mo–Fr verteilen.
+
+Das **Raster gibt die Form, die Wochensumme der Schiene die Höhe**:
+gerechnet wird anteilig, damit die verkürzte erste Blockwoche (10 statt 14
+Stunden) nicht mehr ausweist als sie hat. Tage außerhalb `start`–`ende`
+zählen nicht mit.
+
+Das Raster ist **optional**: ohne Eintrag zählt die angebrochene Woche wie
+bisher ganz.
+
 **Qualität bleibt bewusst ungewichtet** — der schlichte Durchschnitt der
 Bewertungen. Eine gut gemachte kleine Aufgabe ist so viel wert wie eine gut
 gemachte große. Nur die Quantität ist stundengewichtet.
@@ -336,8 +365,17 @@ Das Dashboard ist auf wenige Zeilen verdichtet:
 
 1. **Toolbar** — Klassenauswahl, Ansicht (Übersicht, Pflichtaufgaben,
    Leistungsnachweise) und rechts „Datei laden" / „Aktualisieren".
-2. **Steuerleiste** — Schulwochen-Slider, „Aktuelle Woche", „CSV Export"
-   und der Halbjahr-Umschalter.
+   Links neben „Datei laden" steht der **Stand der geladenen Datei**
+   (Datum und Uhrzeit des Exports, z. B. `22.09.2026, 07:30`); der
+   vollständige Dateiname erscheint als Tooltip. Ist der Export älter
+   als einen Tag, folgt daneben der Hinweis „N Tage alt".
+2. **Steuerleiste** — Schulwochen-Slider, Wochentag (Mo–Fr), „Aktuelle
+   Woche", „CSV Export" und der Halbjahr-Umschalter. Der Wochentag teilt
+   die gewählte Blockwoche tagesgenau; vorausgewählt ist der heutige Tag,
+   außerhalb eines Blocks Freitag. Tage außerhalb der Blockwoche sind
+   ausgegraut — in Woche 1 der Schiene 3 beginnt der Unterricht erst am
+   Dienstag. Beim Wochenwechsel bleibt der Tag stehen, „Aktuelle Woche"
+   setzt beides auf heute zurück.
 3. **Kennzahlenleiste** — Ø Pflichtaufgaben, Durchschnittsnote, Ø Note
    Pflichtaufgaben, Quantität, Delta, Qualität und Mitarbeitsnote in
    einer geteilten Zeile.

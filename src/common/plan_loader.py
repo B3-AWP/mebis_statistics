@@ -16,15 +16,21 @@ Formel wären eine Fehlerquelle, die später niemand findet.
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from src.common.group_utils import extract_group_prefix
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 AUFGABEN_TYPEN = ('assign', 'quiz')
+
+# Wochentage, die ein Stundenraster tragen darf. Blockwochen laufen Mo–Fr.
+RASTER_TAGE = ('mo', 'di', 'mi', 'do', 'fr')
+
+# date.weekday(): 0 = Montag. Wochenenden tragen kein Raster.
+_WOCHENTAG_SCHLUESSEL = {0: 'mo', 1: 'di', 2: 'mi', 3: 'do', 4: 'fr'}
 
 
 class PlanFehler(Exception):
@@ -110,6 +116,10 @@ def pruefe_plan(rohdaten: Any, quelle: str = '<memory>') -> 'Plan':
     klassen_zu_schiene = _pruefe_klassenzuordnung(
         rohdaten.get('klassenZuSchiene'), schienen, fehler
     )
+    stundenraster = _pruefe_stundenraster(rohdaten.get('stundenraster'), fehler)
+    klassen_zu_raster = _pruefe_rasterzuordnung(
+        rohdaten.get('klassenZuRaster'), stundenraster, fehler
+    )
     kurse = _pruefe_kurse(rohdaten.get('kurse'), skalen, fehler)
 
     if fehler:
@@ -127,6 +137,8 @@ def pruefe_plan(rohdaten: Any, quelle: str = '<memory>') -> 'Plan':
         skalen=skalen,
         schienen=schienen,
         klassen_zu_schiene=klassen_zu_schiene,
+        stundenraster=stundenraster,
+        klassen_zu_raster=klassen_zu_raster,
         kurse=kurse,
         stunden_gesamt=stunden_gesamt,
         quelle=quelle,
@@ -224,6 +236,72 @@ def _pruefe_klassenzuordnung(roh: Any, schienen: Dict, fehler: List[str]) -> Dic
         if schiene not in schienen:
             fehler.append(
                 f'klassenZuSchiene.{klasse} verweist auf unbekannte Schiene "{schiene}".'
+            )
+    return dict(roh)
+
+
+def _pruefe_stundenraster(roh: Any, fehler: List[str]) -> Dict[str, Dict[str, float]]:
+    """
+    Prüft die Stundenraster — Verteilung der Wochenstunden auf Mo–Fr.
+
+    Das Raster gibt nur die Form der Verteilung; die Höhe bleibt die
+    Wochensumme aus der Schiene. Es ist optional: ohne Raster zählt eine
+    angebrochene Blockwoche wie bisher ganz.
+    """
+    if roh is None:
+        return {}
+
+    if not isinstance(roh, dict):
+        fehler.append('stundenraster ist kein Objekt.')
+        return {}
+
+    geprueft: Dict[str, Dict[str, float]] = {}
+
+    for name, tage in roh.items():
+        if not isinstance(tage, dict):
+            fehler.append(f'stundenraster.{name} ist kein Objekt.')
+            continue
+
+        eintrag: Dict[str, float] = {}
+        summe = 0.0
+        gueltig = True
+
+        for tag in RASTER_TAGE:
+            wert = tage.get(tag, 0)
+            if isinstance(wert, bool) or not isinstance(wert, (int, float)) or wert < 0:
+                fehler.append(f'stundenraster.{name}.{tag} ist keine Stundenzahl >= 0.')
+                gueltig = False
+                continue
+            eintrag[tag] = float(wert)
+            summe += wert
+
+        if not gueltig:
+            continue
+
+        # Ein Raster ohne Stunden könnte das Soll auf null ziehen.
+        if summe <= 0:
+            fehler.append(f'stundenraster.{name} hat in Summe 0 Stunden.')
+            continue
+
+        geprueft[name] = eintrag
+
+    return geprueft
+
+
+def _pruefe_rasterzuordnung(roh: Any, stundenraster: Dict,
+                            fehler: List[str]) -> Dict[str, str]:
+    """Prüft die Zuordnung Klasse → Stundenraster."""
+    if roh is None:
+        return {}
+
+    if not isinstance(roh, dict):
+        fehler.append('klassenZuRaster ist kein Objekt.')
+        return {}
+
+    for klasse, name in roh.items():
+        if name not in stundenraster:
+            fehler.append(
+                f'klassenZuRaster.{klasse} verweist auf unbekanntes Raster "{name}".'
             )
     return dict(roh)
 
@@ -351,19 +429,91 @@ def ist_im_block(schulwochen: List[Dict], woche: int, heute: Optional[date] = No
     return stichtag <= eintrag['ende']
 
 
-def soll_anteil(schulwochen: List[Dict], woche: int) -> float:
+def soll_anteil(schulwochen: List[Dict], woche: int,
+                raster: Optional[Dict[str, float]] = None,
+                heute: Optional[date] = None) -> float:
     """
     Soll(w) — Anteil der bis einschließlich Woche w verstrichenen Stunden.
 
         Soll(w) = Σ Stunden Schulwoche 1..w / Σ Stunden gesamt
 
     Bewusst nicht w / anzahl_wochen: Woche 1 hat 10 Stunden, die übrigen 14.
+
+    Mit Raster und Stichtag zählt die laufende Blockwoche nur anteilig: am
+    Dienstag einer Blockwoche sind eben noch nicht alle 14 Stunden gehalten.
+    Ohne Raster bleibt es beim alten Verhalten — die angebrochene Woche
+    zählt ganz.
+
+    Args:
+        schulwochen: Wochenkalender der Schiene
+        woche: laufende Wochennummer
+        raster: {mo..fr: Stunden} der Klasse, oder None
+        heute: Stichtag; ohne ihn greift das Raster nicht
     """
     gesamt = sum(w['stunden'] for w in schulwochen)
     if gesamt <= 0:
         return 0.0
-    bisher = sum(w['stunden'] for w in schulwochen if w['woche'] is not None and w['woche'] <= woche)
-    return bisher / gesamt
+
+    bisher = sum(
+        w['stunden'] for w in schulwochen
+        if w['woche'] is not None and w['woche'] < woche
+    )
+
+    laufende = next((w for w in schulwochen if w['woche'] == woche), None)
+    if laufende is None:
+        return bisher / gesamt
+
+    return (bisher + _anteil_laufende_woche(laufende, raster, heute)) / gesamt
+
+
+def _anteil_laufende_woche(woche: Dict, raster: Optional[Dict[str, float]],
+                           heute: Optional[date]) -> float:
+    """
+    Stunden der laufenden Blockwoche, die bis zum Stichtag gehalten sind.
+
+    Das Raster gibt die Form der Verteilung, die Wochensumme aus dem Plan
+    die Höhe: gerechnet wird anteilig, damit eine verkürzte erste Woche
+    (10 statt 14 Stunden) nicht mehr ausweist als sie hat. Tage außerhalb
+    von start–ende zählen nicht mit — so fällt der fehlende Montag einer
+    am Dienstag beginnenden Woche von selbst heraus.
+    """
+    stunden = woche['stunden'] or 0
+
+    # Ohne Raster oder Stichtag bleibt es beim alten Verhalten.
+    if not raster or heute is None:
+        return stunden
+
+    beginn = woche['start']
+    ende = woche['ende']
+    if beginn is None:
+        return stunden
+    if heute < beginn:
+        return 0.0
+    if ende and heute >= ende:
+        return stunden
+
+    summe_woche = 0.0
+    summe_bis_heute = 0.0
+
+    # Ohne Endedatum gilt die Woche als Mo–Fr ab Beginn.
+    letzter = ende or (beginn + timedelta(days=4))
+
+    tag = beginn
+    schutz = 0
+    while tag <= letzter and schutz < 7:
+        wert = raster.get(_WOCHENTAG_SCHLUESSEL.get(tag.weekday(), ''), 0)
+        summe_woche += wert
+        if tag <= heute:
+            summe_bis_heute += wert
+        tag += timedelta(days=1)
+        schutz += 1
+
+    # Ein Raster, das für diese Woche nichts hergibt, darf das Soll nicht
+    # auf null ziehen — dann lieber die volle Wochensumme.
+    if summe_woche <= 0:
+        return stunden
+
+    return (summe_bis_heute / summe_woche) * stunden
 
 
 def begrenze_schulwochen(schulwochen: List[Dict], kurse: List[Dict],
@@ -439,7 +589,8 @@ class Plan:
     """Validierter Plan mit Zugriffshilfen."""
 
     def __init__(self, schema_version, schuljahr, stand, notenschluessel, skalen,
-                 schienen, klassen_zu_schiene, kurse, stunden_gesamt, quelle):
+                 schienen, klassen_zu_schiene, kurse, stunden_gesamt, quelle,
+                 stundenraster=None, klassen_zu_raster=None):
         self.schema_version = schema_version
         self.schuljahr = schuljahr
         self.stand = stand
@@ -447,6 +598,8 @@ class Plan:
         self.skalen = skalen
         self.schienen = schienen
         self.klassen_zu_schiene = klassen_zu_schiene
+        self.stundenraster = stundenraster or {}
+        self.klassen_zu_raster = klassen_zu_raster or {}
         self.kurse = kurse
         self.stunden_gesamt = stunden_gesamt
         self.quelle = quelle
@@ -529,6 +682,21 @@ class Plan:
         schiene = self.schienen.get(track)
         return list(schiene['schulwochen']) if schiene else []
 
+    def get_raster_for_class(self, klasse: str) -> Optional[Dict[str, float]]:
+        """
+        Stundenraster zu einer Klasse.
+
+        Nimmt den Gruppennamen in jeder Form entgegen — wie
+        get_track_for_class. Ohne Eintrag gibt es kein Raster; die
+        laufende Blockwoche zählt dann wie bisher ganz.
+        """
+        if not klasse or not self.klassen_zu_raster:
+            return None
+        name = self.klassen_zu_raster.get(klasse)
+        if name is None:
+            name = self.klassen_zu_raster.get(extract_group_prefix(klasse))
+        return self.stundenraster.get(name) if name else None
+
     # --- Noten ---
 
     def percent_to_grade(self, prozent: Optional[float]) -> Optional[int]:
@@ -564,6 +732,8 @@ class Plan:
             'notenschluessel': self.notenschluessel,
             'skalen': self.skalen,
             'klassen_zu_schiene': self.klassen_zu_schiene,
+            'stundenraster': self.stundenraster,
+            'klassen_zu_raster': self.klassen_zu_raster,
             'schienen': {
                 name: {
                     'titel': s['titel'],

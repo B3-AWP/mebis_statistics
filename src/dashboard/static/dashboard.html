@@ -77,16 +77,14 @@
 
                 <div class="nav-spacer"></div>
 
-                <div class="file-info-container" id="fileInfoContainer" style="display: none;">
-                    <span class="file-info-label">Datei:</span>
+                <!-- Stand der geladenen Datei, direkt neben "Datei laden" -->
+                <div class="file-info-container" id="fileInfoContainer" hidden>
+                    <span class="file-info-label">Stand</span>
                     <span class="file-info-text" id="fileInfoText">-</span>
+                    <span class="file-age-warning" id="fileAgeWarning" hidden>
+                        <span id="fileAgeDays"></span> Tage alt
+                    </span>
                 </div>
-
-                <div class="file-age-warning" id="fileAgeWarning" style="display: none; margin-left: 10px; padding: 6px 12px; background: #ffc107; color: #000; border-radius: 4px; font-size: 13px; font-weight: 500;">
-                    ⚠️ Daten sind <span id="fileAgeDays"></span> Tag(e) alt
-                </div>
-
-               
 
                 <input type="file" id="filePickerInput" accept=".json" style="display:none" onchange="loadFromFile(this)">
                 <button class="nav-btn" onclick="document.getElementById('filePickerInput').click()" title="JSON-Datei manuell laden">
@@ -120,6 +118,32 @@
                             <span class="slider-value max">9</span>
                         </div>
                         <div class="current-week-display">Woche <span id="currentWeekDisplay">9</span></div>
+
+                        <!-- Wochentag: teilt die laufende Blockwoche tagesgenau.
+                             Tage ausserhalb start-ende der Woche sind deaktiviert. -->
+                        <div class="weekday-picker" id="weekdayPicker" role="group"
+                             aria-label="Wochentag">
+                            <label class="weekday-option">
+                                <input type="radio" name="referenceWeekday" value="1">
+                                <span>Mo</span>
+                            </label>
+                            <label class="weekday-option">
+                                <input type="radio" name="referenceWeekday" value="2">
+                                <span>Di</span>
+                            </label>
+                            <label class="weekday-option">
+                                <input type="radio" name="referenceWeekday" value="3">
+                                <span>Mi</span>
+                            </label>
+                            <label class="weekday-option">
+                                <input type="radio" name="referenceWeekday" value="4">
+                                <span>Do</span>
+                            </label>
+                            <label class="weekday-option">
+                                <input type="radio" name="referenceWeekday" value="5" checked>
+                                <span>Fr</span>
+                            </label>
+                        </div>
 
                         <button id="currentWeekBtn" class="nav-btn current-week-btn" onclick="setToCurrentWeek()">
                             <svg class="icon" width="14" height="14" aria-hidden="true">

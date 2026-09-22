@@ -4,6 +4,64 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 
 ## [Unreleased] - 2026-09-22 — Planstunden im Titel, Sprung in die Bewertung
 
+### 🚀 Stundenraster: Soll wächst tagesgenau statt sprunghaft
+
+Bisher zählte eine Blockwoche komplett, sobald sie begonnen hatte. Am
+Montagmorgen schuldete ein Schüler damit bereits alle 14 Stunden der
+Woche — bei IFA12D rund **9 Unterrichtsstunden künstliches Minus** genau
+in der Woche, in der man mit der Klasse über den Stand spricht. Nach dem
+Block stimmte es wieder; der Fehler traf also immer den Moment des
+Hinsehens.
+
+Neu verteilt ein **Stundenraster** die Wochenstunden auf Mo–Fr. Während
+einer laufenden Blockwoche zählt nur der bereits gehaltene Anteil:
+
+```
+IFA12D, Blockwoche 2 (122 Std gesamt, Raster 2/3/2/5/2)
+  Mo  vorher 19,7 %  →  jetzt  9,8 %
+  Di  vorher 19,7 %  →  jetzt 12,3 %
+  Do  vorher 19,7 %  →  jetzt 18,0 %
+  Fr  vorher 19,7 %  →  jetzt 19,7 %
+```
+
+- **`plan.json` bekommt zwei neue Blöcke** (`stundenraster`,
+  `klassenZuRaster`) und steigt auf **`schemaVersion` 4**. Mehrere Klassen
+  können sich ein Raster teilen — IFA12A/B und IFA12C/D haben je eines,
+  über beide Schienen hinweg.
+- **Das Raster gibt nur die Form der Verteilung, die Wochensumme aus der
+  Schiene die Höhe.** Gerechnet wird anteilig, damit die verkürzte erste
+  Blockwoche (10 statt 14 Stunden) nicht mehr ausweist als sie hat. Tage
+  außerhalb `start`–`ende` zählen nicht — so fällt der fehlende Montag der
+  Schiene 3 in Woche 1 von selbst heraus.
+- **Optional und abwärtskompatibel:** ohne Rastereintrag zählt die
+  angebrochene Woche wie bisher ganz. Alle Wochen sind dann rechnerisch
+  bitgleich zum alten Verhalten.
+- `soll_anteil()` in [plan_loader.py](src/common/plan_loader.py) nimmt
+  Raster und Stichtag als optionale Parameter; Gegenstücke in
+  [dashboard.js](src/dashboard/static/dashboard.js) und in `js/bilanz.js`
+  des Schüler-Dashboards wurden mitgezogen. Neu:
+  `Plan.get_raster_for_class()`, das den Gruppennamen in jeder Form
+  entgegennimmt wie `get_track_for_class()`.
+
+### 🚀 Wochentag-Auswahl neben dem Wochen-Slider
+
+Damit der Stichtag nicht geraten werden muss, steht neben dem
+Schulwochen-Slider eine Radiogruppe **Mo Di Mi Do Fr**. Vorausgewählt ist
+der aktuelle Wochentag, sofern heute in der gezeigten Blockwoche liegt —
+sonst Freitag, womit die Woche komplett zählt.
+
+- **Beim Wochenwechsel bleibt der Tag stehen**; nur die Ausgrauung richtet
+  sich nach der neuen Woche.
+- **Tage außerhalb der Blockwoche sind deaktiviert** statt stumm falsch zu
+  rechnen. In Woche 1 der Schiene 3 (Di-Start) ist „Mo" ausgegraut; fällt
+  der gewählte Tag weg, rückt die Auswahl auf den letzten verfügbaren.
+- „Aktuelle Woche" setzt Woche **und** Tag auf heute zurück.
+- Der Stichtag wird aus Woche und Tag abgeleitet (`getStichtagForWeek()`),
+  nicht mehr aus `new Date()`. Vorher ließ sich nicht unterscheiden, ob
+  der Slider bewusst verstellt oder nur vorbelegt war.
+
+
+
 ### 🚀 Aufgabentitel nennen die Planstunden
 
 Moodle führt im Namen einer Aktivität die reine Bearbeitungszeit
@@ -49,6 +107,27 @@ jetzt:   …/mod/assign/view.php?id=91837888&group=625177&action=grader
   gesetzt wird — **nicht über die URL steuerbar**. Moodle merkt sie sich
   aber je Nutzer, sodass sie nach einmaligem Setzen im Grader erhalten
   bleibt.
+
+### 🚀 Stand der geladenen Datei neben „Datei laden"
+
+Wie aktuell die angezeigten Zahlen sind, war bisher nicht abzulesen: die
+Datei-Info saß am linken Rand der Toolbar, weit weg von den Knöpfen, und
+war ungestylt. Sie steht jetzt **direkt links neben „Datei laden"**, wo
+die Frage aufkommt.
+
+- Anzeige als `Stand 22.09.2026, 07:30` — die Sekunden aus dem
+  Dateinamen entfallen, in einer Toolbar zählen Tag und Uhrzeit. Der
+  vollständige Dateiname steht im Tooltip.
+- Der Hinweis auf veraltete Daten (ab zwei Tagen) sitzt in derselben
+  Zeile und ist vom gelben Signalkasten auf Text in `--warning-color`
+  umgestellt — das Layout ist flach, ohne Farbflächen.
+- Ein- und Ausblenden läuft über das `hidden`-Attribut statt über
+  `style.display`, sodass die Darstellung ganz in der CSS bleibt.
+  Die Regeln für `.file-info-*` standen doppelt in
+  [style.css](src/dashboard/static/css/style.css) und
+  [dashboard-custom.css](src/dashboard/static/css/dashboard-custom.css);
+  maßgeblich ist jetzt nur noch die zuletzt geladene
+  `dashboard-custom.css`.
 
 ### 🔧 Technische Änderungen
 

@@ -104,7 +104,7 @@ function showTab(tabName) {
     }
 }
 
-// Datei-Info anzeigen
+// Stand der geladenen Export-Datei neben "Datei laden" anzeigen
 function displayFileInfo(filename) {
     const container = document.getElementById('fileInfoContainer');
     const textElement = document.getElementById('fileInfoText');
@@ -138,26 +138,25 @@ function displayFileInfo(filename) {
         const ageInMs = now - fileDate;
         const ageInDays = Math.floor(ageInMs / (1000 * 60 * 60 * 24));
 
-        // Formatiere für Anzeige
-        const formattedDateTime = `${day}.${month}.${year} ${hour}:${minute}:${second}`;
-        textElement.textContent = formattedDateTime;
-
-        // Container anzeigen
-        container.style.display = 'flex';
+        // Sekunden bleiben weg — in der Toolbar zaehlt Tag und Uhrzeit
+        textElement.textContent = `${day}.${month}.${year}, ${hour}:${minute}`;
+        textElement.title = `Geladen: ${filename.replace(/.*[\\\/]/, '')}`;
+        container.hidden = false;
 
         // Zeige Warnung nur wenn älter als 1 Tag
         if (ageInDays > 1 && ageWarning && ageDaysElement) {
             ageDaysElement.textContent = ageInDays;
-            ageWarning.style.display = 'block';
+            ageWarning.hidden = false;
         } else if (ageWarning) {
-            ageWarning.style.display = 'none';
+            ageWarning.hidden = true;
         }
     } else {
         // Fallback: zeige rohen Dateinamen
         textElement.textContent = filename.replace(/.*[\\\/]/, ''); // Nur Dateiname ohne Pfad
-        container.style.display = 'flex';
+        textElement.title = '';
+        container.hidden = false;
         if (ageWarning) {
-            ageWarning.style.display = 'none';
+            ageWarning.hidden = true;
         }
     }
 }
@@ -479,6 +478,88 @@ function updateWeekSlider() {
 
     currentWeek = wert;
     window.currentWeek = currentWeek;
+
+    setzeWochentagAufHeute(wochen, wert);
+    updateWeekdayPicker();
+}
+
+// Stellt die Wochentagsauswahl auf heute — aber nur, wenn heute in der
+// gezeigten Blockwoche liegt. Ausserhalb eines Blocks gilt Freitag: dann
+// ist die Woche komplett und zaehlt ganz, wie vor dem Stundenraster.
+function setzeWochentagAufHeute(wochen, woche) {
+    const eintrag = (wochen || []).find(w => w.woche === woche);
+    let tag = 5;
+
+    if (eintrag && eintrag.start) {
+        const heute = datumOhneZeit(new Date());
+        const beginn = datumOhneZeit(new Date(eintrag.start));
+        const ende = eintrag.ende ? datumOhneZeit(new Date(eintrag.ende)) : null;
+
+        // Am Wochenende innerhalb eines Blocks bleibt es bei Freitag —
+        // getDay() 0/6 traegt ohnehin keine Unterrichtsstunden.
+        if (heute >= beginn && (!ende || heute <= ende)
+            && heute.getDay() >= 1 && heute.getDay() <= 5) {
+            tag = heute.getDay();
+        }
+    }
+
+    const radio = document.querySelector(`input[name="referenceWeekday"][value="${tag}"]`);
+    if (radio) radio.checked = true;
+}
+
+// Graut Tage aus, die ausserhalb start-ende der gewaehlten Blockwoche
+// liegen: Schiene 3 beginnt in Woche 1 erst am Dienstag, ein "Mo" waere
+// dort sinnlos. Faellt der gewaehlte Tag weg, rueckt die Auswahl auf den
+// letzten verfuegbaren Tag.
+function updateWeekdayPicker() {
+    const picker = document.getElementById('weekdayPicker');
+    if (!picker) return;
+
+    const track = getTrackForGroup(currentGroup) || (plan && Object.keys(plan.schienen)[0]);
+    const wochen = getSchulwochenForScope(track);
+    const eintrag = wochen.find(w => w.woche === currentWeek);
+
+    let ersterTag = 1;
+    let letzterTag = 5;
+
+    if (eintrag && eintrag.start) {
+        const beginn = datumOhneZeit(new Date(eintrag.start));
+        if (!Number.isNaN(beginn.getTime()) && beginn.getDay() >= 1 && beginn.getDay() <= 5) {
+            ersterTag = beginn.getDay();
+        }
+        if (eintrag.ende) {
+            const ende = datumOhneZeit(new Date(eintrag.ende));
+            if (!Number.isNaN(ende.getTime()) && ende.getDay() >= 1 && ende.getDay() <= 5) {
+                letzterTag = ende.getDay();
+            }
+        }
+    }
+
+    let gewaehltWeg = false;
+    picker.querySelectorAll('input[name="referenceWeekday"]').forEach(radio => {
+        const wert = parseInt(radio.value);
+        const aus = wert < ersterTag || wert > letzterTag;
+        radio.disabled = aus;
+        if (aus && radio.checked) {
+            radio.checked = false;
+            gewaehltWeg = true;
+        }
+    });
+
+    if (gewaehltWeg) {
+        const ersatz = picker.querySelector(
+            `input[name="referenceWeekday"][value="${letzterTag}"]`
+        );
+        if (ersatz) ersatz.checked = true;
+    }
+}
+
+// Wochentag gewechselt — die Woche bleibt stehen, nur der Stichtag
+// innerhalb der Woche verschiebt sich.
+function updateReferenceWeekday() {
+    const tag = getSelectedWeekday();
+    dashboardLogger.info('USER', 'Wochentag geändert', { weekday: tag });
+    updateDashboard();
 }
 
 // Zeichnet die Halbjahr-Schaltflaechen und den Hinweis bei leerem Kurs.
@@ -933,7 +1014,9 @@ function updateOverviewStats(groupStats, users) {
     let cardAvgProgress = 0;
     let validCount = 0;
     validUsers.forEach(user => {
-        const result = calculatePflichtaufgabenProgressGesamt(user, cardSelectedWeek);
+        const result = calculatePflichtaufgabenProgressGesamt(
+            user, cardSelectedWeek, getRasterForGroup(user.group || currentGroup)
+        );
         if (result !== null) {
             cardAvgProgress += result.value;
             validCount++;
@@ -1496,7 +1579,11 @@ function calculateQuantitaet(user, groupName, weekOverride) {
     const woche = weekOverride !== undefined && weekOverride !== null
         ? weekOverride
         : getCurrentReferenceWeekForTrack(track);
-    const soll = sollAnteil(wochen, woche);
+    // Stichtag ist der gewaehlte Wochentag in dieser Woche — so zaehlt eine
+    // laufende Blockwoche nur anteilig.
+    const raster = getRasterForGroup(groupName);
+    const soll = sollAnteil(wochen, woche, raster,
+                            raster ? getStichtagForWeek(wochen, woche) : null);
 
     return {
         value: Math.round(ist * 1000) / 10,       // Prozent, eine Nachkommastelle
@@ -1519,14 +1606,15 @@ function calculateQuantitaet(user, groupName, weekOverride) {
 // Funktion wie calculateQuantitaet und liefert konsistente Werte.
 //
 // value > 100 % heisst: weiter als zum Stichtag erwartet.
-function calculatePflichtaufgabenProgressGesamt(user, selectedWeek) {
+function calculatePflichtaufgabenProgressGesamt(user, selectedWeek, raster = null) {
     const a = (user && user.assignments) || {};
     const stundenGesamt = a.stunden_gesamt || 0;
     if (stundenGesamt <= 0) return null;
 
     const stundenErledigt = a.stunden_erledigt || 0;
     const wochen = getSchulwochenForScope(getTrackForGroup(user.group || currentGroup));
-    const soll = sollAnteil(wochen, selectedWeek);
+    const soll = sollAnteil(wochen, selectedWeek, raster,
+                            raster ? getStichtagForWeek(wochen, selectedWeek) : null);
 
     // Vor der ersten Blockwoche gibt es kein Soll — dann zeigen wir den
     // absoluten Fortschritt statt durch null zu teilen.
@@ -1551,14 +1639,124 @@ function calculatePflichtaufgabenProgressGesamt(user, selectedWeek) {
 // Soll-Anteil nach Stunden — Gegenstueck zu sollAnteil() in js/bilanz.js.
 // Woche 1 hat 10 Stunden, die uebrigen 14; eine lineare Naeherung
 // (woche / anzahlWochen) waere daher schon innerhalb eines Halbjahres falsch.
-function sollAnteil(schulwochen, woche) {
+// Mit raster und heute zaehlt die laufende Blockwoche nur anteilig: am
+// Dienstag einer Blockwoche sind eben noch nicht alle 14 Stunden gehalten.
+// Ohne Raster bleibt es beim alten Verhalten — die angebrochene Woche
+// zaehlt ganz. Gegenstueck zu sollAnteil() in js/bilanz.js und
+// soll_anteil() in plan_loader.py.
+function sollAnteil(schulwochen, woche, raster = null, heute = null) {
     if (!schulwochen || schulwochen.length === 0) return 0;
     const gesamt = schulwochen.reduce((summe, w) => summe + (w.stunden || 0), 0);
     if (gesamt <= 0) return 0;
+
     const bisher = schulwochen
-        .filter(w => w.woche <= woche)
+        .filter(w => w.woche < woche)
         .reduce((summe, w) => summe + (w.stunden || 0), 0);
-    return bisher / gesamt;
+
+    const laufende = schulwochen.find(w => w.woche === woche);
+    if (!laufende) return bisher / gesamt;
+
+    return (bisher + anteilLaufendeWoche(laufende, raster, heute)) / gesamt;
+}
+
+// Stunden der laufenden Blockwoche, die bis zum Stichtag gehalten sind.
+//
+// Das Raster gibt die Form der Verteilung, die Wochensumme aus dem Plan
+// die Hoehe: gerechnet wird anteilig, damit eine verkuerzte erste Woche
+// (10 statt 14 Stunden) nicht mehr ausweist als sie hat. Tage ausserhalb
+// von start–ende zaehlen nicht mit — so faellt der fehlende Montag einer
+// am Dienstag beginnenden Woche von selbst heraus.
+function anteilLaufendeWoche(woche, raster, heute) {
+    const stunden = woche.stunden || 0;
+
+    // Ohne Raster oder Stichtag bleibt es beim alten Verhalten.
+    if (!raster || !heute) return stunden;
+
+    const beginn = datumOhneZeit(new Date(woche.start));
+    const ende = woche.ende ? datumOhneZeit(new Date(woche.ende)) : null;
+    const stichtag = datumOhneZeit(heute);
+
+    if (Number.isNaN(beginn.getTime())) return stunden;
+    if (stichtag < beginn) return 0;
+    if (ende && stichtag >= ende) return stunden;
+
+    // Ohne Endedatum gilt die Woche als Mo–Fr ab Beginn.
+    const letzter = ende && !Number.isNaN(ende.getTime())
+        ? ende
+        : new Date(beginn.getFullYear(), beginn.getMonth(), beginn.getDate() + 4);
+
+    let summeWoche = 0;
+    let summeBisHeute = 0;
+
+    const lauf = new Date(beginn);
+    let schutz = 0;
+    while (lauf <= letzter && schutz < 7) {
+        const wert = raster[WOCHENTAG_SCHLUESSEL[lauf.getDay()]] || 0;
+        summeWoche += wert;
+        if (lauf <= stichtag) summeBisHeute += wert;
+        lauf.setDate(lauf.getDate() + 1);
+        schutz++;
+    }
+
+    // Ein Raster, das fuer diese Woche nichts hergibt, darf das Soll nicht
+    // auf null ziehen — dann lieber die volle Wochensumme.
+    if (summeWoche <= 0) return stunden;
+
+    return (summeBisHeute / summeWoche) * stunden;
+}
+
+// Date.getDay(): 0 = Sonntag. Wochenenden tragen kein Raster.
+const WOCHENTAG_SCHLUESSEL = {
+    0: 'so', 1: 'mo', 2: 'di', 3: 'mi', 4: 'do', 5: 'fr', 6: 'sa'
+};
+
+// Schneidet die Uhrzeit ab, damit Wochenvergleiche stabil sind.
+function datumOhneZeit(datum) {
+    return new Date(datum.getFullYear(), datum.getMonth(), datum.getDate());
+}
+
+// Stundenraster einer Gruppe. Nimmt den Gruppennamen in jeder Form
+// entgegen — wie getTrackForGroup.
+function getRasterForGroup(groupName) {
+    if (!plan || !plan.stundenraster || !plan.klassen_zu_raster) return null;
+    if (!groupName) return null;
+
+    const map = plan.klassen_zu_raster;
+    let name = map[groupName];
+    if (!name) {
+        const treffer = Object.keys(map).find(key => groupName.startsWith(key));
+        name = treffer ? map[treffer] : null;
+    }
+    return name ? (plan.stundenraster[name] || null) : null;
+}
+
+// Gewaehlter Wochentag (1 = Mo ... 5 = Fr) aus der Radiogruppe.
+// Ohne Auswahl gilt Freitag — dann zaehlt die Woche ganz, wie frueher.
+function getSelectedWeekday() {
+    const gewaehlt = document.querySelector('input[name="referenceWeekday"]:checked');
+    const wert = gewaehlt ? parseInt(gewaehlt.value) : 5;
+    return (wert >= 1 && wert <= 5) ? wert : 5;
+}
+
+// Stichtag fuer das tagesgenaue Soll: der gewaehlte Wochentag innerhalb
+// der gewaehlten Blockwoche.
+//
+// Woche und Tag stehen beide explizit in der Bedienleiste; aus ihnen
+// laesst sich der Stichtag direkt ableiten, statt "heute" zu nehmen und
+// zu raten, ob der Slider bewusst verstellt wurde.
+//
+// Liegt der Tag ausserhalb start-ende der Woche, faellt das Raster in
+// anteilLaufendeWoche() ohnehin auf die volle Wochensumme zurueck.
+function getStichtagForWeek(wochen, woche) {
+    const eintrag = (wochen || []).find(w => w.woche === woche);
+    if (!eintrag || !eintrag.start) return null;
+
+    const beginn = datumOhneZeit(new Date(eintrag.start));
+    if (Number.isNaN(beginn.getTime())) return null;
+
+    // getDay(): 1 = Mo. Blockwochen beginnen Mo oder spaeter in der Woche.
+    const versatz = getSelectedWeekday() - beginn.getDay();
+    return new Date(beginn.getFullYear(), beginn.getMonth(), beginn.getDate() + versatz);
 }
 
 // Wochenkalender der Schiene, auf den aktiven Kurs-Scope beschnitten.
@@ -1667,7 +1865,11 @@ function generateGroupProgressTable(users) {
     const wochen = getSchulwochenForScope(track);
     const sliderWeek = parseInt(document.getElementById('referenceWeekSlider')?.value || 0);
     const woche = sliderWeek > 0 ? sliderWeek : getCurrentReferenceWeekForTrack(track);
-    const sollPct = Math.round(sollAnteil(wochen, woche) * 1000) / 10;
+    const rasterDetail = getRasterForGroup(currentGroup);
+    const sollPct = Math.round(
+        sollAnteil(wochen, woche, rasterDetail,
+                   rasterDetail ? getStichtagForWeek(wochen, woche) : null) * 1000
+    ) / 10;
 
     let html = '';
     html += `<div class="stats-group-title" style="margin-bottom: 8px;">`;
@@ -1690,7 +1892,9 @@ function generateGroupProgressTable(users) {
     users.forEach(user => {
         // Quantitaet relativ zum Soll der Woche — kann ueber 100 % gehen,
         // wer dem Plan voraus ist.
-        const pflichtResult = calculatePflichtaufgabenProgressGesamt(user, woche);
+        const pflichtResult = calculatePflichtaufgabenProgressGesamt(
+            user, woche, rasterDetail
+        );
         const quantitaet = pflichtResult ? pflichtResult.value : 0;
         const pflichtPoints = pflichtResult
             ? { actual: pflichtResult.actual, expected: pflichtResult.expected }
@@ -2110,6 +2314,10 @@ function updateReferenceWeek(week) {
         weekDisplay.textContent = currentWeek;
     }
 
+    // Der gewaehlte Wochentag bleibt beim Wochenwechsel stehen; nur die
+    // Ausgrauung richtet sich nach den Tagen der neuen Woche.
+    updateWeekdayPicker();
+
     // Dashboard aktualisieren
     updateDashboard();
 }
@@ -2131,6 +2339,8 @@ function setToCurrentWeek() {
     const wert = (jetzt >= min && jetzt <= max) ? jetzt : max;
 
     slider.value = wert;
+    // Der Knopf stellt auf heute — also auch den Wochentag zuruecksetzen.
+    setzeWochentagAufHeute(getSchulwochenForScope(track), wert);
     updateReferenceWeek(wert);
 }
 
@@ -3705,6 +3915,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Progress Type Toggle
     document.querySelectorAll('input[name="progressType"]').forEach(radio => {
         radio.addEventListener('change', toggleProgressType);
+    });
+
+    // Wochentag neben dem Wochen-Slider
+    document.querySelectorAll('input[name="referenceWeekday"]').forEach(radio => {
+        radio.addEventListener('change', updateReferenceWeekday);
     });
 
     // Alle Gruppen-Dropdowns synchronisieren (excluding the main group selector which is now tabs)

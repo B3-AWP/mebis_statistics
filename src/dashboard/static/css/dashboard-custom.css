@@ -593,7 +593,7 @@
     filter: brightness(0.93);
 }
 
-/* File Info Display */
+/* Stand der geladenen Export-Datei, direkt links neben "Datei laden". */
 .file-info-container {
     display: flex;
     align-items: center;
@@ -613,11 +613,25 @@
 
 .file-info-text {
     font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     background: var(--surface-muted);
     padding: 2px 6px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--line);
     color: var(--text-muted);
+}
+
+/* Hinweis auf veraltete Daten — Signalfarbe als Text, keine gelbe Flaeche,
+   damit die Toolbar flach bleibt. */
+.file-age-warning {
+    font-weight: 600;
+    color: var(--warning-color);
+}
+
+/* hidden schlaegt das display:flex bzw. display:inline der Regeln oben. */
+.file-info-container[hidden],
+.file-age-warning[hidden] {
+    display: none;
 }
 
 .group-tab-text {
