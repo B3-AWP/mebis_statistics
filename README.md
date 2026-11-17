@@ -264,8 +264,9 @@ scripts\export_data.cmd
 ```
 
 Der Export läuft über alle nicht gesperrten Kurse aus `plan.json` und legt
-eine JSON-Datei im `EXPORT_FOLDER` ab. Dauer: etwa 6–7 Minuten je Kurs bei
-~50 Aktivitäten und ~65 Personen.
+eine JSON-Datei im `EXPORT_FOLDER` ab. Dauer: etwa 3 Minuten je Kurs bei
+~57 Aktivitäten und ~104 Personen. Am Ende jedes Laufs steht eine
+Phasenübersicht, die zeigt, wo die Zeit geblieben ist.
 
 Zum Ausprobieren gibt es einen Testmodus mit 5 Aktivitäten je Typ:
 
@@ -283,7 +284,9 @@ Quelle 3 ist nötig, weil Quizze ohne Abschlussverfolgung sonst unsichtbar
 blieben und ihre Stunden im Soll fehlten.
 
 **Abgabedatum-Ermittlung (Priorität):**
-1. Feedback-Datum aus dem Singleview-Bewertungsbericht (wenn eingetragen)
+1. Feedback-Datum aus dem Singleview-Bewertungsbericht — nur wenn das
+   Feedback-Feld **ausschließlich** ein Datum enthält (z.B. `09.01.2026`
+   oder `09.01.2026 14:30`); normaler Feedbacktext wird übersprungen
 2. „Zuletzt geändert (Abgabe)"-Datum der Bewertungsseite
 3. Bewertungshistorie (Fallback für manuell eingetragene Noten)
 

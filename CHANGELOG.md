@@ -2,6 +2,71 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [Unreleased] - 2026-11-17 — Tabellen in einem Rutsch lesen
+
+### ⚡ Export: Batch-Auslesung statt zeilenweisem Selenium
+
+Ein Lauf über einen Kurs (29 Assignments, 28 Quizze, 104 Personen) dauerte
+12,7 min, davon 6,9 min Assignments und 4,0 min Quizze. Ursache war nicht
+das Laden der Seiten, sondern das Auslesen: jede Tabellenzelle kostete
+eigene WebDriver-Roundtrips (`find_element`, `.text`, `get_attribute`) —
+rund 10 je Schüler auf der Bewertungsseite, weitere ~5 je Schüler auf der
+Singleview, die für jedes Assignment *und* jedes Quiz geladen wird.
+
+Vier Funktionen lesen ihre Tabelle jetzt mit einem einzigen
+`execute_script`, nach dem Muster, das `get_grader_report_data()` schon
+nutzte:
+
+- `get_assignment_status()` — Bewertungsseite
+- `get_quiz_submission_times()` — Quiz-Report
+- `get_singleview_feedback_dates()` — Singleview-Feedback
+- `get_all_activity_categories()` — Kategorienbaum
+
+Die Elementauswahl ist 1:1 übernommen, Defaults und Datums-Parsing bleiben
+in Python. Der Helfer `_JS_TEXT` liest Text wie Seleniums `.text`
+(gerendert, geschützte Leerzeichen normalisiert, getrimmt). Gegen
+Test-Seiten mit Sonderfällen (Mehrfachversuche, fehlende Zellen, versteckte
+Dropdowns, Feedback als textarea/input/HTML) liefern alte und neue Variante
+identische Ergebnisse; das Auslesen einer Seite mit ~120 Zeilen sinkt
+dabei von 5–9 s auf unter 0,1 s.
+
+Außerdem wartet der Quiz-Report nicht mehr auf `#attempts`: Bei Quizzen
+ohne Versuche gibt es die Tabelle nicht, und jedes solche Quiz kostete die
+volle `MODE_WAITTIME`.
+
+Gemessen am selben Kurs:
+
+| Phase | vorher | nachher |
+|---|---|---|
+| Assignments | 6,9 min | 1,7 min |
+| Quiz Submission Times | 4,0 min | 43 s |
+| Kategorien laden | 7,7 s | 1,1 s |
+| **Gesamt** (ohne Login) | 11,4 min | 2,8 min |
+
+Der Export ist inhaltlich identisch zum vorherigen (reihenfolgeunabhängiger
+Vergleich beider JSON-Dateien: 0 Abweichungen).
+
+## [Unreleased] - 2026-11-17 — Feedbacktext ist kein Datumsfehler
+
+### 🔧 Export: Singleview-Feedback flutet das Log nicht mehr
+
+Das Feedback-Feld der Singleview dient als Override für das Abgabedatum
+(siehe 2026-03-16). Steht dort echtes Feedback — meist als HTML aus dem
+Editor —, schrieb der Export für jeden Schüler eine Warnung
+„Kein Datumsformat erkannt“ samt komplettem HTML-Block ins Log.
+
+- Neue Funktion **`feedback_als_datum()`** in `exporter.py`: entfernt
+  HTML-Tags und wertet das Feld nur dann als Datum, wenn es **ausschließlich**
+  ein Datum enthält (`09.01.2026`, `09.01.2026 14:30`,
+  `24. September 2025 08:12`, `Dienstag, 23. September 2025, 07:46`).
+  Feedbacktext wird stillschweigend übersprungen; ein Datum mitten im Text
+  („Abgabe bis 09.01.2026 …“) zählt bewusst nicht.
+- Ein vom Editor eingepacktes Datum (`<p>09.01.2026</p>`) wird jetzt
+  ebenfalls erkannt.
+- Die Singleview-Zusammenfassung nennt die Zahl übersprungener
+  Feedback-Texte.
+- Warnungen aus `parse_german_datetime()` kürzen den Wert auf 80 Zeichen.
+
 ## [Unreleased] - 2026-09-22 — Planstunden im Titel, Sprung in die Bewertung
 
 ### 🚀 Stundenraster: Soll wächst tagesgenau statt sprunghaft

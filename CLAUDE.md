@@ -186,7 +186,13 @@ Testexporte heißen `test_output_*.json` und werden dadurch nicht gefunden).
   mit `tabular-nums`, damit Kommastellen in Flucht stehen.
 - Selenium-Scraping ist langsam und flaky: `retry`-Decorator und
   `PhaseTimer` in [exporter.py](src/export/exporter.py) nutzen, statt neue
-  Wartelogik zu erfinden. Ein voller Export dauert ~6–7 min je Kurs.
+  Wartelogik zu erfinden. Die Phasenübersicht am Ende jedes Laufs zeigt,
+  wo die Zeit bleibt.
+- **Tabellen per `execute_script` in einem Aufruf auslesen**, nicht Zeile für
+  Zeile mit `find_element`/`.text`: Jeder Selenium-Aufruf ist ein eigener
+  Roundtrip, bei ~110 Schülern kostete das zeilenweise Lesen ~10 s je Seite.
+  Vorbilder: `get_grader_report_data`, `get_assignment_status`; Text über den
+  JS-Helfer `_JS_TEXT` (entspricht `.text`).
 - Keine Testdaten oder Exporte committen — `data/` ist vollständig gitignored
   und enthält echte Schülernamen.
 

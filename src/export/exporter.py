@@ -184,12 +184,62 @@ def parse_german_datetime(datetime_str):
                 continue
 
         # Wenn kein Format passt
-        logger.warning(f"Kein Datumsformat erkannt für '{datetime_str}' – wird ignoriert")
+        logger.warning(f"Kein Datumsformat erkannt für '{_kuerze(datetime_str)}' – wird ignoriert")
         return None
 
     except Exception as e:
-        logger.warning(f"Fehler beim Parsen der Zeitangabe '{datetime_str}': {e}")
+        logger.warning(f"Fehler beim Parsen der Zeitangabe '{_kuerze(datetime_str)}': {e}")
         return None
+
+
+def _kuerze(text, max_len=80):
+    """Kürzt lange Werte für Log-Ausgaben, damit kein HTML-Block das Log flutet."""
+    text = str(text)
+    return text if len(text) <= max_len else f"{text[:max_len]}… ({len(text)} Zeichen)"
+
+
+# Ein Feedback-Feld gilt nur dann als Datums-Override, wenn es ausschließlich
+# ein Datum enthält: '09.01.2026', '09.01.2026 14:30', '24. September 2025 08:12',
+# 'Dienstag, 23. September 2025, 07:46'. Ein Datum mitten im Feedbacktext
+# („Abgabe bis 09.01.2026 …") zählt bewusst nicht.
+_FEEDBACK_DATUM_MUSTER = re.compile(
+    r'^(?:[^\W\d_]+,\s*)?'                      # optionaler Wochentag
+    r'\d{1,2}\.\s*(?:\d{1,2}\.\s*|[^\W\d_]+\s+)'  # Tag + Monat (numerisch oder Name)
+    r'\d{4}'                                    # Jahr
+    r'(?:,?\s+\d{1,2}:\d{2})?$'                 # optionale Uhrzeit
+)
+
+
+def feedback_als_datum(feedback):
+    """
+    Liest ein Datum aus dem Feedback-Feld der Singleview.
+
+    Das Feld dient als Override für das Abgabedatum, enthält aber oft echtes
+    Feedback als HTML. Tags werden entfernt; steht danach nur ein Datum da,
+    wird es geparst, sonst ``None`` — ohne Warnung, denn Feedbacktext ist
+    kein Fehler.
+    """
+    if not feedback:
+        return None
+    text = feedback
+    if '<' in text:
+        text = BeautifulSoup(text, "html.parser").get_text(" ")
+    text = re.sub(r'\s+', ' ', text).strip()
+    if not _FEEDBACK_DATUM_MUSTER.match(text):
+        return None
+    return parse_german_datetime(text)
+
+
+# JS-Helfer für die Batch-Extraktion per execute_script: liest den sichtbaren
+# Text eines Elements so, wie Seleniums `.text` ihn liefert (gerendert,
+# geschützte Leerzeichen als normale Leerzeichen, an den Rändern getrimmt).
+# Wird jedem Extraktions-Skript vorangestellt.
+_JS_TEXT = """
+    function txt(el) {
+        return (el.innerText || '').replace(/\\u00a0/g, ' ').trim();
+    }
+"""
+
 
 def create_webdriver(headless=False):
     options = Options()
@@ -644,78 +694,76 @@ def get_assignment_status(driver, assignment_url, waittime):
 
     try:
         # Überprüfen, ob das tbody-Element vorhanden ist
-        tbody_element = WebDriverWait(driver, waittime).until(
+        WebDriverWait(driver, waittime).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "tbody"))
         )
     except TimeoutException:
         # Kein tbody gefunden, also gibt es keine Abgaben
         return []
 
-    # Finde die Spaltenüberschriften, um die Klassen der relevanten Spalten zu ermitteln
-    headers = driver.find_elements(By.CSS_SELECTOR, "th.header")
-    grade_column_class = None
-    submission_time_column_class = None
+    # Die ganze Tabelle in einem einzigen JS-Aufruf lesen. Zeilenweise
+    # find_element/.text kostete ~10 WebDriver-Roundtrips je Schüler — bei
+    # ~110 Zeilen der größte Einzelposten des Exports. Die Auswahl der
+    # Elemente entspricht 1:1 der früheren Selenium-Abfrage; Defaults und
+    # Datums-Parsing bleiben auf der Python-Seite.
+    tabelle = driver.execute_script(_JS_TEXT + """
+        // Spaltenklassen aus den Überschriften; wie zuvor gewinnt die letzte
+        // Übereinstimmung, und die Klasse ist das zweite Token ("c14").
+        var gradeCol = null, timeCol = null;
+        document.querySelectorAll('th.header').forEach(function(h) {
+            var t = txt(h);
+            var cls = (h.getAttribute('class') || '').split(/\\s+/).filter(Boolean);
+            var sortby = h.getAttribute('data-sortby') || '';
+            if (t.indexOf('Endbewertung') >= 0) gradeCol = cls[1] || null;
+            if (t.indexOf('Zuletzt geändert (Abgabe)') >= 0 || sortby.indexOf('timesubmitted') >= 0) {
+                timeCol = cls[1] || null;
+            }
+        });
+        if (!gradeCol) return {gradeCol: null, rows: []};
 
-    for header in headers:
-        if "Endbewertung" in header.text:
-            # Extrahiere die Klasse, z.B. "c14"
-            grade_column_class = header.get_attribute("class").split()[1]
-        if "Zuletzt geändert (Abgabe)" in header.text or (header.get_attribute("data-sortby") and "timesubmitted" in header.get_attribute("data-sortby")):
-            # Extrahiere die Klasse für die Abgabezeit-Spalte
-            submission_time_column_class = header.get_attribute("class").split()[1]
+        function feld(row, sel) {
+            var el = row.querySelector(sel);
+            return el ? txt(el) : null;
+        }
+        var tbody = document.querySelector('tbody');
+        var rows = [];
+        tbody.querySelectorAll('tr').forEach(function(row) {
+            rows.push({
+                cls: row.getAttribute('class') || '',
+                status: feld(row, 'div.submissionstatussubmitted'),
+                status2: feld(row, 'div.submissiongraded'),
+                submission: feld(row, 'div.assignsubmission_onlinetext .no-overflow p'),
+                grade: feld(row, 'td.cell.' + gradeCol),
+                time: timeCol ? feld(row, 'td.cell.' + timeCol) : null
+            });
+        });
+        return {gradeCol: gradeCol, rows: rows};
+    """)
 
-    if not grade_column_class:
+    if not tabelle or not tabelle.get("gradeCol"):
         logger.warning("Spalte 'Endbewertung' nicht gefunden.")
         return []
 
-    # Finde alle Zeilen in der Tabelle
-    rows = tbody_element.find_elements(By.CSS_SELECTOR, "tr")
-
     user_statuses = []
 
-    for row in rows:
+    for row in tabelle["rows"]:
         # Extrahiere die UserID aus der class des tr-Elements
-        class_attribute = row.get_attribute("class")
-        user_id_match = re.search(r'user(\d+)', class_attribute)
+        user_id_match = re.search(r'user(\d+)', row["cls"])
         if not user_id_match:
             continue  # Überspringe Zeilen ohne UserID
 
         user_id = user_id_match.group(1)
 
-        # Extrahiere die gewünschten Informationen aus den td-Elementen
-        try:
-            status = row.find_element(By.CSS_SELECTOR, "div.submissionstatussubmitted").text
-        except NoSuchElementException:
-            status = "Nicht eingereicht"
-
-        try:
-            status2 = row.find_element(By.CSS_SELECTOR, "div.submissiongraded").text
-        except NoSuchElementException:
-            status2 = "Nicht bewertet"
-
-        try:
-            submission = row.find_element(By.CSS_SELECTOR, "div.assignsubmission_onlinetext .no-overflow p").text
-        except NoSuchElementException:
-            submission = "Keine Abgabe"
+        status = row["status"] if row["status"] is not None else "Nicht eingereicht"
+        status2 = row["status2"] if row["status2"] is not None else "Nicht bewertet"
+        submission = row["submission"] if row["submission"] is not None else "Keine Abgabe"
+        grade = row["grade"] if row["grade"] is not None else "Keine Bewertung"
 
         # grade_options werden leer gelassen (wie gewünscht)
         grade_options = []
 
-        # Verwende die ermittelte Klasse, um die Endbewertung abzurufen (ursprüngliche Methode)
-        try:
-            grade = row.find_element(By.CSS_SELECTOR, f"td.cell.{grade_column_class}").text
-        except NoSuchElementException:
-            grade = "Keine Bewertung"
-
-        # Extrahiere den Abgabezeitpunkt, falls die Spalte vorhanden ist
-        submission_time = None
-        if submission_time_column_class:
-            try:
-                submission_time_raw = row.find_element(By.CSS_SELECTOR, f"td.cell.{submission_time_column_class}").text.strip()
-                # Konvertiere deutsche Zeitangabe in ISO-Format
-                submission_time = parse_german_datetime(submission_time_raw)
-            except NoSuchElementException:
-                submission_time = None
+        # Konvertiere deutsche Zeitangabe in ISO-Format
+        submission_time = parse_german_datetime(row["time"]) if row["time"] is not None else None
 
         # Korrigiere Status basierend auf der Bewertung
         # Wenn eine gültige Bewertung vorhanden ist, sollte der Status nicht "Nicht eingereicht" sein
@@ -947,98 +995,84 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
     report_url = f"https://lernplattform.bycs.de/mod/quiz/report.php?id={quiz_id}&mode=overview&attempts=enrolled_with&onlygraded&group=0&onlyregraded=0&slotmarks=1&tsort=timefinish&tdir=3"
 
     try:
+        # driver.get() kehrt erst nach dem load-Event zurück; ein zusätzliches
+        # Warten auf #attempts kostete bei Quizzen ohne Versuche (dort gibt es
+        # die Tabelle nicht) jedes Mal die volle waittime.
         driver.get(report_url)
-        WebDriverWait(driver, waittime).until(
-            lambda d: d.execute_script("return document.readyState") == "complete"
-        )
     except Exception as e:
         logger.error(f"Konnte Quiz-Report-Seite nicht laden (Quiz {quiz_id}): {e}")
         return submission_times
 
     try:
-        # Warte auf die Tabelle mit den Versuchen
-        table_element = WebDriverWait(driver, waittime).until(
-            EC.presence_of_element_located((By.ID, "attempts"))
-        )
-    except TimeoutException:
-        # Keine Versuche vorhanden - das ist normal
-        return submission_times
-    except Exception as e:
-        logger.error(f"Fehler beim Warten auf Tabelle für Quiz {quiz_id}: {e}")
-        return submission_times
+        # Ganze Tabelle in einem JS-Aufruf lesen (statt bis zu 6 Roundtrips je
+        # Zeile). Auswahl der Elemente wie zuvor mit Selenium.
+        tabelle = driver.execute_script(_JS_TEXT + """
+            var table = document.getElementById('attempts');
+            if (!table) return null;
 
-    try:
-        # Ermittle die "Beendet"-Spalte dynamisch aus den Tabellenheadern
-        finish_col_class = None
-        headers = table_element.find_elements(By.CSS_SELECTOR, "th")
-        for header in headers:
-            header_text = header.text.strip()
-            if "Beendet" in header_text or "timefinish" in (header.get_attribute("data-sortby") or ""):
-                col_match = re.search(r'\bc\d+\b', header.get_attribute("class") or "")
-                if col_match:
-                    finish_col_class = col_match.group(0)
-                    break
-        if not finish_col_class:
-            finish_col_class = "c7"  # Fallback
+            // "Beendet"-Spalte dynamisch aus den Überschriften; erste
+            // Übereinstimmung mit Spaltenklasse gewinnt, sonst Fallback c7.
+            var finishCol = null;
+            var ths = table.querySelectorAll('th');
+            for (var i = 0; i < ths.length && !finishCol; i++) {
+                var t = txt(ths[i]);
+                var sortby = ths[i].getAttribute('data-sortby') || '';
+                if (t.indexOf('Beendet') >= 0 || sortby.indexOf('timefinish') >= 0) {
+                    var m = (ths[i].getAttribute('class') || '').match(/\\bc\\d+\\b/);
+                    if (m) finishCol = m[0];
+                }
+            }
+            if (!finishCol) finishCol = 'c7';
 
-        # Finde alle Zeilen in der Tabelle (tbody tr)
-        tbody = table_element.find_element(By.TAG_NAME, "tbody")
-        rows = tbody.find_elements(By.CSS_SELECTOR, "tr")
+            var tbody = table.querySelector('tbody');
+            if (!tbody) return [];
+            // User-Link mit Fallback-Kette für verschiedene Moodle-Layouts
+            var linkSel = [
+                "td.cell.c2 a[href*='user/view.php?id=']",
+                "td.cell.c1 a[href*='user/view.php?id=']",
+                "td a[href*='user/view.php?id=']"
+            ];
+            var rows = [];
+            tbody.querySelectorAll('tr').forEach(function(row) {
+                var link = null;
+                for (var j = 0; j < linkSel.length && !link; j++) {
+                    link = row.querySelector(linkSel[j]);
+                }
+                if (!link) return;
+                var cell = row.querySelector('td.cell.' + finishCol);
+                // .href liefert wie Seleniums get_attribute("href") die absolute URL
+                rows.push([link.href, cell ? txt(cell) : null]);
+            });
+            return rows;
+        """)
 
-        # Durchlaufe alle Zeilen
-        for row in rows:
-            try:
-                # Extrahiere User-ID – Fallback-Kette für verschiedene Moodle-Layouts
-                user_link = None
-                for selector in [
-                    "td.cell.c2 a[href*='user/view.php?id=']",
-                    "td.cell.c1 a[href*='user/view.php?id=']",
-                    "td a[href*='user/view.php?id=']",
-                ]:
-                    try:
-                        user_link = row.find_element(By.CSS_SELECTOR, selector)
-                        break
-                    except NoSuchElementException:
-                        continue
+        if tabelle is None:
+            # Keine Versuche vorhanden - das ist normal
+            return submission_times
 
-                if not user_link:
-                    continue
+        # Zeilen sind nach Beendet-Zeit absteigend sortiert: der erste
+        # erfolgreich geparste Eintrag je User ist der neueste.
+        for user_href, submission_time_raw in tabelle:
+            user_id_match = re.search(r'id=(\d+)', user_href or "")
 
-                user_href = user_link.get_attribute("href")
-                user_id_match = re.search(r'id=(\d+)', user_href)
-
-                if not user_id_match:
-                    continue
-
-                user_id = user_id_match.group(1)
-
-                # Wenn dieser User bereits erfasst wurde, überspringe (wir wollen nur den neuesten)
-                if user_id in submission_times:
-                    continue
-
-                # Extrahiere submission_time aus der dynamisch ermittelten "Beendet"-Spalte
-                submission_time_cell = None
-                submission_time_raw = None
-
-                try:
-                    submission_time_cell = row.find_element(By.CSS_SELECTOR, f"td.cell.{finish_col_class}")
-                    submission_time_raw = submission_time_cell.text.strip()
-                except NoSuchElementException:
-                    continue
-
-                if not submission_time_raw or submission_time_raw == "":
-                    continue
-
-                # Konvertiere in ISO-Format
-                submission_time = parse_german_datetime(submission_time_raw)
-
-                # Speichere nur, wenn erfolgreich geparst
-                if submission_time:
-                    submission_times[user_id] = submission_time
-
-            except Exception as e:
-                # Zeile konnte nicht verarbeitet werden, überspringe
+            if not user_id_match:
                 continue
+
+            user_id = user_id_match.group(1)
+
+            # Wenn dieser User bereits erfasst wurde, überspringe (wir wollen nur den neuesten)
+            if user_id in submission_times:
+                continue
+
+            if not submission_time_raw:
+                continue
+
+            # Konvertiere in ISO-Format
+            submission_time = parse_german_datetime(submission_time_raw)
+
+            # Speichere nur, wenn erfolgreich geparst
+            if submission_time:
+                submission_times[user_id] = submission_time
 
     except Exception as e:
         logger.error(f"Fehler beim Extrahieren der Quiz-Submission-Times für Quiz {quiz_id}: {e}")
@@ -1192,57 +1226,57 @@ def get_singleview_feedback_dates(driver, course_id, grade_item_id, waittime):
         return {}
 
     feedback_dates = {}
+    feedback_ohne_datum = 0
     try:
-        rows = driver.find_elements(By.CSS_SELECTOR, "table#singleview-grades tbody tr")
-        logger.info(f"  Singleview: {len(rows)} Zeilen für grade_item_id {grade_item_id}")
+        # Alle Zeilen in einem JS-Aufruf lesen statt ~5 Roundtrips je Zeile —
+        # die Singleview wird für jedes Assignment und jedes Quiz geladen.
+        # Rückgabe: Zeilenzahl + [href, feedback_text] je auswertbarer Zeile.
+        ergebnis = driver.execute_script(_JS_TEXT + """
+            var rows = document.querySelectorAll('table#singleview-grades tbody tr');
+            var out = [];
+            rows.forEach(function(row) {
+                // UserID aus dem ersten User-Link in der Zeile (Spalte c0)
+                var link = row.querySelector("a[href*='user/view.php?id=']");
+                if (!link) return;
+                // Feedback-Text aus Spalte c4: Moodle rendert den Wert je nach
+                // Modus als sichtbaren Text, textarea oder input.
+                var cell = row.querySelector('td.cell.c4');
+                if (!cell) return;
+                var text = txt(cell);
+                if (!text) {
+                    var ta = cell.querySelector('textarea');
+                    if (ta) text = ta.value || '';
+                }
+                if (!text) {
+                    var inp = cell.querySelector("input[type='text']");
+                    if (inp) text = inp.value || '';
+                }
+                out.push([link.href, text]);
+            });
+            return {anzahl: rows.length, zeilen: out};
+        """)
+        logger.info(f"  Singleview: {ergebnis['anzahl']} Zeilen für grade_item_id {grade_item_id}")
 
-        for row in rows:
-            # UserID aus dem ersten User-Link in der Zeile (Spalte c0)
-            try:
-                user_link = row.find_element(By.CSS_SELECTOR, "a[href*='user/view.php?id=']")
-                href = user_link.get_attribute("href") or ""
-                uid_match = re.search(r'user/view\.php\?id=(\d+)', href)
-                if not uid_match:
-                    continue
-                user_id = uid_match.group(1)
-            except NoSuchElementException:
+        for href, feedback_text in ergebnis["zeilen"]:
+            uid_match = re.search(r'user/view\.php\?id=(\d+)', href or "")
+            if not uid_match:
                 continue
-
-            # Feedback-Text aus Spalte c4:
-            # Moodle rendert den Wert je nach Modus als textarea, input oder sichtbaren Text
-            feedback_text = None
-            try:
-                feedback_cell = row.find_element(By.CSS_SELECTOR, "td.cell.c4")
-                # 1. Versuch: sichtbarer Text (read-only Ansicht)
-                feedback_text = feedback_cell.text.strip()
-                # 2. Versuch: textarea-Inhalt (edit-Modus)
-                if not feedback_text:
-                    try:
-                        ta = feedback_cell.find_element(By.TAG_NAME, "textarea")
-                        feedback_text = ta.get_attribute("value") or ""
-                    except NoSuchElementException:
-                        pass
-                # 3. Versuch: input-Wert
-                if not feedback_text:
-                    try:
-                        inp = feedback_cell.find_element(By.CSS_SELECTOR, "input[type='text']")
-                        feedback_text = inp.get_attribute("value") or ""
-                    except NoSuchElementException:
-                        pass
-            except NoSuchElementException:
-                continue
+            user_id = uid_match.group(1)
 
             if not feedback_text:
                 continue
 
-            feedback_date = parse_german_datetime(feedback_text.strip())
+            feedback_date = feedback_als_datum(feedback_text)
             if feedback_date:
                 feedback_dates[user_id] = feedback_date
+            else:
+                feedback_ohne_datum += 1
 
     except Exception as e:
         logger.error(f"Fehler beim Parsen der Singleview für grade_item_id {grade_item_id}: {e}")
 
-    logger.info(f"  Singleview: {len(feedback_dates)} Feedback-Daten extrahiert")
+    hinweis = f" ({feedback_ohne_datum} Feedback-Texte ohne Datum übersprungen)" if feedback_ohne_datum else ""
+    logger.info(f"  Singleview: {len(feedback_dates)} Feedback-Daten extrahiert{hinweis}")
     return feedback_dates
 
 
@@ -1419,40 +1453,55 @@ def get_all_activity_categories(driver, course_id):
     driver.get(grade_url)
 
     # Verwenden Sie WebDriverWait, um sicherzustellen, dass die Elemente geladen sind
-    activity_elements = WebDriverWait(driver, 10).until(
+    WebDriverWait(driver, 10).until(
         EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a.gradeitemheader"))
     )
 
-    for activity_element in activity_elements:
-        try:
-            # Extrahiere die Aktivitäts-ID aus dem href-Attribut
-            href = activity_element.get_attribute("href")
-            activity_id_match = re.search(r'\?id=(\d+)', href)
-            if not activity_id_match:
-                continue
-
-            activity_id = activity_id_match.group(1)
-
-            # Finde die übergeordnete Kategorie
-            parent_tr = activity_element.find_element(By.XPATH, "./ancestor::tr")
-            category_id = parent_tr.get_attribute("data-parent-category")
-            # Bewertungs-ID (data-itemid auf dem TR) – unterscheidet sich von der Activity-ID
-            grade_item_id = parent_tr.get_attribute("data-itemid") or None
-
-            full_id = f"grade-item-{category_id}"
-            category_tr = driver.find_element(By.ID, full_id)
-
-            # Extrahiere den Kategorienamen aus dem `data-toggle-selectall` Attribut
-            category_name = category_tr.find_element(By.CSS_SELECTOR, "input.itemselect").get_attribute("data-toggle-selectall")
-
-            categories_data[activity_id] = {
-                "category_id": category_id,
-                "category_name": category_name,
-                "grade_item_id": grade_item_id
+    # Alle Aktivitäten in einem JS-Aufruf statt ~5 Roundtrips je Aktivität.
+    eintraege = driver.execute_script("""
+        var out = [];
+        document.querySelectorAll('a.gradeitemheader').forEach(function(a) {
+            // Wie zuvor XPath "./ancestor::tr" mit find_element: das erste
+            // Treffer-Element in Dokumentreihenfolge, also das äußerste <tr>.
+            var parentTr = null;
+            for (var el = a.parentElement; el; el = el.parentElement) {
+                if (el.tagName === 'TR') parentTr = el;
             }
+            if (!parentTr) { out.push({href: a.href, fehler: 'kein übergeordnetes <tr>'}); return; }
+            var categoryId = parentTr.getAttribute('data-parent-category');
+            var categoryTr = document.getElementById('grade-item-' + categoryId);
+            var input = categoryTr ? categoryTr.querySelector('input.itemselect') : null;
+            if (!input) {
+                out.push({href: a.href, fehler: 'Kategoriezeile grade-item-' + categoryId + ' nicht gefunden'});
+                return;
+            }
+            out.push({
+                href: a.href,
+                category_id: categoryId,
+                // Bewertungs-ID (data-itemid auf dem TR) – unterscheidet sich von der Activity-ID
+                grade_item_id: parentTr.getAttribute('data-itemid'),
+                // Kategoriename aus dem data-toggle-selectall-Attribut
+                category_name: input.getAttribute('data-toggle-selectall')
+            });
+        });
+        return out;
+    """)
 
-        except Exception as e:
-            logger.warning(f"Fehler beim Verarbeiten der Aktivität: {e}")
+    for eintrag in eintraege:
+        # Extrahiere die Aktivitäts-ID aus dem href-Attribut
+        activity_id_match = re.search(r'\?id=(\d+)', eintrag.get("href") or "")
+        if not activity_id_match:
+            continue
+
+        if eintrag.get("fehler"):
+            logger.warning(f"Fehler beim Verarbeiten der Aktivität: {eintrag['fehler']}")
+            continue
+
+        categories_data[activity_id_match.group(1)] = {
+            "category_id": eintrag["category_id"],
+            "category_name": eintrag["category_name"],
+            "grade_item_id": eintrag["grade_item_id"] or None
+        }
 
     return categories_data
 
