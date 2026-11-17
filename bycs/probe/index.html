@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ByCS-Machbarkeitstest</title>
+<link rel="stylesheet" href="probe.css">
+</head>
+<body>
+<main>
+    <h1>Machbarkeitstest: Lehrkräfte-Dashboard in ByCS</h1>
+    <p class="lead">
+        Prüft, ob diese Seite — als Aktivität „Datei" hochgeladen — die Moodle-Seiten
+        lesen kann, die der Export braucht. Gelesen wird nur, was Ihr Konto ohnehin sieht.
+        Angezeigt werden <strong>nur Zählwerte</strong>: keine Namen, keine Personen-IDs.
+    </p>
+
+    <form id="formular">
+        <label for="kursId">Moodle-Kurs-ID</label>
+        <input id="kursId" name="kursId" inputmode="numeric" pattern="[0-9]+" required
+               placeholder="z.B. 2491549">
+        <button type="submit" id="start">Test starten</button>
+    </form>
+    <p class="hinweis">Die Kurs-ID steht in der Adresse des Kurses:
+        <code>…/course/view.php?id=<strong>2491549</strong></code></p>
+
+    <section id="ergebnis" hidden>
+        <h2>Ergebnis</h2>
+        <p id="fazit" class="fazit"></p>
+        <table>
+            <thead><tr><th>Prüfung</th><th>Ergebnis</th><th>Details</th></tr></thead>
+            <tbody id="zeilen"></tbody>
+        </table>
+        <button type="button" id="kopieren">Ergebnis als Text kopieren</button>
+        <textarea id="rohtext" readonly hidden></textarea>
+    </section>
+</main>
+<script src="probe.js"></script>
+</body>
+</html>

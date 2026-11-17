@@ -1,0 +1,70 @@
+/* Werte aus den Design-Tokens des Dashboards (src/dashboard/static/css/style.css) */
+:root {
+    --accent: #2563EB;
+    --surface: #ffffff;
+    --surface-sunken: #F1F3F6;
+    --surface-muted: #F7F8FA;
+    --line: #E4E7EC;
+    --line-row: #F1F3F5;
+    --text-color: #1A1D23;
+    --text-light: #5B6472;
+    --success-color: #16A34A;
+    --warning-color: #FF6B35;
+    --radius-sm: 6px;
+    --radius-lg: 10px;
+    --font-base: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--surface-sunken);
+    color: var(--text-color);
+    font: 14px/1.5 var(--font-base);
+}
+
+main {
+    max-width: 960px;
+    margin: 24px auto;
+    padding: 24px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+}
+
+h1 { font-size: 19px; margin: 0 0 8px; }
+h2 { font-size: 15px; margin: 24px 0 8px; }
+h3 { font-size: 13.5px; margin: 12px 0 4px; }
+.lead, .hinweis { color: var(--text-light); }
+.hinweis { font-size: 12.5px; }
+
+.kurs { display: block; margin: 4px 0; }
+
+button {
+    margin-top: 12px;
+    font: inherit; padding: 6px 14px; cursor: pointer;
+    border: 1px solid var(--accent); border-radius: var(--radius-sm);
+    background: var(--accent); color: var(--surface);
+}
+button:disabled { opacity: 0.5; cursor: wait; }
+
+.fortschritt { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.protokoll {
+    max-height: 220px; overflow-y: auto;
+    margin: 0; padding: 8px 12px; list-style: none;
+    background: var(--surface-muted); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    font-family: var(--font-mono); font-size: 12px;
+}
+
+.pruefbericht {
+    padding: 8px 12px;
+    border-left: 3px solid var(--line);
+    background: var(--surface-muted);
+    border-radius: var(--radius-sm);
+}
+.pruefbericht ul { margin: 4px 0; padding-left: 18px; }
+.ok { color: var(--success-color); }
+.warnung { color: var(--warning-color); }

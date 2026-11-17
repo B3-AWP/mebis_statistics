@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mebis Statistik Dashboard</title>
+    <!-- Alle Links öffnen grundsätzlich in einem neuen Tab, damit das Dashboard
+         mit seiner Auswahl stehen bleibt. Gilt auch für Links ohne eigenes target. -->
+    <base target="_blank">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/dashboard-custom.css">
@@ -165,6 +168,8 @@
                         <nav class="halbjahr-nav-container" id="halbjahrNav"></nav>
                     </div>
                     <p id="halbjahrHinweis" class="halbjahr-hinweis" style="display:none;"></p>
+                    <!-- Pruefbericht des Exports: Luecken, Rueckgaenge, fehlende Kurse -->
+                    <div id="pruefbericht" class="pruefbericht" hidden></div>
                 </div>
             </div>
 

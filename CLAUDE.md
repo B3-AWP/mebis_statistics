@@ -56,12 +56,37 @@ Leicht zu verwechseln — es sind verschiedene Dinge:
 | Konstante | Wert | Gilt für |
 |---|---|---|
 | `plan_loader.SCHEMA_VERSION` | **4** | `plan.json` (`schemaVersion`) |
-| `exporter.EXPORT_SCHEMA_VERSION` / `backend.EXPORT_SCHEMA_VERSION` | **2** | Export-JSON (`schema`) |
+| `exporter.EXPORT_SCHEMA_VERSION` / `backend.EXPORT_SCHEMA_VERSION` | **3** | Export-JSON (`schema`) |
 
 Beide werden hart geprüft; Altformate werden **abgelehnt, nicht migriert**.
-Ändert sich das Exportformat, müssen [exporter.py:41](src/export/exporter.py#L41)
-und [backend.py:41](src/dashboard/backend.py#L41) gemeinsam angehoben werden —
-plus die Assertion in [tests/run_refactoring_tests.sh](tests/run_refactoring_tests.sh).
+Ändert sich das Exportformat, müssen `EXPORT_SCHEMA_VERSION` in
+[exporter.py](src/export/exporter.py) und [backend.py](src/dashboard/backend.py)
+gemeinsam angehoben werden — plus die Prüfung in
+[report_generator.py](src/report/report_generator.py) (`_flatten_export`), die
+Assertion in [tests/run_refactoring_tests.sh](tests/run_refactoring_tests.sh)
+und `schema` in [tests/make_fixture.py](tests/make_fixture.py).
+
+### Unbekannt ist nicht „nicht abgegeben"
+
+Seit Schema 3 kann ein Status **unbekannt** sein (`"unbekannt": true`,
+`"grund"`): Der Export konnte die Seite nicht lesen oder die Person fehlte in
+einer sonst vollständigen Tabelle. Regeln:
+
+- Eine fehlgeschlagene Seite wird **nie** zur leeren Liste. Lesefunktionen
+  werfen `SeiteUnvollstaendig` ([pruefung.py](src/export/pruefung.py)); der
+  Aufrufer macht daraus `unbekannter_status(...)`.
+- Unbekannt zählt nicht als erledigt. Die Quantität ist dann eine
+  **Untergrenze**, die Mitarbeitsnote **vorläufig** (Dashboard: „mind.",
+  Marke „vorl."; CSV-Spalte „Vorläufig"; Bericht: „Stand unbekannt").
+  Bewusst so entschieden statt „keine Note": eine einzige ausgefallene Seite
+  soll nicht der ganzen Klasse die Note nehmen.
+- Getrennt halten von der Planregel: Eine **Plan-Aufgabe, die in Moodle
+  fehlt**, ist „nicht begonnen", nicht unbekannt.
+- Tabellen, die Moodle aufteilt, über `lade_alle_seiten()` lesen — nur die
+  Seitennummer übernehmen, nie den Link (Filter bleiben sonst in der Sitzung).
+- Der frühere Größenvergleich der Exportdatei ist ersetzt durch den
+  `pruefbericht` (Lücken, Zählwert-Vergleich mit dem Vorlauf). Ein Rückgang
+  ist eine Warnung, kein Grund zum Verwerfen.
 
 ### Rechenregeln (nicht „vereinfachen")
 
@@ -139,9 +164,15 @@ scripts/        dünne CLI-Wrapper (sys.path-Setup + main()), *.bat/*.cmd danebe
 src/
   common/       plan_loader.py (Stammdaten + Rechnen), group_utils.py
   dashboard/    backend.py (Flask, ~1.8k Z.) + static/ (dashboard.js ~5.4k Z.)
-  export/       exporter.py (Selenium-Scraper, ~2.2k Z.)
+  export/       exporter.py (Selenium-Scraper, ~2.5k Z.), pruefung.py (Prüfschichten)
   report/       report_generator.py (ReportLab)
   exam/         scraper.py, pdf_generator.py, utils.py  → eigene README.md
+bycs/           Browser-Seiten zum Hochladen in ByCS (ZIP via scripts/build_bycs_zip.py)
+  probe/        Machbarkeitstest: liest die Export-Seiten in der Lehrkraft-Sitzung
+  export/       Browser-Export: exporter.js = JS-Gegenstück zu exporter.py (Schema 3)
+  dashboard/    aufbereitung.js = JS-Gegenstück zu backend._process_dashboard_data,
+                start.js ersetzt die Serveraufrufe und stellt window.pflichtSync
+                (Einzel-Nachladen) bereit; ZIP aus src/dashboard/static/
 config/         config_manager.py (nur .env), logger_config.py, .env (nicht in Git)
 tests/
 data/           quiz_data/, LNW/, report/, export/  — alles gitignored
@@ -177,6 +208,9 @@ Testexporte heißen `test_output_*.json` und werden dadurch nicht gefunden).
   explizitem `pfad` arbeiten.
 - Frontend ist **Vanilla JS ohne Build-Schritt** — Dateien in
   `src/dashboard/static/` werden direkt ausgeliefert. Kein npm, kein Bundler.
+- **Links im Dashboard öffnen im neuen Tab** — zentral über
+  `<base target="_blank">` in `dashboard.html`. Ausnahme sind Downloads
+  (z.B. CSV), die ausdrücklich `target="_self"` setzen.
 - **Farben, Abstände und Schriftgrößen kommen aus den Design-Tokens** in
   `:root` von [style.css](src/dashboard/static/css/style.css)
   (`--accent`, `--class-accent`, `--surface*`, `--line*`, `--text-*`,
@@ -193,8 +227,29 @@ Testexporte heißen `test_output_*.json` und werden dadurch nicht gefunden).
   Roundtrip, bei ~110 Schülern kostete das zeilenweise Lesen ~10 s je Seite.
   Vorbilder: `get_grader_report_data`, `get_assignment_status`; Text über den
   JS-Helfer `_JS_TEXT` (entspricht `.text`).
-- Keine Testdaten oder Exporte committen — `data/` ist vollständig gitignored
-  und enthält echte Schülernamen.
+- Keine Testdaten oder Exporte committen — `data/` enthält echte
+  Schülernamen. Gitignored sind nur die Unterordner `export/`, `LNW/`,
+  `quiz_data/`, `report/` und `bycs/`; ein neuer Unterordner muss in
+  `.gitignore` nachgetragen werden.
+- **Browser-Seiten für ByCS** (`bycs/`) laufen unter
+  `lernplattform.bycs.de` in der Sitzung der angemeldeten Person. Sie lesen
+  Moodle-HTML per `fetch` + `DOMParser`; dort gibt es kein Layout, also
+  **`textContent` statt `innerText`** (anders als im Selenium-JS des
+  Exporters, `_JS_TEXT`). Keine externen Ressourcen, keine Personendaten in
+  Ausgaben, die zum Weitergeben gedacht sind.
+- **Der Export existiert doppelt**: [exporter.py](src/export/exporter.py)
+  (Selenium) und [bycs/export/exporter.js](bycs/export/exporter.js)
+  (Browser). Beide müssen dieselbe JSON erzeugen. Wer Lese- oder Prüfregeln
+  ändert, ändert beide Seiten und prüft mit
+  `tests/vergleiche_exporte.py` gegen einen echten Lauf.
+- **Die Aufbereitung existiert doppelt**: `backend.py` (Flask, lokal) und
+  [bycs/dashboard/aufbereitung.js](bycs/dashboard/aufbereitung.js) (ByCS).
+  Wer `_process_course_data`, `calculate_user_progress`, Gruppenschnitte o.ä.
+  ändert, ändert beide; `tests/vergleiche_aufbereitung.py` (Stufe 4) vergleicht
+  sie. Python-Eigenheiten sind dort nachgebildet — `round()` als `pyRound`,
+  `sum()` als `pySum` (Neumaier), `dict.get` als `hol` — nicht durch
+  JS-Bordmittel ersetzen. `dashboard.js` bleibt die einzige Oberfläche; das
+  ByCS-ZIP übernimmt sie unverändert.
 
 ## Befehle
 
@@ -221,7 +276,12 @@ python scripts/generate_pdfs.py [--only-incorrect]
 ```bash
 bash tests/run_refactoring_tests.sh     # die maßgebliche Suite, 4 Stufen
 python -m unittest tests.test_plan_loader
+python -X utf8 -m unittest tests.test_pruefung   # Prüfschichten, ohne Browser
 ```
+
+`test_pruefung` ersetzt Selenium und Moodle durch Attrappen und prüft
+Seitenleisten, Nachladen und den Abgleich in `export_course` an einem
+simulierten Kurs — der Weg, Exporter-Änderungen ohne Moodle-Sitzung zu testen.
 
 `run_refactoring_tests.sh` prüft plan_loader (inkl. Abgleich mit der
 JS-Referenz) → Fixture-Erzeugung → Backend-API → Frontend-Rechenpfade.
@@ -253,6 +313,14 @@ Nicht „aufräumen" ohne Rückfrage, aber auch nicht als Vorbild nehmen:
 - `SHOW_RECENT_SUBMISSIONS = false` in
   [dashboard.js](src/dashboard/static/dashboard.js) blendet „Letzte Abgaben
   je Gruppe" aus; `build_recent_submissions` im Backend rechnet weiter mit.
+- `SHOW_LEISTUNGSNACHWEISE = false` in
+  [dashboard.js](src/dashboard/static/dashboard.js) blendet den Tab
+  „Leistungsnachweise" aus. Leistungsnachweise werden bisher am Namen der
+  Notenbuch-Kategorie erkannt — mit drei verschiedenen Regeln (Tab:
+  „Leistungsnachweise"/„📊"; Backend `create_structured_tables`:
+  „Zentrale Leistungsnachweise"/„chart"; `report_generator`: nur „Zentrale
+  Leistungsnachweise"). Der Kurs 2026/27 hat keine solche Kategorie. Vor dem
+  Wiedereinschalten die Regel vereinheitlichen, am besten über `plan.json`.
 
 ## Arbeitsweise
 

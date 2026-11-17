@@ -962,6 +962,28 @@
     text-decoration: underline;
 }
 
+/* Nachladen einer einzelnen Aufgabe (nur im ByCS-Dashboard sichtbar) */
+.pflicht-matrix th.pflicht-task-col .pflicht-sync {
+    display: block;
+    margin: 0 auto 4px;
+    padding: 2px 6px;
+    line-height: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--accent);
+    cursor: pointer;
+}
+
+.pflicht-matrix th.pflicht-task-col .pflicht-sync:hover {
+    border-color: var(--accent);
+}
+
+.pflicht-matrix th.pflicht-task-col .pflicht-sync:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
 .pflicht-matrix td.pflicht-task-cell {
     width: 90px;
     min-width: 90px;

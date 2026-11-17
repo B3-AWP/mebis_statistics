@@ -83,7 +83,9 @@
     --font-size-xxl: 19px;
 
     /* Breiten */
-    --max-width: 1280px;
+    /* Keine feste Breite: auf grossen Bildschirmen sollen die breiten
+       Klassentabellen den Platz nutzen, statt seitlich zu scrollen. */
+    --max-width: none;
     --min-height: 800px;
 }
 
@@ -124,7 +126,11 @@ body {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     background: white;
-    max-height: 70vh; /* Maximale Höhe für besseres Handling */
+    /* Fast die ganze Fensterhoehe: Der Kasten bleibt noetig, damit der
+       Tabellenkopf beim Scrollen stehen bleibt (sticky wirkt nur innerhalb
+       des scrollenden Elements) — er soll aber nicht kleiner sein als
+       der Bildschirm hergibt. Frueher 70vh. */
+    max-height: calc(100vh - 120px);
     overflow-y: auto; /* Vertikales Scrollen innerhalb der Tabelle */
 }
 
@@ -1971,6 +1977,52 @@ h3 {
     border-radius: var(--radius-sm);
     font-size: var(--font-size-sm);
     color: var(--text-light);
+}
+
+/* Pruefbericht des Exports — gleiche Form wie der Halbjahr-Hinweis */
+.pruefbericht {
+    margin: 8px 0 0;
+    padding: 7px 12px;
+    border-left: 3px solid var(--success-color);
+    background: var(--surface-muted);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-light);
+}
+
+.pruefbericht--warnung {
+    border-left-color: var(--warning-color);
+    color: var(--text-color);
+}
+
+.pruefbericht summary {
+    cursor: pointer;
+}
+
+.pruefbericht ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+}
+
+/* Unbekannter Stand: der Export konnte die Aufgabe nicht lesen */
+.zelle-unbekannt {
+    color: var(--warning-color);
+    font-weight: 600;
+    text-align: center;
+    cursor: help;
+}
+
+/* Marke hinter vorlaeufigen Werten (Quantitaet ist Untergrenze) */
+.vorlaeufig-marke {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 4px;
+    border: 1px solid var(--warning-color);
+    border-radius: var(--radius-sm);
+    color: var(--warning-color);
+    font-size: 0.8em;
+    font-weight: 500;
+    cursor: help;
 }
 
 /* Punkte-Unterzeile in Prozentzellen (z.B. "229 / 1333") */

@@ -33,12 +33,20 @@ import functools
 from config.config_manager import config_manager
 from config.logger_config import get_logger
 from src.common.plan_loader import PlanFehler, get_plan
+from src.export.pruefung import (
+    MAX_SEITEN, SeiteUnvollstaendig, erste_seite, fuehre_gruppen_zusammen,
+    gilt_fuer_gruppe, offene_seiten, seiten_url, seitenwerte,
+    unbekannter_status, vergleiche_zaehlwerte, zaehlwerte,
+)
 
 logger = get_logger('exporter')
 
 # Version des Exportformats. 2 = ein Export je Schuljahr mit mehreren Kursen
-# unter "kurse". Das Dashboard lehnt aeltere Formate ab.
-EXPORT_SCHEMA_VERSION = 2
+# unter "kurse". 3 = zusaetzlich unbekannter Status je Aufgabe
+# ("unbekannt": true) und ein "pruefbericht". Das Dashboard lehnt aeltere
+# Formate ab — ein Schema-2-Export kennt keine Luecken und wuerde jede als
+# "nicht abgegeben" ausweisen.
+EXPORT_SCHEMA_VERSION = 3
 
 # Checklisten-Export deaktivieren (True = exportieren, False = überspringen)
 EXPORT_CHECKLISTS = False
@@ -240,6 +248,91 @@ _JS_TEXT = """
     }
 """
 
+# Links der Seitenleiste(n). Die Buchstabenleiste (.initialbar) teilt sich
+# in Moodle 4 die Klasse .pagination, ist aber ein Filter — sie bleibt
+# draussen. Aus den Links wird ohnehin nur die Seitennummer gelesen
+# (pruefung.seitenwerte).
+_JS_SEITENLINKS = """
+    var out = [];
+    document.querySelectorAll('.pagination a[href], .paging a[href]').forEach(function(a) {
+        if (a.closest('.initialbar')) return;
+        out.push(a.getAttribute('href'));
+    });
+    return out;
+"""
+
+# Zaehlt nachgeladene Folgeseiten fuer den Pruefbericht (Threads teilen ihn).
+_seiten_statistik = {"nachgeladen": 0}
+_seiten_lock = threading.Lock()
+
+
+def pruefe_angemeldet(driver):
+    """Bricht ab, wenn Moodle statt des Inhalts die Anmeldeseite liefert."""
+    if "login" in (driver.current_url or ""):
+        raise SeiteUnvollstaendig("Anmeldeseite statt Inhalt — Sitzung abgelaufen?")
+
+
+def lade_alle_seiten(driver, url, lese_seite):
+    """
+    Laedt eine Moodle-Seite samt aller Folgeseiten.
+
+    Bewerterübersicht, Bewertungsseite und Testbericht teilen ihre Tabellen
+    je nach den im Moodle-Konto gespeicherten Einstellungen auf. Ohne
+    Nachladen fehlten Personen jenseits der ersten Seite — still, und in
+    jedem Lauf gleich, also auch fuer einen Vergleich mit dem Vorlauf
+    unsichtbar.
+
+    Args:
+        driver: WebDriver
+        url: Basis-URL der ersten Seite
+        lese_seite: Funktion(driver) -> Ergebnis einer Seite; wirft
+            SeiteUnvollstaendig, wenn die Seite nicht wie erwartet aussieht
+
+    Returns:
+        Liste der Seitenergebnisse, erste Seite zuerst
+
+    Raises:
+        SeiteUnvollstaendig: Anmeldeseite, fehlende Tabelle, zu viele Seiten
+    """
+    driver.get(url)
+    pruefe_angemeldet(driver)
+    ergebnisse = [lese_seite(driver)]
+
+    geladen = erste_seite(url)
+    gefunden = seitenwerte(driver.execute_script(_JS_SEITENLINKS) or [])
+    offen = offene_seiten(gefunden, geladen)
+
+    while offen:
+        if len(ergebnisse) >= MAX_SEITEN:
+            raise SeiteUnvollstaendig(f"mehr als {MAX_SEITEN} Seiten — Seitenleiste unerwartet")
+        param, wert = offen[0]
+        driver.get(seiten_url(url, param, wert))
+        pruefe_angemeldet(driver)
+        ergebnisse.append(lese_seite(driver))
+        geladen.setdefault(param, set()).add(wert)
+        with _seiten_lock:
+            _seiten_statistik["nachgeladen"] += 1
+
+        # Eine lange Seitenleiste zeigt nicht alle Nummern auf einmal —
+        # jede geladene Seite kann weitere verraten.
+        for p, werte in seitenwerte(driver.execute_script(_JS_SEITENLINKS) or []).items():
+            gefunden.setdefault(p, set()).update(werte)
+        offen = offene_seiten(gefunden, geladen)
+
+    if len(ergebnisse) > 1:
+        logger.info(f"  {len(ergebnisse)} Seiten geladen (aufgeteilte Tabelle)")
+    return ergebnisse
+
+
+def warte_auf(driver, selektor, waittime, beschreibung):
+    """Wartet auf ein Element; fehlt es, ist die Seite unvollstaendig."""
+    try:
+        WebDriverWait(driver, waittime).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, selektor))
+        )
+    except TimeoutException:
+        raise SeiteUnvollstaendig(f"{beschreibung} nicht gefunden")
+
 
 def create_webdriver(headless=False):
     options = Options()
@@ -355,23 +448,80 @@ def get_user_ids_from_group(driver, group_value, base_url, course_id):
         logger.error(f"Benutzer für Gruppe {group_value} nicht ladbar: {e}")
         return []
 
+def _lies_gruppenseite(session, url):
+    """
+    Liest eine Seite des Fortschrittsberichts per requests.
+
+    Returns:
+        (users, seitenlinks)
+
+    Raises:
+        SeiteUnvollstaendig: Anmeldeseite oder kein Fortschrittsbericht
+    """
+    resp = session.get(url, timeout=30)
+    resp.raise_for_status()
+    if "login" in resp.url:
+        raise SeiteUnvollstaendig("Anmeldeseite statt Fortschrittsbericht")
+    soup = BeautifulSoup(resp.text, 'html.parser')
+
+    tabelle = soup.select_one('#completion-progress')
+    if tabelle is None:
+        # Eine leere Gruppe hat keine Tabelle, wohl aber die Gruppenauswahl
+        # des Berichts. Fehlt beides, ist es nicht der Bericht.
+        if soup.select_one('select[name="group"]') is None:
+            raise SeiteUnvollstaendig("Fortschrittsbericht nicht erkannt")
+        return [], []
+
+    users = []
+    for a in tabelle.select('tbody th[scope="row"] a'):
+        m = re.search(r'id=(\d+)', a.get('href', ''))
+        if m:
+            users.append({"id": m.group(1), "name": a.get_text(strip=True)})
+
+    links = [a.get('href') for a in soup.select('.pagination a[href], .paging a[href]')
+             if not a.find_parent(class_='initialbar')]
+    return users, links
+
+
 def get_user_ids_from_group_fast(session, group_value, base_url, course_id):
-    """Lädt User-IDs via requests+BeautifulSoup statt Selenium (viel schneller)"""
-    try:
-        url = f"{base_url}?course={course_id}&group={group_value}"
-        resp = session.get(url, timeout=30)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        users = []
-        for a in soup.select('#completion-progress tbody th[scope="row"] a'):
-            href = a.get('href', '')
-            m = re.search(r'id=(\d+)', href)
-            if m:
-                users.append({"id": m.group(1), "name": a.get_text(strip=True)})
-        return users
-    except Exception as e:
-        logger.error(f"Benutzer für Gruppe {group_value} nicht ladbar (fast): {e}")
-        return []
+    """
+    Lädt die Mitglieder einer Gruppe via requests+BeautifulSoup.
+
+    Der Fortschrittsbericht zeigt nur eine begrenzte Zahl Personen je Seite;
+    die Folgeseiten werden nachgeladen. Die Mitglieder sind die Bezugsmenge
+    aller weiteren Abgleiche — fehlt hier jemand, fehlt die Person im
+    ganzen Dashboard. Deshalb wird ein Fehler nicht als leere Gruppe
+    weitergegeben, sondern geworfen.
+
+    Raises:
+        SeiteUnvollstaendig, requests.RequestException
+    """
+    url = f"{base_url}?course={course_id}&group={group_value}"
+    users, links = _lies_gruppenseite(session, url)
+
+    geladen = erste_seite(url)
+    gefunden = seitenwerte(links)
+    offen = offene_seiten(gefunden, geladen)
+    seiten = 1
+    while offen:
+        if seiten >= MAX_SEITEN:
+            raise SeiteUnvollstaendig(f"mehr als {MAX_SEITEN} Seiten im Fortschrittsbericht")
+        param, wert = offen[0]
+        mehr, links = _lies_gruppenseite(session, seiten_url(url, param, wert))
+        users.extend(mehr)
+        seiten += 1
+        geladen.setdefault(param, set()).add(wert)
+        with _seiten_lock:
+            _seiten_statistik["nachgeladen"] += 1
+        for p, werte in seitenwerte(links).items():
+            gefunden.setdefault(p, set()).update(werte)
+        offen = offene_seiten(gefunden, geladen)
+
+    # Doppelte Zeilen (z.B. bei ueberlappenden Seiten) entfernen
+    eindeutig = {}
+    for user in users:
+        eindeutig.setdefault(user["id"], user)
+    return list(eindeutig.values())
 
 def create_requests_session_from_driver(driver):
     """Erstellt eine requests.Session mit den Cookies des Selenium-Drivers"""
@@ -641,72 +791,47 @@ def extract_progress(driver):
 
     return progress_data
 
-def get_assignment_groups(driver, assignment_url, waittime):
+@retry(max_retries=3, base_delay=2.0,
+       exceptions=(TimeoutException, WebDriverException, SeiteUnvollstaendig))
+def get_assignment_status(driver, assignment_url, waittime):
     """
-    Extrahiert die Gruppierungsinformationen für ein Assignment
+    Liest die Bewertungsseite einer Aufgabe, alle Teilseiten.
 
     Returns:
-        str: "all" wenn für alle Gruppen, oder der Gruppenname wenn nur für eine spezifische Gruppe
+        Liste der Status-Eintraege je Person
+
+    Raises:
+        SeiteUnvollstaendig: Tabelle oder Spalte "Endbewertung" fehlt, auch
+            nach Wiederholung. Frueher wurde daraus eine leere Liste — und
+            damit fuer die ganze Klasse "nicht abgegeben".
     """
-    try:
-        # Navigiere zur Assignment-Seite
-        driver.get(assignment_url)
-        WebDriverWait(driver, waittime).until(
-            lambda d: d.execute_script("return document.readyState") == "complete"
-        )
-
-        # Suche nach dem Form mit id="selectgroup"
-        try:
-            form_element = driver.find_element(By.ID, "selectgroup")
-
-            # Finde das Label innerhalb des Forms
-            label_element = form_element.find_element(By.TAG_NAME, "label")
-            label_text = label_element.text.strip()
-
-            # Analysiere den Label-Text
-            # Prüfe ob es einen Gruppennamen in Klammern gibt
-            group_match = re.search(r'Getrennte Gruppen \(([^)]+)\)', label_text)
-            if group_match:
-                # Spezifische Gruppe gefunden
-                return group_match.group(1)
-            elif "Getrennte Gruppen" in label_text:
-                # "Getrennte Gruppen" ohne spezifischen Namen = alle Gruppen
-                return "all"
-            else:
-                # Unerwarteter Label-Text
-                return "all"
-
-        except Exception as e:
-            # Form nicht gefunden oder Fehler beim Parsen = keine Gruppenbeschränkung
-            return "all"
-
-    except Exception as e:
-        logger.error(f"Fehler beim Extrahieren der Gruppierungsinformationen: {e}")
-        return "all"
-
-def get_assignment_status(driver, assignment_url, waittime):
     # Navigiere zur Bewertungsseite des Assignments mit allen nötigen Parametern
     # status: alle Benutzer anzeigen, auch die ohne Abgaben
     # quickgrading=0: vollständige Bewertungsansicht
     # group=0: alle Gruppen
     grading_url = f"{assignment_url}&action=grading&status&quickgrading=0&group=0"
-    driver.get(grading_url)
 
-    try:
-        # Überprüfen, ob das tbody-Element vorhanden ist
-        WebDriverWait(driver, waittime).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "tbody"))
-        )
-    except TimeoutException:
-        # Kein tbody gefunden, also gibt es keine Abgaben
-        return []
+    def lese_seite(drv):
+        warte_auf(drv, "tbody", waittime, "Bewertungstabelle")
+        tabelle = _lies_bewertungstabelle(drv)
+        if not tabelle or not tabelle.get("gradeCol"):
+            raise SeiteUnvollstaendig("Spalte 'Endbewertung' nicht gefunden")
+        return tabelle["rows"]
 
+    zeilen = []
+    for seite in lade_alle_seiten(driver, grading_url, lese_seite):
+        zeilen.extend(seite)
+    return _bewertungszeilen_auswerten(zeilen)
+
+
+def _lies_bewertungstabelle(driver):
+    """Liest die geladene Bewertungstabelle in einem JS-Aufruf."""
     # Die ganze Tabelle in einem einzigen JS-Aufruf lesen. Zeilenweise
     # find_element/.text kostete ~10 WebDriver-Roundtrips je Schüler — bei
     # ~110 Zeilen der größte Einzelposten des Exports. Die Auswahl der
     # Elemente entspricht 1:1 der früheren Selenium-Abfrage; Defaults und
     # Datums-Parsing bleiben auf der Python-Seite.
-    tabelle = driver.execute_script(_JS_TEXT + """
+    return driver.execute_script(_JS_TEXT + """
         // Spaltenklassen aus den Überschriften; wie zuvor gewinnt die letzte
         // Übereinstimmung, und die Klasse ist das zweite Token ("c14").
         var gradeCol = null, timeCol = null;
@@ -740,19 +865,22 @@ def get_assignment_status(driver, assignment_url, waittime):
         return {gradeCol: gradeCol, rows: rows};
     """)
 
-    if not tabelle or not tabelle.get("gradeCol"):
-        logger.warning("Spalte 'Endbewertung' nicht gefunden.")
-        return []
 
+def _bewertungszeilen_auswerten(zeilen):
+    """Wandelt die Rohzeilen der Bewertungstabelle in Status-Eintraege."""
     user_statuses = []
+    gesehen = set()
 
-    for row in tabelle["rows"]:
+    for row in zeilen:
         # Extrahiere die UserID aus der class des tr-Elements
         user_id_match = re.search(r'user(\d+)', row["cls"])
         if not user_id_match:
             continue  # Überspringe Zeilen ohne UserID
 
         user_id = user_id_match.group(1)
+        if user_id in gesehen:
+            continue  # Zeile auf zwei Teilseiten
+        gesehen.add(user_id)
 
         status = row["status"] if row["status"] is not None else "Nicht eingereicht"
         status2 = row["status2"] if row["status2"] is not None else "Nicht bewertet"
@@ -786,25 +914,51 @@ def get_assignment_status(driver, assignment_url, waittime):
 
     return user_statuses
 
+@retry(max_retries=3, base_delay=2.0,
+       exceptions=(TimeoutException, WebDriverException, SeiteUnvollstaendig))
 def get_grader_report_data(driver, course_id, group_id, waittime):
     """
-    Extrahiert alle Bewertungsdaten aus der Grader-Report-Seite.
+    Extrahiert alle Bewertungsdaten aus der Grader-Report-Seite, alle Teilseiten.
     Nutzt JavaScript-Extraktion statt einzelner Selenium-Aufrufe (>50x schneller).
+
+    Returns:
+        (aktivitaeten, personen): {activity_id: {..., grades: {user_id: text}}}
+        und die Menge der User-IDs mit einer Zeile im Bericht. Wer dort
+        fehlt, hat keinen bekannten Teststatus.
+
+    Raises:
+        SeiteUnvollstaendig: Tabelle fehlt auch nach Wiederholung
     """
     grader_url = f"https://lernplattform.bycs.de/grade/report/grader/index.php?id={course_id}&groupsearchvalue=&group={group_id}"
-    driver.get(grader_url)
 
-    try:
-        WebDriverWait(driver, waittime).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "table.gradereport-grader-table#user-grades"))
-        )
-    except TimeoutException:
-        logger.warning(f"Grader-Report-Tabelle für Kurs {course_id}, Gruppe {group_id} nicht gefunden")
-        return {}
+    def lese_seite(drv):
+        warte_auf(drv, "table.gradereport-grader-table#user-grades", waittime,
+                  "Tabelle der Bewerterübersicht")
+        ergebnis = _lies_bewerteruebersicht(drv)
+        if ergebnis is None:
+            raise SeiteUnvollstaendig("Bewerterübersicht nicht auslesbar")
+        return ergebnis
 
+    aktivitaeten = {}
+    personen = set()
+    for seite in lade_alle_seiten(driver, grader_url, lese_seite):
+        personen.update(seite.get("personen", []))
+        for aid, adata in seite.get("aktivitaeten", {}).items():
+            ziel = aktivitaeten.setdefault(aid, {**adata, "grades": {}})
+            ziel["grades"].update(adata.get("grades", {}))
+
+    # Debug-Logging: Zeige Stichprobe der extrahierten Daten
+    total_grades = sum(len(a.get("grades", {})) for a in aktivitaeten.values())
+    non_empty = sum(1 for a in aktivitaeten.values() for g in a.get("grades", {}).values() if g and g != "-")
+    logger.info(f"  Grader-Report: {len(aktivitaeten)} Aktivitäten, {len(personen)} Personen, "
+                f"{total_grades} Grade-Einträge, {non_empty} mit Bewertung")
+    return aktivitaeten, personen
+
+
+def _lies_bewerteruebersicht(driver):
+    """Liest die geladene Bewerterübersicht in einem JS-Aufruf."""
     # Extrahiere alle Daten in einem einzigen JavaScript-Aufruf
-    try:
-        result = driver.execute_script("""
+    return driver.execute_script("""
             var table = document.querySelector('table.gradereport-grader-table#user-grades');
             if (!table) return null;
 
@@ -851,29 +1005,34 @@ def get_grader_report_data(driver, course_id, group_id, waittime):
                 var gradeEl = cell.querySelector('.gradevalue, .gradetext');
                 if (gradeEl) return gradeEl.textContent.trim();
 
-                // Versuch 2: Sammle nur direkte Text-Nodes der Zelle (ignoriere Buttons/Dropdowns)
+                // Bearbeitungsmodus: Note steht im Eingabefeld; daneben eine
+                // versteckte Beschriftung "<Name> <Aktivitaet> Bewertung",
+                // die nie als Note gelesen werden darf (Befund aus dem
+                // Parallelvergleich mit dem Browser-Export, 17.11.2026).
+                var input = cell.querySelector('input[type="text"], input:not([type])');
+                if (input) return (input.getAttribute('value') || '').trim() || '-';
+
+                // Versteckte Hilfstexte, Menues und Bedienelemente entfernen
+                var clone = cell.cloneNode(true);
+                clone.querySelectorAll('.accesshide, .sr-only, .visually-hidden, label, .dropdown, button, '
+                                     + '.dropdown-menu, [role="menu"], input, select')
+                    .forEach(function(el) { el.remove(); });
+
+                // Versuch 2: nur direkte Text-Nodes
                 var text = '';
-                for (var i = 0; i < cell.childNodes.length; i++) {
-                    var node = cell.childNodes[i];
-                    if (node.nodeType === 3) { // TEXT_NODE
-                        text += node.textContent;
-                    }
+                for (var i = 0; i < clone.childNodes.length; i++) {
+                    if (clone.childNodes[i].nodeType === 3) text += clone.childNodes[i].textContent;
                 }
                 text = text.trim();
                 if (text) return text;
 
-                // Versuch 3: Fallback - gesamten textContent nehmen, aber Dropdown-Text entfernen
-                var clone = cell.cloneNode(true);
-                var dropdowns = clone.querySelectorAll('.dropdown, button, .dropdown-menu, [role="menu"]');
-                dropdowns.forEach(function(el) { el.remove(); });
-                text = clone.textContent.trim();
-                if (text) return text;
-
-                // Versuch 4: Letzter Fallback - ersten sichtbaren Text nehmen
-                return (cell.textContent || '').replace(/Zellaktionen/g, '').trim().split('\\n')[0].trim();
+                // Versuch 3: restlicher Text; leer heisst: keine Bewertung
+                text = (clone.textContent || '').replace(/Zellaktionen/g, '').trim().split('\\n')[0].trim();
+                return text || '-';
             }
 
             // 4. Zeilen durchlaufen: User-Bewertungen extrahieren
+            var personen = [];
             var rows = table.querySelectorAll('tbody tr');
             rows.forEach(function(row) {
                 var userLink = row.querySelector('th a[href*="user/view.php?id="]');
@@ -881,6 +1040,7 @@ def get_grader_report_data(driver, course_id, group_id, waittime):
                 var userMatch = (userLink.getAttribute('href') || '').match(/id=(\\d+)/);
                 if (!userMatch) return;
                 var userId = userMatch[1];
+                personen.push(userId);
 
                 var cells = row.querySelectorAll('td');
                 cells.forEach(function(cell) {
@@ -891,32 +1051,8 @@ def get_grader_report_data(driver, course_id, group_id, waittime):
                 });
             });
 
-            return activities;
+            return {aktivitaeten: activities, personen: personen};
         """)
-
-        if result is None:
-            logger.warning("JavaScript-Extraktion lieferte kein Ergebnis")
-            return {}
-
-        # Debug-Logging: Zeige Stichprobe der extrahierten Daten
-        total_grades = sum(len(a.get("grades", {})) for a in result.values())
-        non_empty = sum(1 for a in result.values() for g in a.get("grades", {}).values() if g and g != "-")
-        logger.info(f"  Grader-Report: {len(result)} Aktivitäten, {total_grades} Grade-Einträge, {non_empty} mit Bewertung")
-        # Zeige erste nicht-leere Note als Beispiel
-        for aid, adata in result.items():
-            for uid, grade in adata.get("grades", {}).items():
-                if grade and grade != "-":
-                    logger.info(f"  Beispiel: Aktivität {aid} ({adata.get('type')}), User {uid}: '{grade}'")
-                    break
-            else:
-                continue
-            break
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Fehler bei JavaScript-Extraktion des Grader-Reports: {e}")
-        return {}
 
 
 def get_singleview_grades(driver, course_id, item_id, base_url, waittime):
@@ -994,19 +1130,47 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
     # Baue die Report-URL mit Sortierung (absteigend nach Beendet-Zeit)
     report_url = f"https://lernplattform.bycs.de/mod/quiz/report.php?id={quiz_id}&mode=overview&attempts=enrolled_with&onlygraded&group=0&onlyregraded=0&slotmarks=1&tsort=timefinish&tdir=3"
 
-    try:
-        # driver.get() kehrt erst nach dem load-Event zurück; ein zusätzliches
-        # Warten auf #attempts kostete bei Quizzen ohne Versuche (dort gibt es
-        # die Tabelle nicht) jedes Mal die volle waittime.
-        driver.get(report_url)
-    except Exception as e:
-        logger.error(f"Konnte Quiz-Report-Seite nicht laden (Quiz {quiz_id}): {e}")
-        return submission_times
+    # driver.get() kehrt erst nach dem load-Event zurück; ein zusätzliches
+    # Warten auf #attempts kostete bei Quizzen ohne Versuche (dort gibt es
+    # die Tabelle nicht) jedes Mal die volle waittime. Damit eine leere
+    # Antwort trotzdem nicht als "keine Versuche" durchgeht, muss die Seite
+    # als Testbericht erkennbar sein (Moodle setzt die body-ID nach dem
+    # Seitentyp, hier page-mod-quiz-report).
+    def lese_seite(drv):
+        ist_bericht = drv.execute_script(
+            "return (document.body && document.body.id || '').indexOf('mod-quiz-report') >= 0;")
+        if not ist_bericht:
+            raise SeiteUnvollstaendig("Testbericht nicht erkannt")
+        return _lies_testversuche(drv) or []
 
-    try:
-        # Ganze Tabelle in einem JS-Aufruf lesen (statt bis zu 6 Roundtrips je
-        # Zeile). Auswahl der Elemente wie zuvor mit Selenium.
-        tabelle = driver.execute_script(_JS_TEXT + """
+    # Fehler laufen zum Aufrufer durch: process_quiz_parallel vermerkt sie im
+    # Pruefbericht. Der Teststatus selbst stammt aus der Bewerterübersicht.
+    tabelle = []
+    for seite in lade_alle_seiten(driver, report_url, lese_seite):
+        tabelle.extend(seite)
+
+    # Zeilen sind nach Beendet-Zeit absteigend sortiert: der erste
+    # erfolgreich geparste Eintrag je User ist der neueste.
+    for user_href, submission_time_raw in tabelle:
+        user_id_match = re.search(r'id=(\d+)', user_href or "")
+        if not user_id_match:
+            continue
+        user_id = user_id_match.group(1)
+        # Wenn dieser User bereits erfasst wurde, überspringe (wir wollen nur den neuesten)
+        if user_id in submission_times or not submission_time_raw:
+            continue
+        submission_time = parse_german_datetime(submission_time_raw)
+        if submission_time:
+            submission_times[user_id] = submission_time
+
+    return submission_times
+
+
+def _lies_testversuche(driver):
+    """Liest die Versuchstabelle eines Testberichts; None ohne Versuche."""
+    # Ganze Tabelle in einem JS-Aufruf lesen (statt bis zu 6 Roundtrips je
+    # Zeile). Auswahl der Elemente wie zuvor mit Selenium.
+    return driver.execute_script(_JS_TEXT + """
             var table = document.getElementById('attempts');
             if (!table) return null;
 
@@ -1046,40 +1210,6 @@ def get_quiz_submission_times(driver, quiz_url, waittime):
             return rows;
         """)
 
-        if tabelle is None:
-            # Keine Versuche vorhanden - das ist normal
-            return submission_times
-
-        # Zeilen sind nach Beendet-Zeit absteigend sortiert: der erste
-        # erfolgreich geparste Eintrag je User ist der neueste.
-        for user_href, submission_time_raw in tabelle:
-            user_id_match = re.search(r'id=(\d+)', user_href or "")
-
-            if not user_id_match:
-                continue
-
-            user_id = user_id_match.group(1)
-
-            # Wenn dieser User bereits erfasst wurde, überspringe (wir wollen nur den neuesten)
-            if user_id in submission_times:
-                continue
-
-            if not submission_time_raw:
-                continue
-
-            # Konvertiere in ISO-Format
-            submission_time = parse_german_datetime(submission_time_raw)
-
-            # Speichere nur, wenn erfolgreich geparst
-            if submission_time:
-                submission_times[user_id] = submission_time
-
-    except Exception as e:
-        logger.error(f"Fehler beim Extrahieren der Quiz-Submission-Times für Quiz {quiz_id}: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-
-    return submission_times
 
 def get_sesskey(driver, waittime=10, max_retries=3):
     """
@@ -1280,16 +1410,30 @@ def get_singleview_feedback_dates(driver, course_id, grade_item_id, waittime):
     return feedback_dates
 
 
+def _fehlertext(e):
+    """Kurzer Fehlertext (eine Zeile) fuer Log und Pruefbericht."""
+    text = str(e) if isinstance(e, SeiteUnvollstaendig) else f"{type(e).__name__}: {e}"
+    return text.splitlines()[0][:200] if text.strip() else type(e).__name__
+
+
 def process_assignment_parallel(assignment, isheadless, waittime, username, password, base_url, course_id, index, total):
-    """Process a single assignment in parallel"""
+    """
+    Verarbeitet eine Aufgabe in einem Arbeits-Thread.
+
+    Returns:
+        (assignment_id, status, groups, grund): ``status`` ist die Liste der
+        Eintraege oder None, wenn die Bewertungsseite nicht vollstaendig
+        gelesen werden konnte — dann nennt ``grund`` die Ursache. None wird
+        spaeter zu "unbekannt", nie zu "nicht abgegeben".
+    """
+    assignment_id = assignment.get('id', 'unknown')
     try:
         driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
 
         if driver is None:
-            logger.error(f"[{index+1}/{total}] Kein WebDriver verfügbar für Assignment {assignment.get('id', 'unknown')}")
-            return assignment.get('id', 'unknown'), [], "all"
+            logger.error(f"[{index+1}/{total}] Kein WebDriver verfügbar für Assignment {assignment_id}")
+            return assignment_id, None, "all", "kein Browser verfügbar"
 
-        assignment_id = assignment["id"]
         assignment_url = assignment["url"]
         assignment_title = assignment.get("title", f"Assignment {assignment_id}")
 
@@ -1298,18 +1442,28 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
         sys.stdout.flush()
         start_time = time.time()
 
-        # Extrahiere Gruppierungsinformationen
-        groups = get_assignment_groups(driver, assignment_url, waittime)
+        # Keine Gruppenabfrage mehr: Die Aufgabenseite lieferte in allen
+        # Exporten nur "all" (das Auswahlfeld zeigt die gerade gewaehlte Gruppe
+        # der Lehrkraft, keine Einschraenkung der Aufgabe), und die
+        # Bewertungsseite wird ohnehin mit group=0 gelesen. Spart einen
+        # Seitenabruf je Aufgabe. Das Feld "groups" bleibt im Export.
+        groups = "all"
 
-        # Extrahiere Status
+        # Extrahiere Status — wirft bei unvollstaendiger Seite (nach Wiederholung)
         status = get_assignment_status(driver, assignment_url, waittime)
 
         grade_item_id = assignment.get("grade_item_id")
 
         # Priorität 1: Feedback-Datum aus Singleview überschreibt submission_time
-        # itemid = grade_item_id (BewertungsID), nicht assignment_id
+        # itemid = grade_item_id (BewertungsID), nicht assignment_id.
+        # Datumsangaben sind eine Ergaenzung: ein Fehler hier macht den
+        # Status nicht unbekannt.
         if grade_item_id:
-            feedback_dates = get_singleview_feedback_dates(driver, course_id, grade_item_id, waittime)
+            try:
+                feedback_dates = get_singleview_feedback_dates(driver, course_id, grade_item_id, waittime)
+            except Exception as e:
+                logger.warning(f"  Feedback-Daten nicht lesbar: {_fehlertext(e)}")
+                feedback_dates = {}
             feedback_count = 0
             for entry in status:
                 fd = feedback_dates.get(entry["user_id"])
@@ -1343,17 +1497,16 @@ def process_assignment_parallel(assignment, isheadless, waittime, username, pass
         with_time = sum(1 for s in status if s.get("submission_time"))
         logger.info(f"  Abgeschlossen in {duration:.1f}s | {len(status)} User | {with_grade} mit Bewertung | {with_time} mit Zeitstempel | groups={groups}")
 
-        return assignment_id, status, groups
+        return assignment_id, status, groups, None
     except Exception as e:
-        import traceback
+        grund = _fehlertext(e)
         try:
-            logger.error(f"Fehler bei Assignment {assignment.get('id', 'unknown')}: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Aufgabe {assignment_id}: Status UNBEKANNT — {grund}")
         except UnicodeEncodeError:
-            logger.error(f"Fehler bei Assignment {assignment.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
-            logger.error("Traceback enthaelt Unicode-Zeichen")
+            logger.error(f"Aufgabe {assignment_id}: Status UNBEKANNT - {grund.encode('ascii', 'replace').decode('ascii')}")
         sys.stdout.flush()
-        return assignment.get('id', 'unknown'), [], "all"
+        return assignment_id, None, "all", grund
+
 
 def process_checklist_parallel(checklist, isheadless, username, password, base_url, course_id, index, total, waittime=10):
     """Process a single checklist in parallel"""
@@ -1400,15 +1553,25 @@ def process_checklist_parallel(checklist, isheadless, username, password, base_u
         return checklist.get('id', 'unknown'), {"required_progress": {}, "all_progress": {}}
 
 def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_url, course_id, index, total):
-    """Process a single quiz in parallel - extracts submission times"""
+    """
+    Liest die Abgabezeiten eines Tests in einem Arbeits-Thread.
+
+    Returns:
+        (quiz_id, submission_times, grund): ``grund`` ist None oder nennt,
+        warum der Testbericht nicht vollstaendig gelesen werden konnte.
+        Der Teststatus haengt daran nicht — er kommt aus der
+        Bewerterübersicht —, wohl aber das Abgabedatum.
+    """
+    quiz_id = quiz.get('id', 'unknown')
+    submission_times = {}
+    grund = None
     try:
         driver = get_thread_driver(isheadless, username, password, base_url, course_id, waittime)
 
         if driver is None:
-            logger.error(f"[{index+1}/{total}] Kein WebDriver verfügbar für Quiz {quiz.get('id', 'unknown')}")
-            return quiz.get('id', 'unknown'), {}
+            logger.error(f"[{index+1}/{total}] Kein WebDriver verfügbar für Quiz {quiz_id}")
+            return quiz_id, {}, "kein Browser verfügbar"
 
-        quiz_id = quiz["id"]
         quiz_url = quiz["url"]
         quiz_title = quiz.get("title", f"Quiz {quiz_id}")
 
@@ -1416,7 +1579,11 @@ def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_u
         print(f"PROGRESS|quizzes|{index+1}|{total}")
         sys.stdout.flush()
         start_time = time.time()
-        submission_times = get_quiz_submission_times(driver, quiz_url, waittime)
+        try:
+            submission_times = get_quiz_submission_times(driver, quiz_url, waittime)
+        except Exception as e:
+            grund = _fehlertext(e)
+            logger.warning(f"  Testbericht unvollständig: {grund}")
 
         # Fallback: Singleview-Feedback-Datum für User ohne submission_time
         grade_item_id = quiz.get("grade_item_id")
@@ -1432,17 +1599,12 @@ def process_quiz_parallel(quiz, isheadless, waittime, username, password, base_u
 
         duration = time.time() - start_time
         logger.info(f"  Abgeschlossen in {duration:.1f}s | {len(submission_times)} submission_times gefunden")
-        return quiz_id, submission_times
+        return quiz_id, submission_times, grund
     except Exception as e:
-        import traceback
-        try:
-            logger.error(f"Fehler bei Quiz {quiz.get('id', 'unknown')}: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-        except UnicodeEncodeError:
-            logger.error(f"Fehler bei Quiz {quiz.get('id', 'unknown')}: {str(e).encode('ascii', 'replace').decode('ascii')}")
-            logger.error("Traceback enthaelt Unicode-Zeichen")
+        grund = _fehlertext(e)
+        logger.error(f"Fehler bei Quiz {quiz_id}: {grund}")
         sys.stdout.flush()
-        return quiz.get('id', 'unknown'), {}
+        return quiz_id, submission_times, grund
 
 
 def get_all_activity_categories(driver, course_id):
@@ -1676,6 +1838,11 @@ def export_course(driver, course_id, course_title, base_url, username, password,
             category_entry[activity_type].append(activity)
 
 
+    # Pruefbericht dieses Kurses: Luecken machen einen Status unbekannt,
+    # Hinweise betreffen nur Nebenangaben wie Abgabezeiten.
+    luecken = []
+    hinweise = []
+
     # Geteilter ThreadPool für alle parallelen Phasen (Threads + Browser werden wiederverwendet)
     shared_executor = ThreadPoolExecutor(max_workers=2)
 
@@ -1693,9 +1860,21 @@ def export_course(driver, course_id, course_title, base_url, username, password,
                 for idx, assignment in enumerate(activities["assignments"])
             }
             for future in as_completed(future_to_assignment):
-                assignment_id, status, groups = future.result()
-                assignments_status[assignment_id] = status
+                assignment_id, status, groups, grund = future.result()
                 assignments_groups[assignment_id] = groups
+                if status is None:
+                    # Seite nicht vollstaendig gelesen: Status unbekannt
+                    # fuer alle, nicht "nicht abgegeben".
+                    aktivitaet = future_to_assignment[future]
+                    luecken.append({
+                        "cmid": assignment_id,
+                        "titel": aktivitaet.get("title", assignment_id),
+                        "typ": "assign",
+                        "personen": "alle",
+                        "grund": grund or "unbekannt",
+                    })
+                    continue
+                assignments_status[assignment_id] = status
 
         # Ergebnis-Logging für Assignments
         total_assignment_users = sum(len(s) for s in assignments_status.values())
@@ -1761,8 +1940,11 @@ def export_course(driver, course_id, course_title, base_url, username, password,
                 for idx, quiz in enumerate(activities["quizzes"])
             }
             for future in as_completed(future_to_quiz):
-                quiz_id, submission_times = future.result()
+                quiz_id, submission_times, grund = future.result()
                 quiz_submission_times[quiz_id] = submission_times
+                if grund:
+                    titel = future_to_quiz[future].get("title", quiz_id)
+                    hinweise.append(f"Test '{titel}': Abgabezeiten unvollständig ({grund})")
 
         total_quiz_times = sum(len(st) for st in quiz_submission_times.values())
         quizzes_without_times = sum(1 for st in quiz_submission_times.values() if not st)
@@ -1793,25 +1975,78 @@ def export_course(driver, course_id, course_title, base_url, username, password,
     http_session = create_requests_session_from_driver(driver)
     filtered_groups = [g for g in group_options if g["value"] != "0"]
 
+    # Pflichtaufgaben dieses Kurses laut Plan: nur fuer sie ist eine fehlende
+    # Bewertung eine Luecke. Uebungstests ohne Bewertung fehlen in der
+    # Bewerterübersicht zu Recht.
+    plan = get_plan()
+    plan_kurs = plan.get_kurs_by_moodle_id(str(course_id))
+    plan_cmids = {a['cmid'] for a in plan_kurs['aufgaben']} if plan_kurs else set()
+
     def _load_group(group):
         users = get_user_ids_from_group_fast(http_session, group["value"], base_url, course_id)
         return {"name": group["name"], "value": group["value"], "users": users}
 
+    gruppen_fehler = []
     with ThreadPoolExecutor(max_workers=4) as executor:
         group_futures = {executor.submit(_load_group, g): g for g in filtered_groups}
         for future in as_completed(group_futures):
-            data["groups"].append(future.result())
+            gruppe = group_futures[future]
+            try:
+                data["groups"].append(future.result())
+            except Exception as e:
+                grund = _fehlertext(e)
+                logger.error(f"Gruppe '{gruppe['name']}': Mitglieder nicht ladbar — {grund}")
+                # Nur Klassen aus dem Plan sind kritisch; andere Gruppen
+                # (IF10B, Testgruppe, ...) fliessen ohnehin nicht ein.
+                if plan.get_track_for_class(gruppe["name"]):
+                    gruppen_fehler.append(f"{gruppe['name']}: {grund}")
+                else:
+                    hinweise.append(f"Gruppe '{gruppe['name']}' nicht ladbar ({grund}) — nicht im Plan, ohne Auswirkung")
 
     total_users = sum(len(g["users"]) for g in data["groups"])
     timer.stop({"gruppen": len(data["groups"]), "user_gesamt": total_users})
 
     # Extrahiere Grader-Report-Daten (einmalig für alle Gruppen mit group=0)
     timer.start("Grader-Report laden")
-    grader_data = get_grader_report_data(driver, course_id, "0", waittime)
-    timer.stop({"aktivitäten_mit_bewertungen": len(grader_data)})
+    grader_data, grader_personen, grader_grund = {}, set(), None
+    try:
+        grader_data, grader_personen = get_grader_report_data(driver, course_id, "0", waittime)
+    except Exception as e:
+        grader_grund = _fehlertext(e)
+        logger.error(f"Bewerterübersicht nicht lesbar — Teststatus UNBEKANNT: {grader_grund}")
+    timer.stop({"aktivitäten_mit_bewertungen": len(grader_data), "personen": len(grader_personen)})
+
+    # Tests, die als Pflichtaufgabe gefuehrt werden, aber in der
+    # Bewerterübersicht keine Spalte haben, sind fuer alle unbekannt.
+    tests_unbekannt = {}
+    for quiz in activities["quizzes"]:
+        if quiz["id"] not in plan_cmids:
+            continue
+        if grader_grund:
+            tests_unbekannt[quiz["id"]] = f"Bewerterübersicht: {grader_grund}"
+        elif quiz["id"] not in grader_data:
+            tests_unbekannt[quiz["id"]] = "keine Spalte in der Bewerterübersicht"
+    for quiz in activities["quizzes"]:
+        if quiz["id"] in tests_unbekannt:
+            luecken.append({"cmid": quiz["id"], "titel": quiz.get("title", quiz["id"]),
+                            "typ": "quiz", "personen": "alle", "grund": tests_unbekannt[quiz["id"]]})
 
     timer.start("User-Daten zusammenführen")
+    # Abgleich (Ebene 2): wer laut Gruppe dazugehoert, aber in einer sonst
+    # vollstaendig gelesenen Tabelle fehlt, hat dort einen unbekannten
+    # Status. Gezaehlt je Aktivitaet fuer den Pruefbericht.
+    fehlt_in_aufgabe = {}
+    fehlt_in_uebersicht = set()
+    status_je_aufgabe = {
+        aid: {s["user_id"]: s for s in statuses}
+        for aid, statuses in assignments_status.items()
+    }
+    luecken_cmids = {l["cmid"] for l in luecken}
+
     for group in data["groups"]:
+        # Nur Klassen aus dem Plan werden abgeglichen: andere Gruppen im
+        # Kurs fliessen nicht in die Auswertung ein.
+        abgleichen = bool(plan.get_track_for_class(group["name"]))
 
         for user in group["users"]:
             user["activities"] = {
@@ -1823,10 +2058,20 @@ def export_course(driver, course_id, course_title, base_url, username, password,
 
             # Verwende die zuvor erfassten Assignment-Status
             for assignment in activities["assignments"]:
-                user_assignment_status = next((status for status in assignments_status[assignment["id"]] if status["user_id"] == user["id"]), None)
+                aid = assignment["id"]
+                if aid in luecken_cmids:
+                    user_assignment_status = unbekannter_status(
+                        user["id"], next(l["grund"] for l in luecken if l["cmid"] == aid))
+                else:
+                    user_assignment_status = status_je_aufgabe.get(aid, {}).get(user["id"])
+                    if user_assignment_status is None and abgleichen and gilt_fuer_gruppe(
+                            assignments_groups.get(aid), group["name"]):
+                        user_assignment_status = unbekannter_status(
+                            user["id"], "fehlt in der Bewertungstabelle")
+                        fehlt_in_aufgabe.setdefault(aid, set()).add(user["id"])
                 if user_assignment_status:
                     user["activities"]["assignments"].append({
-                        "id": assignment["id"],
+                        "id": aid,
                         "status": user_assignment_status,
                         "category_id": assignment.get("category_id"),
                         "category_name": assignment.get("category_name")
@@ -1849,10 +2094,19 @@ def export_course(driver, course_id, course_title, base_url, username, password,
                     })
 
             # Verwende die Grader-Report-Daten für Quiz-Status
+            fehlt_in_bewerterzeilen = (abgleichen and not grader_grund
+                                       and user["id"] not in grader_personen)
+            if fehlt_in_bewerterzeilen and plan_cmids & {q["id"] for q in activities["quizzes"]}:
+                fehlt_in_uebersicht.add(user["id"])
             for quiz in activities["quizzes"]:
                 quiz_id = quiz["id"]
+                eintrag = None
+                if quiz_id in tests_unbekannt:
+                    eintrag = unbekannter_status(user["id"], tests_unbekannt[quiz_id])
+                elif fehlt_in_bewerterzeilen and quiz_id in plan_cmids:
+                    eintrag = unbekannter_status(user["id"], "fehlt in der Bewerterübersicht")
                 # Suche Quiz-Daten im Grader-Report
-                if quiz_id in grader_data and user["id"] in grader_data[quiz_id]["grades"]:
+                elif quiz_id in grader_data and user["id"] in grader_data[quiz_id]["grades"]:
                     grade = grader_data[quiz_id]["grades"][user["id"]]
 
                     # Bestimme Status basierend auf der Bewertung
@@ -1868,20 +2122,35 @@ def export_course(driver, course_id, course_title, base_url, username, password,
                     if quiz_id in quiz_submission_times and user["id"] in quiz_submission_times[quiz_id]:
                         submission_time = quiz_submission_times[quiz_id][user["id"]]
 
+                    eintrag = {
+                        "user_id": user["id"],
+                        "status": status,
+                        "status2": status2,
+                        "submission": "Quiz abgeschlossen" if status2 == "Bewertet" else "Nicht abgeschlossen",
+                        "submission_time": submission_time,
+                        "grade_options": [],
+                        "grade": grade
+                    }
+
+                if eintrag:
                     user["activities"]["quizzes"].append({
                         "id": quiz_id,
-                        "status": {
-                            "user_id": user["id"],
-                            "status": status,
-                            "status2": status2,
-                            "submission": "Quiz abgeschlossen" if status2 == "Bewertet" else "Nicht abgeschlossen",
-                            "submission_time": submission_time,
-                            "grade_options": [],
-                            "grade": grade
-                        },
+                        "status": eintrag,
                         "category_id": quiz.get("category_id"),
                         "category_name": quiz.get("category_name")
                     })
+
+    # Personen, die einzeln fehlen, als Luecke je Aufgabe vermerken
+    for aid, personen in sorted(fehlt_in_aufgabe.items()):
+        titel = next((a["title"] for a in activities["assignments"] if a["id"] == aid), aid)
+        luecken.append({"cmid": aid, "titel": titel, "typ": "assign",
+                        "personen": sorted(personen), "grund": "fehlt in der Bewertungstabelle"})
+    if fehlt_in_uebersicht:
+        for quiz in activities["quizzes"]:
+            if quiz["id"] in plan_cmids and quiz["id"] not in tests_unbekannt:
+                luecken.append({"cmid": quiz["id"], "titel": quiz.get("title", quiz["id"]),
+                                "typ": "quiz", "personen": sorted(fehlt_in_uebersicht),
+                                "grund": "fehlt in der Bewerterübersicht"})
 
     timer.stop()
 
@@ -1898,6 +2167,11 @@ def export_course(driver, course_id, course_title, base_url, username, password,
     # Prüfe Aktivitäten
     if not activities["assignments"] and not activities["checklists"] and not activities["quizzes"]:
         validation_errors.append("FEHLER: Keine Aktivitäten gefunden (keine Assignments, Checklisten oder Quizzes)")
+
+    # Gruppen aus dem Plan, deren Mitglieder nicht ladbar waren: ohne sie
+    # fehlt die ganze Klasse — das ist kein Fall fuer "vorlaeufig".
+    for fehler in gruppen_fehler:
+        validation_errors.append(f"FEHLER: Gruppenmitglieder nicht ladbar — {fehler}")
 
     # Prüfe Gruppen
     if not data["groups"]:
@@ -1916,9 +2190,10 @@ def export_course(driver, course_id, course_title, base_url, username, password,
     if activities["checklists"] and not checklist_progress:
         validation_errors.append("FEHLER: Checklisten gefunden, aber keine Fortschrittsdaten")
 
-    # Prüfe Assignments-Status
+    # Prüfe Assignments-Status: nur wenn *keine einzige* Aufgabe lesbar war,
+    # ist der Kurs unbrauchbar. Einzelne Ausfaelle sind Luecken (unbekannt).
     if activities["assignments"] and not assignments_status:
-        validation_errors.append("FEHLER: Assignments gefunden, aber keine Status-Daten")
+        validation_errors.append("FEHLER: Assignments gefunden, aber keine einzige Bewertungsseite lesbar")
 
     # Ausgabe der Validierungsergebnisse
     if validation_errors:
@@ -1985,10 +2260,95 @@ def export_course(driver, course_id, course_title, base_url, username, password,
         logger.info("[OK] Alle Aktivitäten haben vollständige Daten")
     logger.info("-" * 60)
 
+    # =====================================================
+    # PRUEFBERICHT: Luecken (Status unbekannt) und Hinweise
+    # =====================================================
+    if luecken:
+        logger.warning(f"[!] {len(luecken)} Lücke(n) — Status UNBEKANNT, Noten gelten als vorläufig:")
+        for l in luecken:
+            wer = "alle" if l["personen"] == "alle" else f"{len(l['personen'])} Person(en)"
+            logger.warning(f"  {l['typ']:6} {l['titel'][:45]:45} {wer:>14}  {l['grund']}")
+    else:
+        logger.info("[OK] Keine Lücken: jeder Status ist bekannt")
+    for h in hinweise:
+        logger.warning(f"  Hinweis: {h}")
 
     data["course_id"] = str(course_id)
     data["titel"] = course_title
+    data["pruefbericht"] = {
+        "luecken": luecken,
+        "hinweise": hinweise,
+        "personen_gruppen": total_users,
+        "personen_bewerteruebersicht": len(grader_personen),
+    }
     return data
+
+
+def _vergleiche_mit_vorlauf(export_folder, data):
+    """
+    Vergleicht die Zaehlwerte des neuen Exports mit dem letzten Lauf.
+
+    Returns:
+        (dateiname_des_vorlaufs oder None, Liste von Meldungen)
+    """
+    import glob
+    vorherige = glob.glob(os.path.join(export_folder, 'output_*.json'))
+    if not vorherige:
+        logger.info("Kein vorheriger Export gefunden — Verlaufsvergleich übersprungen.")
+        return None, []
+
+    letzter = max(vorherige, key=os.path.getctime)
+    try:
+        with open(letzter, 'r', encoding='utf-8') as f:
+            alt = json.load(f)
+    except (OSError, ValueError) as e:
+        logger.warning(f"Vorheriger Export {os.path.basename(letzter)} nicht lesbar: {e}")
+        return os.path.basename(letzter), []
+
+    titel = {}
+    for kurs in data.get("kurse", {}).values():
+        for kat in kurs.get("activities_by_category", []):
+            for typ in ("assignments", "quizzes"):
+                for act in kat.get(typ, []):
+                    titel[str(act.get("id"))] = act.get("title", "")
+
+    meldungen = vergleiche_zaehlwerte(zaehlwerte(alt), zaehlwerte(data), titel)
+    return os.path.basename(letzter), meldungen
+
+
+def _protokolliere_pruefbericht(bericht):
+    """Gibt den Pruefbericht am Ende des Laufs gesammelt aus."""
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("PRÜFBERICHT")
+    logger.info("=" * 60)
+    luecken = bericht.get("luecken", [])
+    if luecken:
+        logger.warning(f"Lücken: {len(luecken)} — betroffene Noten gelten im Dashboard als vorläufig")
+        for l in luecken:
+            wer = "alle" if l["personen"] == "alle" else f"{len(l['personen'])} Person(en)"
+            logger.warning(f"  {l['titel'][:50]:50} {wer:>14}  {l['grund']}")
+    else:
+        logger.info("Lücken: keine — jeder Status ist bekannt")
+
+    if bericht.get("fehlende_kurse"):
+        logger.warning(f"Fehlende Kurse: {', '.join(bericht['fehlende_kurse'])}")
+
+    verlauf = bericht.get("verlauf", [])
+    if bericht.get("vergleich_mit"):
+        if verlauf:
+            logger.warning(f"Rückgänge gegenüber {bericht['vergleich_mit']}: {len(verlauf)}")
+            for m in verlauf:
+                logger.warning(f"  {m}")
+        else:
+            logger.info(f"Verlauf: keine Rückgänge gegenüber {bericht['vergleich_mit']}")
+
+    for h in bericht.get("hinweise", []):
+        logger.warning(f"Hinweis: {h}")
+
+    if bericht.get("seiten_nachgeladen"):
+        logger.info(f"Aufgeteilte Tabellen: {bericht['seiten_nachgeladen']} Folgeseite(n) nachgeladen")
+    logger.info("=" * 60)
 
 
 def main(test_mode=False):
@@ -2090,12 +2450,12 @@ def main(test_mode=False):
                 fehlende_kurse.append(kurs['titel'])
                 continue
 
-            # Die Gruppen sind kursuebergreifend dieselben Personen. Wir
-            # uebernehmen sie vom ersten Kurs, der sie liefert, und halten
-            # sie aus den Kursdaten heraus.
-            if not groups:
-                groups = daten.get("groups", [])
-            daten.pop("groups", None)
+            # Die Gruppen sind kursuebergreifend dieselben Personen, ihre
+            # Aktivitaeten aber je Kurs verschieden. Frueher wurden die
+            # Gruppen nur vom ersten Kurs uebernommen — damit gingen alle
+            # Abgaben spaeterer Kurse verloren. Jetzt werden sie je Person
+            # zusammengefuehrt und aus den Kursdaten herausgehalten.
+            fuehre_gruppen_zusammen(groups, daten.pop("groups", []))
             kurs_daten[str(course_id)] = daten
 
         if not kurs_daten:
@@ -2134,95 +2494,40 @@ def main(test_mode=False):
 
         local_filename = os.path.join(export_folder, json_filename)
 
+        # =====================================================
+        # VERLAUF: Zaehlwerte je Aufgabe und Klasse gegen den letzten Lauf.
+        # Ersetzt den frueheren Groessenvergleich der Datei. Ein Rueckgang
+        # ist eine Warnung im Pruefbericht, kein Grund zum Verwerfen:
+        # Abmeldungen oder zurueckgesetzte Abgaben senken Zahlen zu Recht,
+        # und eine echte Luecke ist bereits als "unbekannt" markiert.
+        # =====================================================
+        vorlauf, verlauf = (None, []) if test_mode else _vergleiche_mit_vorlauf(export_folder, data)
+
+        data["pruefbericht"] = {
+            "luecken": [
+                {**l, "kurs": cid} for cid, k in kurs_daten.items()
+                for l in k.get("pruefbericht", {}).get("luecken", [])
+            ],
+            "hinweise": [
+                h for k in kurs_daten.values()
+                for h in k.get("pruefbericht", {}).get("hinweise", [])
+            ],
+            "fehlende_kurse": fehlende_kurse,
+            "verlauf": verlauf,
+            "vergleich_mit": vorlauf,
+            "seiten_nachgeladen": _seiten_statistik["nachgeladen"],
+        }
+
         try:
             os.makedirs(export_folder, exist_ok=True)
             json_bytes = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
-            new_file_size = len(json_bytes)
             with open(local_filename, 'wb') as f:
                 f.write(json_bytes)
             save_duration = time.time() - save_start_time
             logger.info(f"Daten erfolgreich lokal gespeichert in {save_duration:.1f}s: {local_filename}")
             save_success = True
 
-            # =====================================================
-            # GRÖSSENVERGLEICH: Prüfe ob neuer Export kleiner ist
-            # (Nur im normalen Modus – im Testmodus überspringen)
-            # =====================================================
-            logger.info(f"Größe der neuen Datei: {new_file_size:,} bytes ({new_file_size / 1024:.1f} KB)")
-
-            if test_mode:
-                logger.info("[TESTMODUS] Größenvergleich übersprungen")
-            else:
-                # Finde vorherige Export-Dateien
-                import glob
-                previous_exports = glob.glob(os.path.join(export_folder, 'output_*.json'))
-                previous_exports = [f for f in previous_exports if f != local_filename]  # Schließe neue Datei aus
-
-                if previous_exports:
-                    # Sortiere nach Erstellungsdatum (neueste zuerst)
-                    previous_exports.sort(key=os.path.getctime, reverse=True)
-                    latest_previous = previous_exports[0]
-                    previous_file_size = os.path.getsize(latest_previous)
-
-                    logger.info(f"Größe der vorherigen Datei: {previous_file_size:,} bytes ({previous_file_size / 1024:.1f} KB)")
-                    logger.info(f"Vorherige Datei: {os.path.basename(latest_previous)}")
-
-                    # Berechne Differenz
-                    size_diff = new_file_size - previous_file_size
-                    size_diff_percent = (size_diff / previous_file_size) * 100 if previous_file_size > 0 else 0
-
-                    logger.info(f"Differenz: {size_diff:+,} bytes ({size_diff_percent:+.1f}%)")
-
-                    # Warnung bei kleineren Exporten
-                    if new_file_size < previous_file_size:
-                        logger.warning("=" * 60)
-                        logger.warning("WARNUNG: NEUER EXPORT IST KLEINER!")
-                        logger.warning("=" * 60)
-                        logger.warning(f"Der neue Export ist {abs(size_diff):,} bytes ({abs(size_diff_percent):.1f}%) kleiner.")
-                        logger.warning(f"Dies könnte auf einen unvollständigen Export hinweisen.")
-                        logger.warning(f"Neue Datei:      {new_file_size:>12,} bytes  {os.path.basename(local_filename)}")
-                        logger.warning(f"Vorherige Datei: {previous_file_size:>12,} bytes  {os.path.basename(latest_previous)}")
-
-                        # Prüfe ob stdin interaktiv ist (Terminal vorhanden)
-                        is_interactive = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
-
-                        if is_interactive:
-                            # Interaktiver Modus: Frage Benutzer
-                            logger.info("[INTERAKTIV] Sie werden um Bestätigung gebeten.")
-                            try:
-                                response = input("Möchten Sie den neuen (kleineren) Export behalten? (j/n): ").strip().lower()
-                                if response not in ['j', 'ja', 'y', 'yes']:
-                                    logger.info("[ABBRUCH] Export wird verworfen...")
-                                    os.remove(local_filename)
-                                    logger.info(f"Datei gelöscht: {local_filename}")
-                                    logger.info("Der vorherige Export bleibt erhalten.")
-                                    save_success = False
-                                else:
-                                    logger.info("[OK] Neuer Export wird behalten.")
-                            except (KeyboardInterrupt, EOFError):
-                                logger.info("[ABBRUCH] Export wird verworfen...")
-                                os.remove(local_filename)
-                                logger.info(f"Datei gelöscht: {local_filename}")
-                                save_success = False
-                        else:
-                            # Nicht-interaktiver Modus: Ablehnen wenn >1% kleiner (sollte nicht vorkommen)
-                            if abs(size_diff_percent) > 1:
-                                logger.warning("[NICHT-INTERAKTIV] Export ist kleiner als vorher – wird automatisch abgelehnt.")
-                                logger.info("[ABBRUCH] Export wird verworfen (automatisch)...")
-                                os.remove(local_filename)
-                                logger.info(f"Datei gelöscht: {local_filename}")
-                                logger.info("Der vorherige Export bleibt erhalten.")
-                                save_success = False
-                            else:
-                                logger.info(f"[NICHT-INTERAKTIV] Kleinerer Export akzeptiert (nur {abs(size_diff_percent):.1f}% Differenz)")
-
-                        logger.info("=" * 60)
-                    elif size_diff_percent > 50:
-                        logger.info(f"Export ist signifikant größer (+{size_diff_percent:.1f}%). Dies ist normal bei mehr Daten.")
-                    else:
-                        logger.info("[OK] Dateigröße ist plausibel.")
-                else:
-                    logger.info("Kein vorheriger Export gefunden, Größenvergleich übersprungen.")
+            _protokolliere_pruefbericht(data["pruefbericht"])
 
         except Exception as e:
             logger.error(f"Lokale Speicherung fehlgeschlagen: {e}")

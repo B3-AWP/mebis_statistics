@@ -1,0 +1,75 @@
+/* Werte aus den Design-Tokens des Dashboards (src/dashboard/static/css/style.css) */
+:root {
+    --accent: #2563EB;
+    --surface: #ffffff;
+    --surface-sunken: #F1F3F6;
+    --surface-muted: #F7F8FA;
+    --line: #E4E7EC;
+    --line-row: #F1F3F5;
+    --text-color: #1A1D23;
+    --text-light: #5B6472;
+    --success-color: #16A34A;
+    --warning-color: #FF6B35;
+    --danger-color: #E65100;
+    --radius-sm: 6px;
+    --radius-lg: 10px;
+    --font-base: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--surface-sunken);
+    color: var(--text-color);
+    font: 14px/1.5 var(--font-base);
+}
+
+main {
+    max-width: 960px;
+    margin: 24px auto;
+    padding: 24px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+}
+
+h1 { font-size: 19px; margin: 0 0 8px; }
+h2 { font-size: 15px; margin: 24px 0 8px; }
+.lead, .hinweis { color: var(--text-light); }
+.hinweis { font-size: 12.5px; }
+
+form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+input {
+    font: inherit; font-family: var(--font-mono);
+    padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+button {
+    font: inherit; padding: 6px 14px; cursor: pointer;
+    border: 1px solid var(--accent); border-radius: var(--radius-sm);
+    background: var(--accent); color: var(--surface);
+}
+button:disabled { opacity: 0.5; cursor: wait; }
+#kopieren { margin-top: 12px; background: var(--surface); color: var(--accent); }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+    text-align: left; background: var(--surface-muted);
+    color: var(--text-light); font-weight: 600;
+}
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line-row); vertical-align: top; }
+td:nth-child(3) { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.ok { color: var(--success-color); font-weight: 600; }
+.warnung { color: var(--warning-color); font-weight: 600; }
+.fehler { color: var(--danger-color); font-weight: 600; }
+
+.fazit {
+    padding: 8px 12px; border-left: 3px solid var(--line);
+    background: var(--surface-muted); border-radius: var(--radius-sm);
+}
+.fazit.ok { border-left-color: var(--success-color); }
+.fazit.fehler { border-left-color: var(--danger-color); }
+
+textarea { width: 100%; height: 160px; margin-top: 8px; font-family: var(--font-mono); font-size: 12px; }

@@ -265,7 +265,7 @@ scripts\export_data.cmd
 
 Der Export läuft über alle nicht gesperrten Kurse aus `plan.json` und legt
 eine JSON-Datei im `EXPORT_FOLDER` ab. Dauer: etwa 3 Minuten je Kurs bei
-~57 Aktivitäten und ~104 Personen. Am Ende jedes Laufs steht eine
+~57 Aktivitäten und ~115 Personen. Am Ende jedes Laufs steht eine
 Phasenübersicht, die zeigt, wo die Zeit geblieben ist.
 
 Zum Ausprobieren gibt es einen Testmodus mit 5 Aktivitäten je Typ:
@@ -289,6 +289,157 @@ blieben und ihre Stunden im Soll fehlten.
    oder `09.01.2026 14:30`); normaler Feedbacktext wird übersprungen
 2. „Zuletzt geändert (Abgabe)"-Datum der Bewertungsseite
 3. Bewertungshistorie (Fallback für manuell eingetragene Noten)
+
+#### Wie der Export seine Vollständigkeit prüft
+
+Früher verglich der Export die Dateigröße mit dem Vorlauf und verwarf eine
+kleinere Datei. Das sagte nicht, *wo* etwas fehlt, und konnte einen Ausfall
+verdecken, wenn anderswo genug Abgaben dazukamen. Heute prüft er auf drei
+Ebenen ([src/export/pruefung.py](src/export/pruefung.py)):
+
+| Ebene | Prüft | Folge bei Befund |
+|---|---|---|
+| **Seite** | keine Anmeldeseite, erwartete Tabelle vorhanden, aufgeteilte Seiten vollständig nachgeladen | Status der Aufgabe **unbekannt** |
+| **Abgleich** | Wer laut Gruppe zur Klasse gehört, muss in jeder Bewertungstabelle und in der Bewerterübersicht stehen | Status dieser Person **unbekannt** |
+| **Verlauf** | Abgegeben/bewertet je Aufgabe und Klasse gegenüber dem letzten `output_*.json` | Warnung im Prüfbericht |
+
+**Aufgeteilte Seiten.** Bewerterübersicht, Bewertungsseite, Testbericht und
+Fortschrittsbericht zeigen je nach den im Moodle-Konto gespeicherten
+Einstellungen nur einen Teil der Personen pro Seite. Der Export folgt der
+Seitenleiste (`page=` bzw. `start=`) und lädt alle Teilseiten. Er übernimmt
+dabei nur die Seitennummer, nie den Link: Filterlinks wie die Buchstabenleiste
+speichert Moodle in der Sitzung, und ein versehentlich gesetzter Filter würde
+alle folgenden Abrufe verfälschen.
+
+**Unbekannt ist nicht „nicht abgegeben".** Lässt sich eine Seite auch nach drei
+Versuchen nicht lesen, steht im Export `"unbekannt": true` samt Grund. Im
+Dashboard erscheint die Zelle als **?**, die Quantität als Untergrenze
+(„mind. 45 %") und die Mitarbeitsnote mit der Marke **vorl.** — der wahre Wert
+kann nur höher liegen. In der CSV steht dazu die Spalte „Vorläufig", im
+Schülerbericht „Stand unbekannt".
+
+**Was den Lauf abbricht.** Nur, was eine ganze Klasse unsichtbar machen würde:
+Mitglieder einer Plan-Klasse nicht ladbar, keine Gruppen, keine Aktivitäten
+oder keine einzige lesbare Bewertungsseite. Der Kurs fehlt dann im Export und
+der Prüfbericht nennt ihn.
+
+**Prüfbericht.** Am Ende jedes Laufs steht im Log ein Abschnitt
+„PRÜFBERICHT"; derselbe Inhalt liegt im Export unter `pruefbericht` und
+erscheint im Dashboard über der Tabelle — grün, wenn jeder Status bekannt ist,
+sonst aufklappbar mit allen Lücken und Rückgängen. Ein Rückgang (z.B.
+„Quiz HTML, IFA12A: abgegeben 23 → 0") verwirft den Export nicht mehr:
+Abmeldungen oder zurückgesetzte Abgaben senken Zahlen zu Recht.
+
+#### Machbarkeitstest: Export im Browser direkt in ByCS
+
+Langfristig soll der Export ohne Python und Selenium auskommen: als ZIP, das
+wie das Schüler-Dashboard als Aktivität „Datei" im Kurs liegt und die
+Moodle-Seiten in der Sitzung der angemeldeten Lehrkraft liest. Ob ByCS die
+dafür nötigen Lehrkräfte-Seiten an eine hochgeladene Seite ausliefert, prüft
+der Machbarkeitstest in [bycs/probe/](bycs/probe/):
+
+```bash
+python scripts/build_bycs_zip.py        # -> data/bycs/bycs_probe.zip
+```
+
+1. In einem Kurs eine Aktivität **Datei** anlegen, das ZIP hochladen, im
+   Dateimanager **entpacken** und `index.html` als Hauptdatei setzen.
+2. Die Aktivität **für Lernende verbergen**. Das ist Ordnung, kein Schutz —
+   die Daten schützt Moodle über die Rechte; eine Lernende bekäme die
+   Lehrkräfte-Seiten gar nicht ausgeliefert.
+3. Öffnen, Kurs-ID eintragen, **Test starten**.
+
+Geprüft werden Fortschrittsbericht (je Gruppe), Bewerterübersicht,
+Bewertungsseite, Testbericht, Notenkategorien und die Moodle-5-Kursübersicht —
+jeweils, ob sie lesbar sind, ob die erwartete Tabelle da ist und ob Moodle sie
+aufteilt. Angezeigt werden **nur Zählwerte**, keine Namen und keine
+Personen-IDs; gespeichert oder gesendet wird nichts. „Ergebnis als Text
+kopieren" liefert eine Zusammenfassung zum Weitergeben.
+
+#### Dashboard in ByCS
+
+Das komplette Lehrkräfte-Dashboard läuft auch direkt in ByCS — ohne Python,
+ohne Flask, ohne Zugangsdaten:
+
+```bash
+python scripts/build_bycs_zip.py dashboard   # -> data/bycs/bycs_dashboard.zip
+```
+
+Hochladen als Aktivität „Datei" (entpacken, `index.html` als Hauptdatei,
+**für Lernende verbergen**). Beim Öffnen liest es Moodle in der Sitzung der
+angemeldeten Lehrkraft (etwa 1–2 Minuten, Fortschritt unten rechts) und zeigt
+das Ergebnis sofort an — dieselbe Oberfläche wie lokal.
+
+- **Aktualisieren** liest Moodle erneut, **Datei laden** öffnet eine
+  gespeicherte Exportdatei, **Export speichern** lädt die zuletzt gelesene
+  Datei herunter (z.B. für `generate_reports.py`).
+- **Einzelne Aufgabe nachladen**: Im Reiter *Pflichtaufgaben* steht über
+  jeder Aufgabe ein ⟳-Knopf. Er liest nur diese Aufgabe neu (Bewertungsseite,
+  Feedback-Datum) — wenige Sekunden statt eines ganzen Exports — und rechnet
+  das Dashboard neu. Bei einem Test wird die ganze Bewerterübersicht gelesen,
+  weil dort der Teststatus steht. Es gelten dieselben Prüfregeln wie beim
+  Gesamtexport; die Lücken dieser Aufgabe im Prüfbericht werden ersetzt.
+  Lokal (Flask) gibt es den Knopf nicht — dort fehlt die Moodle-Sitzung im
+  Browser.
+- Nichts wird gespeichert: Die Daten leben nur im Speicher der Seite.
+- Das ZIP entsteht aus den unveränderten Dateien in `src/dashboard/static/`.
+  Was lokal der Flask-Server rechnet, übernimmt
+  [bycs/dashboard/aufbereitung.js](bycs/dashboard/aufbereitung.js); Plan und
+  Einstellungen legt das Build-Skript mit Python geprüft bei
+  (`plan_dashboard.json`, `einstellungen.json` aus `config/.env`).
+- `einstellungen.json` enthält die Ausschlussliste, also Namen — ein Grund
+  mehr, die Aktivität zu verbergen.
+- Ändern sich `plan.json` oder `config/.env`, das ZIP neu bauen und hochladen.
+- **Bearbeitungsmodus aus**: Ist er in Moodle eingeschaltet, liest der Export
+  die Noten aus den Eingabefeldern und vermerkt das im Prüfbericht.
+- **Darstellung „Öffnen" oder „Im neuen Fenster"** wählen (Einstellungen der
+  Aktivität → Darstellung). „Einbetten" zeigt das Dashboard in einem Rahmen
+  mit fester Höhe, „Im Pop-up" in einem kleinen Fenster (Standard 620 × 450).
+  In beiden Fällen bietet das Dashboard oben „Im ganzen Fenster öffnen" an —
+  das liest Moodle allerdings neu ein.
+
+Dass ByCS- und lokales Dashboard dieselben Zahlen zeigen, prüft
+`tests/vergleiche_aufbereitung.py` (Stufe 4 der Testsuite, braucht Node):
+
+```bash
+python -X utf8 tests/vergleiche_aufbereitung.py <export>.json
+```
+
+#### Export im Browser (ohne Python)
+
+Der Machbarkeitstest war erfolgreich (17.11.2026): Alle Seiten sind aus einer
+hochgeladenen Seite lesbar. [bycs/export/](bycs/export/) erzeugt deshalb
+dieselbe Exportdatei wie `scripts/export_data.py`, direkt im Browser der
+angemeldeten Lehrkraft — ohne Python, Selenium oder Zugangsdaten in der `.env`.
+
+```bash
+python scripts/build_bycs_zip.py export   # -> data/bycs/bycs_export.zip (inkl. plan.json)
+```
+
+Hochladen wie den Machbarkeitstest (Aktivität „Datei", entpacken, `index.html`
+als Hauptdatei, für Lernende verbergen). Die Seite liest die `plan.json`
+neben sich, bietet die nicht gesperrten Kurse an, zeigt am Ende den
+Prüfbericht und lädt die Datei `output_<Zeitstempel>.json` herunter. Diese im
+Dashboard über **„Datei laden"** öffnen oder in den `EXPORT_FOLDER` legen.
+
+- Dieselben Regeln wie der Python-Export: aufgeteilte Seiten nachladen,
+  „unbekannt" statt „nicht abgegeben", Abgleich gegen die Gruppenmitglieder.
+- Der Verlaufsvergleich nutzt nur Zählwerte (keine Namen), die im Browser
+  gespeichert werden — er greift ab dem zweiten Lauf im selben Browser.
+- Die `plan.json` im ZIP ist eine Kopie. Ändert sich der Plan, ZIP neu bauen
+  und hochladen — wie beim Schüler-Dashboard.
+
+**Parallelbetrieb.** Bis der Browser-Export den Python-Export ersetzt, beide
+direkt nacheinander laufen lassen und vergleichen:
+
+```bash
+python -X utf8 tests/vergleiche_exporte.py <python-export>.json <browser-export>.json
+```
+
+Das Werkzeug vergleicht Kurse, Aktivitäten, Gruppenmitglieder und je Person
+und Aktivität Status, Bewertung, Abgabezeit und „unbekannt". Es gibt nur IDs
+aus, keine Namen. Leerraum-Unterschiede (Selenium `.text` gegenüber
+`textContent`) zählen nicht.
 
 ### 2. Dashboard starten
 
@@ -520,9 +671,16 @@ Prozentwerte der Skala stehen zusätzlich in `plan.json` (`skalen.sterne4`).
 - `plan.json` liegt nicht am erwarteten Ort. Pfad per `PLAN_JSON_PATH` setzen
   oder das Schüler-Dashboard-Repo danebenlegen.
 
-**„Export hat Schema X, erwartet wird 2"**
-- Die Datei stammt aus dem Vorjahr. Altformate werden bewusst nicht gelesen —
-  einen neuen Export erzeugen.
+**„Export hat Schema X, erwartet wird 3"**
+- Die Datei stammt aus einer älteren Version. Schema 2 kannte keinen
+  unbekannten Status und hat jede Lücke als „nicht abgegeben" exportiert.
+  Altformate werden bewusst nicht gelesen — einen neuen Export erzeugen.
+
+**Zellen mit „?" und die Marke „vorl."**
+- Der Export konnte den Stand dieser Aufgaben nicht lesen (Seite fehlte,
+  Person nicht in der Tabelle). Der Prüfbericht über der Tabelle nennt
+  Aufgabe und Grund. Meist genügt ein neuer Export; bleibt dieselbe Lücke,
+  lohnt ein Blick auf die genannte Moodle-Seite.
 
 **Warnung „N Aufgabe(n) aus plan.json fehlen im Kurs"**
 - Die genannten `cmid`s sind in Moodle nicht auffindbar. Entweder die Aufgabe

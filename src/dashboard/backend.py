@@ -38,8 +38,9 @@ from src.common import plan_loader
 from src.common.group_utils import extract_group_prefix
 from src.common.plan_loader import PlanFehler, get_plan
 
-# Erwartete Version des Exportformats (siehe exporter.EXPORT_SCHEMA_VERSION)
-EXPORT_SCHEMA_VERSION = 2
+# Erwartete Version des Exportformats (siehe exporter.EXPORT_SCHEMA_VERSION).
+# 3 = Status kann "unbekannt" sein; dazu ein "pruefbericht".
+EXPORT_SCHEMA_VERSION = 3
 
 # Flask App Setup mit sicherer Konfiguration
 # Use absolute path for static folder
@@ -125,7 +126,8 @@ def load_json_data(file_path):
 
         # Schuljahr 2026/27: Ein Export enthält mehrere Kurse unter "kurse".
         # Altformate werden bewusst abgelehnt statt stillschweigend falsch
-        # interpretiert — sie stammen aus dem Vorjahr mit anderer Kursstruktur.
+        # interpretiert — Schema 2 kennt keinen unbekannten Status und hat
+        # jede Lücke als "nicht abgegeben" exportiert.
         schema = data.get('schema')
         if schema != EXPORT_SCHEMA_VERSION:
             logger.error(
@@ -523,34 +525,25 @@ def find_user_assignment_status(user, assignment_id):
     activities = user.get('activities', {})
     logger.debug(f"User has {len(activities.get('assignments', []))} assignments and {len(activities.get('quizzes', []))} quizzes")
 
-    # Suche in assignments
-    for assignment in activities.get('assignments', []):
-        if assignment.get('id') == assignment_id:
-            status_info = assignment.get('status', {})
+    # Suche in assignments und quizzes
+    for typ in ('assignments', 'quizzes'):
+        for activity in activities.get(typ, []):
+            if activity.get('id') != assignment_id:
+                continue
+            status_info = activity.get('status', {})
             raw_grade = status_info.get('grade', '-')
-            rounded_grade = round_grade(raw_grade)
             result = {
                 'status': status_info.get('status', 'Nicht eingereicht'),
                 'status2': status_info.get('status2', ''),
-                'grade': rounded_grade,
+                'grade': round_grade(raw_grade),
                 'submission_time': status_info.get('submission_time', None)
             }
-            logger.debug(f"MATCH! {user.get('name')} - Assignment {assignment_id}: {result}")
-            return result
-
-    # Suche in quizzes
-    for quiz in activities.get('quizzes', []):
-        if quiz.get('id') == assignment_id:
-            status_info = quiz.get('status', {})
-            raw_grade = status_info.get('grade', '-')
-            rounded_grade = round_grade(raw_grade)
-            result = {
-                'status': status_info.get('status', 'Nicht eingereicht'),
-                'status2': status_info.get('status2', ''),
-                'grade': rounded_grade,
-                'submission_time': status_info.get('submission_time', None)
-            }
-            logger.debug(f"QUIZ MATCH! {user.get('name')} - Quiz {assignment_id}: {result}")
+            # Unbekannt ist kein "nicht abgegeben": der Export konnte den
+            # Stand nicht lesen. Das Frontend zeigt die Zelle als Lücke.
+            if status_info.get('unbekannt'):
+                result['unbekannt'] = True
+                result['grund'] = status_info.get('grund', '')
+            logger.debug(f"MATCH! {user.get('name')} - {typ} {assignment_id}: {result}")
             return result
 
     # Wenn nicht gefunden
@@ -659,6 +652,9 @@ def _process_dashboard_data(data, source_label=None):
         'schuljahr': data.get('schuljahr') or plan.schuljahr,
         'plan': plan.to_dict(),
         'kurse': kurse_response,
+        # Gesamtbericht des Exports: Lücken, Rückgänge gegenüber dem Vorlauf,
+        # fehlende Kurse. Das Frontend zeigt ihn über der Tabelle.
+        'pruefbericht': data.get('pruefbericht') or {},
         'ignored_groups': list(load_ignored_groups()),
         'last_updated': source_label,
         'environment': environment_settings,
@@ -831,13 +827,7 @@ def _process_course_data(data, plan, kurs, source_label=None):
                         if user.get('name') in excluded_names:
                             continue
                         status = find_user_assignment_status(user, assignment_id)
-                        assignment['user_status'].append({
-                            'user_name': user.get('name', ''),
-                            'user_id': user.get('id', ''),
-                            'status': status.get('status', 'Nicht eingereicht'),
-                            'grade': status.get('grade', '-'),
-                            'submission_time': status.get('submission_time', None)
-                        })
+                        assignment['user_status'].append(_user_status_eintrag(user, status))
             for quiz in category.get('quizzes', []):
                 quiz['user_status'] = []
                 quiz_id = quiz.get('id')
@@ -849,14 +839,21 @@ def _process_course_data(data, plan, kurs, source_label=None):
                         if user.get('name') in excluded_names:
                             continue
                         status = find_user_assignment_status(user, quiz_id)
-                        quiz['user_status'].append({
-                            'user_name': user.get('name', ''),
-                            'user_id': user.get('id', ''),
-                            'status': status.get('status', 'Nicht eingereicht'),
-                            'grade': status.get('grade', '-'),
-                            'submission_time': status.get('submission_time', None)
-                        })
+                        quiz['user_status'].append(_user_status_eintrag(user, status))
         return activities
+
+    def _user_status_eintrag(user, status):
+        eintrag = {
+            'user_name': user.get('name', ''),
+            'user_id': user.get('id', ''),
+            'status': status.get('status', 'Nicht eingereicht'),
+            'grade': status.get('grade', '-'),
+            'submission_time': status.get('submission_time', None)
+        }
+        if status.get('unbekannt'):
+            eintrag['unbekannt'] = True
+            eintrag['grund'] = status.get('grund', '')
+        return eintrag
 
     activities_with_status = add_user_status_to_activities(activities_ordered, data, groups_data, excluded_names)
 
@@ -916,6 +913,8 @@ def _process_course_data(data, plan, kurs, source_label=None):
         'mitarbeitsnote_config': mitarbeitsnote_cfg,
         'recent_submissions': recent_submissions,
         'stunden_geplant': kurs['stundenGeplant'],
+        # Lücken und Hinweise dieses Kurses aus dem Export (Schema 3)
+        'pruefbericht': data.get('pruefbericht') or {},
     }
 
     logger.info(
@@ -1143,8 +1142,15 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
 
         # "Abgegeben" zählt unabhängig von der Bewertung — wie im Schüler-Dashboard.
         erledigte_ids = set()
+        unbekannte_ids = set()
         for activity in all_pflicht_activities:
             status = activity.get('status', {}) or {}
+            # Unbekannt: der Export konnte den Stand nicht lesen. Die Aufgabe
+            # zählt nicht als erledigt, die Quantität ist damit eine
+            # Untergrenze — und die Note vorläufig.
+            if status.get('unbekannt'):
+                unbekannte_ids.add(str(activity.get('id', '')).strip())
+                continue
             hat_abgabe = bool(status.get('submission_time'))
             hat_note = status.get('grade') not in (None, '', '-', 'Nicht bewertet',
                                                    'Nicht eingereicht', 'Keine Bewertung')
@@ -1152,6 +1158,7 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
                 erledigte_ids.add(str(activity.get('id', '')).strip())
 
         stunden_erledigt = sum(a['stunden'] for a in geplante if a['cmid'] in erledigte_ids)
+        unbekannte = [a for a in geplante if a['cmid'] in unbekannte_ids]
 
         user_data['assignments']['stunden_gesamt'] = round(stunden_gesamt, 2)
         user_data['assignments']['stunden_erledigt'] = round(stunden_erledigt, 2)
@@ -1160,6 +1167,9 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
         )
         user_data['assignments']['aufgaben_erledigt'] = len(erledigte_ids)
         user_data['assignments']['aufgaben_gesamt'] = len(geplante)
+        user_data['assignments']['stunden_unbekannt'] = round(sum(a['stunden'] for a in unbekannte), 2)
+        user_data['assignments']['aufgaben_unbekannt'] = len(unbekannte)
+        user_data['assignments']['unbekannte_aufgaben'] = [a['titel'] for a in unbekannte]
 
     # Checklisten verarbeiten - nur Pflicht-Checklisten (is_mandatory: true)
     checklists = user['activities'].get('checklists', [])

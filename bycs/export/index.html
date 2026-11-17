@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mebis-Export im Browser</title>
+<link rel="stylesheet" href="export.css">
+</head>
+<body>
+<main>
+    <h1>Mebis-Export im Browser</h1>
+    <p class="lead">
+        Liest die Kurse aus <code>plan.json</code> in Ihrer Moodle-Sitzung und erzeugt dieselbe
+        Exportdatei wie <code>scripts/export_data.py</code> — ohne Python, ohne Zugangsdaten.
+        Die Datei enthält Schülernamen und bleibt auf Ihrem Rechner.
+    </p>
+
+    <section>
+        <h2>1. Planung</h2>
+        <p id="planStatus" class="hinweis">Lade <code>plan.json</code> …</p>
+        <label id="planWahl" hidden>
+            <code>plan.json</code> auswählen: <input type="file" id="planDatei" accept=".json,application/json">
+        </label>
+    </section>
+
+    <section>
+        <h2>2. Kurse</h2>
+        <div id="kursListe" class="hinweis">—</div>
+        <button type="button" id="start" disabled>Export starten</button>
+    </section>
+
+    <section id="laufBereich" hidden>
+        <h2>3. Verlauf</h2>
+        <p id="fortschritt" class="fortschritt"></p>
+        <ul id="protokoll" class="protokoll"></ul>
+    </section>
+
+    <section id="ergebnisBereich" hidden>
+        <h2>4. Ergebnis</h2>
+        <div id="pruefbericht" class="pruefbericht"></div>
+        <button type="button" id="herunterladen">Exportdatei herunterladen</button>
+        <p class="hinweis">
+            Die Datei im Lehrkräfte-Dashboard über <strong>„Datei laden"</strong> öffnen oder in den
+            <code>EXPORT_FOLDER</code> legen.
+        </p>
+    </section>
+</main>
+<script src="exporter.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

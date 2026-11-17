@@ -101,7 +101,7 @@ console.log('\n== calculateQuantitaet (stundengewichtet) ==');
 setG('currentGroup', 'IFA12A');
 G('selectCourseScope')('halbjahr-1');
 const users = G('dashboardData').groups['IFA12A'].users;
-pruefe('drei Personen', users.length === 3, `= ${users.length}`);
+pruefe('vier Personen', users.length === 4, `= ${users.length}`);
 
 const byName = {};
 users.forEach(u => { byName[u.name] = G('calculateQuantitaet')(u, 'IFA12A', 5); });
@@ -148,8 +148,53 @@ try {
     pruefe('enthaelt individualProgressTable', html.includes('individualProgressTable'));
     pruefe('enthaelt Delta-Spalte', html.includes('Delta'));
     pruefe('kein MA2-Rest', !html.includes('Prognose') && !html.includes('ma2Table'));
-    pruefe('alle drei Personen', users.every(u => html.includes(u.name)));
+    pruefe('alle vier Personen', users.every(u => html.includes(u.name)));
 } catch (e) { pruefe('generateGroupProgressTable', false, e.message); }
+
+// Export-Schema 3: Dora hat eine Aufgabe mit unbekanntem Stand.
+console.log('\n== Unbekannter Stand (vorlaeufige Note) ==');
+try {
+    const dora = users.find(u => u.name === 'Dora Datenluecke');
+    const doraBernd = users.find(u => u.name === 'Bernd Beflissen');
+    pruefe('Dora vorlaeufig', G('istVorlaeufig')(dora) === true,
+           `${dora.assignments.stunden_unbekannt} Std. unbekannt`);
+    pruefe('Bernd nicht vorlaeufig', G('istVorlaeufig')(doraBernd) === false);
+
+    // Dora = Bernds Abgaben + eine unbekannte Aufgabe. Plan-unabhaengig:
+    // die Stundenzahlen in plan.json aendern sich im Schuljahr.
+    const q = G('calculateQuantitaet')(dora, 'IFA12A', 5);
+    const qBernd = G('calculateQuantitaet')(doraBernd, 'IFA12A', 5);
+    pruefe('Unbekanntes zaehlt nicht als erledigt', q.stundenErledigt === qBernd.stundenErledigt,
+           `Dora ${q.stundenErledigt} Std., Bernd ${qBernd.stundenErledigt} Std.`);
+    pruefe('Dora rechnet wie Bernd (Untergrenze)',
+           q.value === G('calculateQuantitaet')(doraBernd, 'IFA12A', 5).value);
+
+    const maDora = G('calculateMitarbeitsnote')(dora, 'IFA12A', 5);
+    pruefe('Mitarbeitsnote traegt vorlaeufig', maDora && maDora.vorlaeufig === true);
+    pruefe('Mitarbeitsnote Bernd ohne vorlaeufig',
+           G('calculateMitarbeitsnote')(doraBernd, 'IFA12A', 5).vorlaeufig === false);
+
+    G('generateGroupProgressTable')(users);
+    const html = elements['groupProgressTable'].innerHTML;
+    const doraZeile = html.split('<tr').find(z => z.includes('Dora Datenluecke')) || '';
+    const berndZeile = html.split('<tr').find(z => z.includes('Bernd Beflissen')) || '';
+    pruefe('Dora-Zeile markiert', doraZeile.includes('zeile-vorlaeufig'));
+    pruefe('Dora-Quantitaet als Untergrenze', doraZeile.includes('mind. '));
+    pruefe('Dora-Note mit Marke', doraZeile.includes('vorlaeufig-marke'));
+    pruefe('Bernd-Zeile ohne Marke', !berndZeile.includes('vorlaeufig') && !berndZeile.includes('mind. '));
+
+    const zelle = G('pflichtStatusZelle')({ unbekannt: true, grund: 'Tabelle fehlt' },
+                                          { activity_type: 'assign', url: '#' }, '1');
+    pruefe('Statuszelle zeigt Luecke statt ❌', zelle.includes('zelle-unbekannt') && !zelle.includes('❌'));
+    pruefe('Grund im Tooltip', zelle.includes('Tabelle fehlt'));
+
+    const pb = elements['pruefbericht'];
+    pruefe('Pruefbericht sichtbar', pb.hidden === false && pb.innerHTML.includes('Lücke'),
+           pb.innerHTML.slice(0, 80));
+    G('renderPruefbericht')({ luecken: [], verlauf: [], fehlende_kurse: [], vergleich_mit: 'x.json' });
+    pruefe('Pruefbericht ohne Befund', elements['pruefbericht'].innerHTML.includes('jeder Status ist bekannt'));
+    G('renderPruefbericht')(apiResponse.pruefbericht);
+} catch (e) { pruefe('Unbekannter Stand', false, e.stack || e.message); }
 
 try {
     G('updateHalbjahrCards')(users);

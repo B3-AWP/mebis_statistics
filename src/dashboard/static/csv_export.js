@@ -268,6 +268,7 @@ function getGradeFromActivitiesByCategory(userName, assignmentId) {
                 if (assignment.id === assignmentId && assignment.user_status) {
                     const userStatus = assignment.user_status.find(status => status.user_name === userName);
                     if (!userStatus) continue;
+                    if (userStatus.unbekannt) return 'unbekannt';
                     const hasGrade = userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
                     if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
@@ -285,6 +286,7 @@ function getGradeFromActivitiesByCategory(userName, assignmentId) {
                 if (quiz.id === assignmentId && quiz.user_status) {
                     const userStatus = quiz.user_status.find(status => status.user_name === userName);
                     if (!userStatus) continue;
+                    if (userStatus.unbekannt) return 'unbekannt';
                     const hasGrade = userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
                     if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
@@ -326,6 +328,7 @@ function getGradeFromLeistungsnachweise(userName, assignmentId) {
                 if (assignment.id === assignmentId && assignment.user_status) {
                     const userStatus = assignment.user_status.find(status => status.user_name === userName);
                     if (!userStatus) continue;
+                    if (userStatus.unbekannt) return 'unbekannt';
                     const hasGrade = userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
                     if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
@@ -343,6 +346,7 @@ function getGradeFromLeistungsnachweise(userName, assignmentId) {
                 if (quiz.id === assignmentId && quiz.user_status) {
                     const userStatus = quiz.user_status.find(status => status.user_name === userName);
                     if (!userStatus) continue;
+                    if (userStatus.unbekannt) return 'unbekannt';
                     const hasGrade = userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
                     if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
@@ -627,6 +631,9 @@ function buildCsvHeaders(data) {
         headers.push(`${p}Delta (Std.)`);
         headers.push(`${p}Qualität (%)`);
         headers.push(`${p}Ø Mitarbeitsnote`);
+        // Kennzeichnung bleibt beim Weitergeben erhalten: Quantitaet ist
+        // dann eine Untergrenze, die Note vorlaeufig.
+        headers.push(`${p}Vorläufig`);
     }
 
     return headers;
@@ -837,6 +844,10 @@ function buildUserRow(user, data) {
             ? ma.deltaStunden.toFixed(1).replace('.', ',') : '');
         row.push(formatHjValue(ma?.qualitaet));
         row.push(formatHjGrade(ma?.grade));
+        const unbekannt = (user.assignments && user.assignments.aufgaben_unbekannt) || 0;
+        row.push(ma && ma.vorlaeufig
+            ? `ja – ${unbekannt} Aufgabe(n) unbekannt, Quantität ist Untergrenze`
+            : '');
     }
 
     return row;
@@ -919,6 +930,9 @@ function downloadCSV(csvString, filename) {
 
         link.setAttribute('href', url);
         link.setAttribute('download', filename);
+        // Download ausdrücklich im selben Tab: <base target="_blank"> in
+        // dashboard.html würde sonst je nach Browser einen leeren Tab öffnen.
+        link.setAttribute('target', '_self');
         link.style.visibility = 'hidden';
 
         document.body.appendChild(link);

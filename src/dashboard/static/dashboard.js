@@ -16,6 +16,19 @@ let currentHalbjahr = null; // Aktiver Kurs: kurs_id aus plan.json oder 'gesamt'
 // false = ausgeblendet). Code und Backend-Aggregation bleiben erhalten.
 const SHOW_RECENT_SUBMISSIONS = false;
 
+// Tab "Leistungsnachweise" anzeigen (true = Tab in der Navigation,
+// false = ausgeblendet). Erkannt werden LNW bisher am Namen der
+// Notenbuch-Kategorie ("Leistungsnachweise"/"📊"); der Kurs 2026/27 hat
+// keine solche Kategorie, der Tab bliebe leer. Code bleibt erhalten.
+const SHOW_LEISTUNGSNACHWEISE = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (!SHOW_LEISTUNGSNACHWEISE) {
+        const knopf = document.getElementById('tabExam');
+        if (knopf) knopf.style.display = 'none';
+    }
+});
+
 // Make variables available globally for csv_export.js
 window.dashboardData = dashboardData;
 window.currentGroup = currentGroup;
@@ -63,6 +76,11 @@ function sortUsersByVorname(users) {
 
 // Tab-Management
 function showTab(tabName) {
+    // Ausgeblendeter Tab: auf die Uebersicht umleiten
+    if (tabName === 'exam' && !SHOW_LEISTUNGSNACHWEISE) {
+        tabName = 'home';
+    }
+
     // Alle Tabs verstecken
     document.querySelectorAll('[id$="Tab"]').forEach(tab => {
         tab.style.display = 'none';
@@ -399,6 +417,9 @@ function mergeCourses(courses) {
                 a.aufgaben_gesamt = (a.aufgaben_gesamt || 0) + (b.aufgaben_gesamt || 0);
                 a.submitted_count = (a.submitted_count || 0) + (b.submitted_count || 0);
                 a.reviewed_count = (a.reviewed_count || 0) + (b.reviewed_count || 0);
+                a.stunden_unbekannt = (a.stunden_unbekannt || 0) + (b.stunden_unbekannt || 0);
+                a.aufgaben_unbekannt = (a.aufgaben_unbekannt || 0) + (b.aufgaben_unbekannt || 0);
+                a.unbekannte_aufgaben = [...(a.unbekannte_aufgaben || []), ...(b.unbekannte_aufgaben || [])];
                 a.percent_stunden = a.stunden_gesamt > 0
                     ? Math.round((a.stunden_erledigt / a.stunden_gesamt) * 10000) / 100 : 0;
                 a.percent_submitted = a.aufgaben_gesamt > 0
@@ -619,6 +640,78 @@ function formatDateDe(iso) {
     return isNaN(d) ? iso : d.toLocaleDateString('de-DE');
 }
 
+// --- Unbekannter Status (Export-Schema 3) -----------------------------
+//
+// Konnte der Export eine Moodle-Seite nicht vollstaendig lesen, ist der
+// Stand der betroffenen Aufgaben unbekannt — nicht "nicht abgegeben".
+// Solche Aufgaben zaehlen nicht als erledigt; die Quantitaet ist dann
+// eine Untergrenze ("mind.") und die Mitarbeitsnote vorlaeufig. Der
+// wahre Wert kann nur hoeher liegen.
+
+// Ob die Werte einer Person auf unvollstaendigen Daten beruhen.
+function istVorlaeufig(user) {
+    return ((user && user.assignments && user.assignments.stunden_unbekannt) || 0) > 0;
+}
+
+// Tooltip-Text: welche Aufgaben unbekannt sind.
+function vorlaeufigText(user) {
+    const a = (user && user.assignments) || {};
+    const liste = (a.unbekannte_aufgaben || []).join(', ');
+    return `Vorläufig: ${a.aufgaben_unbekannt || 0} Aufgabe(n) mit unbekanntem Stand `
+         + `(${formatStunden(a.stunden_unbekannt || 0)} Std.) — der Export konnte sie nicht lesen.`
+         + (liste ? ` Betroffen: ${liste}` : '');
+}
+
+function formatStunden(wert) {
+    return (Math.round(wert * 10) / 10).toString().replace('.', ',');
+}
+
+// Kleine Marke hinter einem Wert.
+function vorlaeufigMarke(user) {
+    if (!istVorlaeufig(user)) return '';
+    return ` <span class="vorlaeufig-marke" title="${escapeAttribut(vorlaeufigText(user))}">vorl.</span>`;
+}
+
+// Zeigt den Pruefbericht des Exports ueber der Tabelle: Luecken,
+// Rueckgaenge gegenueber dem letzten Lauf, fehlende Kurse.
+function renderPruefbericht(bericht) {
+    const el = document.getElementById('pruefbericht');
+    if (!el) return;
+    if (!bericht || Object.keys(bericht).length === 0) {
+        el.hidden = true;
+        el.innerHTML = '';
+        return;
+    }
+
+    const luecken = bericht.luecken || [];
+    const verlauf = bericht.verlauf || [];
+    const fehlend = bericht.fehlende_kurse || [];
+    const probleme = luecken.length + verlauf.length + fehlend.length;
+
+    let html = '';
+    if (probleme === 0) {
+        el.className = 'pruefbericht pruefbericht--ok';
+        html = '<strong>Export geprüft:</strong> jeder Status ist bekannt';
+        if (bericht.vergleich_mit) html += `, keine Rückgänge gegenüber dem letzten Lauf`;
+        html += '.';
+    } else {
+        el.className = 'pruefbericht pruefbericht--warnung';
+        const teile = [];
+        if (luecken.length) teile.push(`${luecken.length} Lücke(n) — betroffene Noten sind vorläufig`);
+        if (verlauf.length) teile.push(`${verlauf.length} Rückgang/Rückgänge gegenüber dem letzten Lauf`);
+        if (fehlend.length) teile.push(`fehlende Kurse: ${fehlend.map(escapeHtml).join(', ')}`);
+        html = `<details><summary><strong>Export unvollständig:</strong> ${teile.join(' · ')}</summary><ul>`;
+        luecken.forEach(l => {
+            const wer = l.personen === 'alle' ? 'alle' : `${l.personen.length} Person(en)`;
+            html += `<li>${escapeHtml(l.titel)} — ${wer}: ${escapeHtml(l.grund)}</li>`;
+        });
+        verlauf.forEach(m => { html += `<li>${escapeHtml(m)}</li>`; });
+        html += '</ul></details>';
+    }
+    el.innerHTML = html;
+    el.hidden = false;
+}
+
 function applyDashboardData(data) {
     serverData = data;
     plan = data.plan || null;
@@ -659,11 +752,14 @@ function applyDashboardData(data) {
         });
     }
 
-    if (dashboardData.environment) {
-        dashboardLogger.setBackendEnvironment(dashboardData.environment);
+    // Dateistand und Umgebung stehen in der Gesamtantwort, nicht in den
+    // Kursdaten — dashboardData ist seit 2026/27 nur der gewaehlte Kurs.
+    if (data.environment) {
+        dashboardLogger.setBackendEnvironment(data.environment);
     }
 
-    displayFileInfo(dashboardData.last_updated);
+    displayFileInfo(data.last_updated);
+    renderPruefbericht(data.pruefbericht);
     populateGroupSelectors();
     populateCategoryFilter();
     updateDashboard();
@@ -1254,8 +1350,14 @@ function generateGroupComparisonTable() {
         // "Ø Checklisten 100%" = avgCompletedChecklists (wie completedCount in der Card)
         // "Ø Pflichtaufgaben eingereicht" = avgCompletedPflichtaufgaben (wie pflichtCompletedCount in der Card)
 
+        // Personen mit unbekanntem Stand machen den Klassenschnitt vorlaeufig
+        const vorlaeufigAnzahl = (groupData.users || []).filter(istVorlaeufig).length;
+        const gruppenMarke = vorlaeufigAnzahl > 0
+            ? ` <span class="vorlaeufig-marke" title="${vorlaeufigAnzahl} Person(en) mit unbekanntem Stand einzelner Aufgaben — Schnitte sind vorläufig">vorl.</span>`
+            : '';
+
         html += '<tr>';
-        html += `<td class="group-name-cell"><strong>${stats.groupName}</strong></td>`;
+        html += `<td class="group-name-cell"><strong>${stats.groupName}</strong>${gruppenMarke}</td>`;
         html += `<td class="text-center">${stats.userCount}</td>`;
         html += `<td class="progress-cell progress-color-info" style="--progress-width: ${displayRequiredProgress}%;">${displayRequiredProgress.toFixed(1)}%</td>`;
         html += `<td class="text-center text-bold">${gradeText}</td>`;
@@ -1554,7 +1656,9 @@ function calculateMitarbeitsnote(user, groupName, weekOverride) {
         qualitaetCount: qualResult ? qualResult.count : null,
         overall: overall,
         grade: convertPercentToIHKGrade(overall),
-        componentCount: components.length
+        componentCount: components.length,
+        // Unbekannte Aufgaben: Quantitaet ist Untergrenze, Note vorlaeufig
+        vorlaeufig: istVorlaeufig(user)
     };
 }
 
@@ -1808,14 +1912,16 @@ function renderPctCell(value, cssClass, points = null, decimals = 1, extraLabel 
 
 // Hilfsfunktion: Rendert eine Notenzelle
 // overall: optionaler Gesamtprozentwert, der als Sub-Label angezeigt wird
-function renderGradeCell(grade, overall = null) {
+// vorlaeufigUser: Person mit unbekannten Aufgaben — dann folgt die Marke
+function renderGradeCell(grade, overall = null, vorlaeufigUser = null) {
     if (grade === null || grade === undefined) {
         return `<td class="text-center" style="color:#6C757D;">–</td>`;
     }
     const overallStr = overall !== null
         ? ` (${overall.toFixed(1)}%)`
         : '';
-    return `<td class="text-center text-bold" style="color: ${getGradeColor(grade)};">${grade.toFixed(1)}${overallStr}</td>`;
+    return `<td class="text-center text-bold" style="color: ${getGradeColor(grade)};">${grade.toFixed(1)}${overallStr}`
+         + `${vorlaeufigMarke(vorlaeufigUser)}</td>`;
 }
 
 // Generiert die Fortschritts-Tabelle für die Übersicht
@@ -1932,14 +2038,20 @@ function generateGroupProgressTable(users) {
             pflichtGradeColor = getGradeColor(pflichtGradeResult.grade);
         }
 
-        html += '<tr>';
+        // Unbekannter Stand einzelner Aufgaben: Quantitaet ist eine
+        // Untergrenze, alle daraus folgenden Noten sind vorlaeufig.
+        const vorlaeufig = istVorlaeufig(user);
+        const mind = vorlaeufig ? 'mind. ' : '';
+
+        html += vorlaeufig ? '<tr class="zeile-vorlaeufig">' : '<tr>';
         html += `<td class="person-name"><strong>${user.name}</strong></td>`;
 
         const stundenSub = pflichtPoints
             ? `<span class="cell-points">${Math.round(pflichtPoints.actual)} / ${Math.round(pflichtPoints.expected)} Std.</span>`
             : '';
-        html += `<td class="progress-cell progress-color-info" style="--progress-width: ${Math.min(quantitaet, 100)}%;">`
-              + `${quantitaet.toFixed(0)}%${stundenSub}</td>`;
+        html += `<td class="progress-cell progress-color-info" style="--progress-width: ${Math.min(quantitaet, 100)}%;"`
+              + (vorlaeufig ? ` title="${escapeAttribut(vorlaeufigText(user))}"` : '')
+              + `>${mind}${quantitaet.toFixed(0)}%${stundenSub}</td>`;
 
         // Delta: positiv = voraus, negativ = im Rueckstand.
         if (deltaStunden === null || deltaStunden === undefined) {
@@ -1951,12 +2063,12 @@ function generateGroupProgressTable(users) {
                   + `${vz}${deltaStunden.toFixed(1)}</td>`;
         }
 
-        html += `<td class="text-center text-bold">${gradeText}</td>`;
+        html += `<td class="text-center text-bold">${gradeText}${vorlaeufigMarke(user)}</td>`;
         html += renderPctCell(qualitaet, 'progress-color-warning', null, 1);
         html += `<td class="progress-cell progress-color-secondary" style="--progress-width: ${user.assignments.percent_submitted}%;">${user.assignments.submitted_count}</td>`;
         html += `<td class="text-center text-bold" style="color: ${pflichtGradeColor};" `
               + `title="Durchschnitt aus ${pflichtGradeResult ? pflichtGradeResult.count : 0} bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
-        html += renderGradeCell(maGrade, maOverall);
+        html += renderGradeCell(maGrade, maOverall, vorlaeufig ? user : null);
         html += '</tr>';
     });
 
@@ -2673,8 +2785,19 @@ function pflichtSpaltenKopf(aktivitaet) {
         + ' | Kategorie: ' + (aktivitaet.category_name || 'Unbekannt')
     );
 
+    // Nachladen einer einzelnen Aufgabe gibt es nur, wo die Seite Moodle
+    // selbst lesen kann (ByCS-Dashboard, bycs/dashboard/start.js setzt
+    // window.pflichtSync). Lokal fehlt die Funktion — dann kein Knopf.
+    const sync = (typeof window.pflichtSync === 'function' && aktivitaet.id)
+        ? `<button type="button" class="pflicht-sync" data-cmid="${escapeAttribut(String(aktivitaet.id))}"`
+          + ` title="Nur diese Aufgabe neu aus Moodle laden"`
+          + ` onclick="event.stopPropagation(); pflichtSync(this.dataset.cmid, this)">`
+          + `<svg class="icon" width="14" height="14" aria-hidden="true"><use href="#icon-refresh"></use></svg>`
+          + `</button>`
+        : '';
+
     return `<th class="pflicht-task-col" title="${tooltip}"`
-         + ` data-activity-type="${aktivitaet.activity_type}">`
+         + ` data-activity-type="${aktivitaet.activity_type}">${sync}`
          + `<a href="${aktivitaet.url}" target="_blank" class="pflicht-task-title">`
          + `<span class="pflicht-task-icon">${icon}</span>`
          + `<span class="pflicht-task-name">${escapeHtml(kurzTitel)}</span></a></th>`;
@@ -2706,6 +2829,13 @@ function findeUserStatus(aktivitaet, userId, userName) {
 function pflichtStatusZelle(status, aktivitaet, groupId) {
     let cellContent = '';
     let bgColor = '';
+
+    // Unbekannt: der Export konnte den Stand nicht lesen — eine Luecke,
+    // kein "nicht abgegeben". Der Grund steht im Tooltip.
+    if (status && status.unbekannt) {
+        return `<td class="pflicht-task-cell zelle-unbekannt" title="${escapeAttribut('Stand unbekannt: ' + (status.grund || 'nicht lesbar'))}"`
+             + ` data-submission-time="" data-activity-type="${aktivitaet.activity_type}">?</td>`;
+    }
 
     if (status && status.grade && status.grade !== '-') {
         cellContent = `<strong>${formatStarGrade(status.grade)}</strong>`;
@@ -2978,7 +3108,10 @@ function generatePflichtTableFromActivities() {
             let cellClass = 'progress-cell';
             let bgColor = '';
 
-            if (status && status.grade && status.grade !== '-') {
+            if (status && status.unbekannt) {
+                // Export konnte den Stand nicht lesen — Luecke, kein ❌
+                cellContent = `<span class="zelle-unbekannt" title="${escapeAttribut('Stand unbekannt: ' + (status.grund || ''))}">?</span>`;
+            } else if (status && status.grade && status.grade !== '-') {
                 cellContent = `<strong>${formatStarGrade(status.grade)}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status && status.rating && status.rating !== '-') {
@@ -3105,7 +3238,9 @@ function generatePflichtTableFromStructuredTables() {
             let cellClass = 'progress-cell';
             let bgColor = '';
 
-            if (status.grade && status.grade != '-') {
+            if (status.unbekannt) {
+                cellContent = `<span class="zelle-unbekannt" title="${escapeAttribut('Stand unbekannt: ' + (status.grund || ''))}">?</span>`;
+            } else if (status.grade && status.grade != '-') {
                 cellContent = `<strong>${formatStarGrade(status.grade)}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
             } else if (status.status === 'Zur Bewertung abgegeben') {
@@ -4108,6 +4243,9 @@ function generateExamTable() {
                 console.log(`DEBUG EXAM: No status found for ${activity.activity_type} "${activity.title}" for user ${userName}`);
                 cellContent = '❓ Nicht gefunden';
                 cellClass = 'status-not-submitted';
+            } else if (status.unbekannt) {
+                cellContent = `<span title="${escapeAttribut('Stand unbekannt: ' + (status.grund || ''))}">?</span>`;
+                cellClass = 'zelle-unbekannt';
             } else if (status.grade && status.grade !== '-') {
                 // WICHTIG: Grade muss VOR Status geprüft werden (z.B. bei Gruppeneinreichungen)
                 // Grade vorhanden - zeige Grade-Wert
@@ -4393,6 +4531,9 @@ function generateAllGroupsExamTable() {
                 // Kein Status gefunden für diesen Benutzer
                 cellContent = '-';
                 cellClass = 'status-not-submitted';
+            } else if (status.unbekannt) {
+                cellContent = `<span title="${escapeAttribut('Stand unbekannt: ' + (status.grund || ''))}">?</span>`;
+                cellClass = 'zelle-unbekannt';
             } else if (status.status === 'Nicht eingereicht' || !status.status) {
                 cellContent = '❌';
                 cellClass = 'status-not-submitted';

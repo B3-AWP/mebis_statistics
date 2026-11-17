@@ -130,7 +130,7 @@ class ReportGenerator:
 
     def _flatten_export(self, data: Dict, quelle: str) -> Dict:
         """
-        Fasst die Kurse eines Exports (Schema 2) zu einer flachen Sicht zusammen.
+        Fasst die Kurse eines Exports (Schema 3) zu einer flachen Sicht zusammen.
 
         Die Berichte betrachten das Schuljahr als Ganzes; die Trennung nach
         Halbjahren interessiert hier nicht. Kategorien und manuelle
@@ -138,9 +138,9 @@ class ReportGenerator:
         Gruppen stehen ohnehin schon kursuebergreifend oben.
         """
         schema = data.get('schema')
-        if schema != 2:
+        if schema != 3:
             raise ValueError(
-                f"Export '{quelle}' hat Schema {schema!r}, erwartet wird 2. "
+                f"Export '{quelle}' hat Schema {schema!r}, erwartet wird 3. "
                 f"Altformate aus dem Vorjahr werden nicht mehr gelesen."
             )
 
@@ -229,9 +229,22 @@ class ReportGenerator:
         # Insertionsreihenfolge beibehalten (Python-Dict seit 3.7 geordnet)
         return [{'title': t, **v} for t, v in items_by_title.items()]
 
+    @staticmethod
+    def _ist_unbekannt(status: Optional[Dict]) -> bool:
+        """Der Export konnte den Stand nicht lesen (Schema 3, "unbekannt")."""
+        return bool(status) and bool(status.get('unbekannt'))
+
+    def _fehlt_text(self, status: Optional[Dict]) -> str:
+        """Text fuer eine Aufgabe ohne Abgabe — oder mit unbekanntem Stand.
+
+        Die Berichte gehen an Lernende: Eine Luecke im Export darf dort
+        nicht als "nicht abgegeben" erscheinen.
+        """
+        return 'Stand unbekannt' if self._ist_unbekannt(status) else 'nicht abgegeben'
+
     def _is_quiz_submitted(self, status: Dict) -> bool:
         """Quiz gilt als abgegeben wenn Status nicht explizit 'nicht eingereicht'"""
-        if not status:
+        if not status or self._ist_unbekannt(status):
             return False
         s = status.get('status', '')
         return s not in ('Nicht eingereicht', 'Nicht abgeschlossen', '')
@@ -262,6 +275,8 @@ class ReportGenerator:
                 if qid in all_quiz:
                     status = all_quiz[qid]
                     break
+            if self._ist_unbekannt(status):
+                return ('Stand unbekannt', None)
             if not self._is_quiz_submitted(status):
                 return ('—', None)
             grade = status.get('grade', '-') or '-'
@@ -277,6 +292,8 @@ class ReportGenerator:
                         status = s
                         break
                     status = status or s
+            if self._ist_unbekannt(status):
+                return ('Stand unbekannt', None)
             if not status or not status.get('submission_time'):
                 return ('—', None)
             grade_val = status.get('grade', '')
@@ -410,7 +427,7 @@ class ReportGenerator:
                 if not self._is_quiz_submitted(status):
                     rows.append([
                         Paragraph(title, styles['cell']),
-                        Paragraph('nicht abgegeben', styles['cell_missing']), '—',
+                        Paragraph(self._fehlt_text(status), styles['cell_missing']), '—',
                     ])
                 else:
                     sub_time = self._format_submission_time(status.get('submission_time')) or '—'
@@ -431,7 +448,7 @@ class ReportGenerator:
                 if not status or not status.get('submission_time'):
                     rows.append([
                         Paragraph(title, styles['cell']),
-                        Paragraph('nicht abgegeben', styles['cell_missing']), '—',
+                        Paragraph(self._fehlt_text(status), styles['cell_missing']), '—',
                     ])
                 else:
                     sub_time = self._format_submission_time(status['submission_time'])
@@ -468,11 +485,11 @@ class ReportGenerator:
             if item_type == 'quiz':
                 status = all_quiz_status_by_id.get(item_id)
                 if not self._is_quiz_submitted(status):
-                    if cutoff:
+                    if cutoff and not self._ist_unbekannt(status):
                         continue  # nicht abgegeben → bei Datumsfilter ausblenden
                     rows.append([
                         Paragraph(title, styles['cell']),
-                        Paragraph('nicht abgegeben', styles['cell_missing']), '—',
+                        Paragraph(self._fehlt_text(status), styles['cell_missing']), '—',
                     ])
                 else:
                     raw_time = status.get('submission_time')
@@ -491,20 +508,20 @@ class ReportGenerator:
             else:  # assignment
                 status = all_assign_status_by_id.get(item_id)
                 if not status:
-                    if cutoff:
+                    if cutoff and not self._ist_unbekannt(status):
                         continue
                     rows.append([
                         Paragraph(title, styles['cell']),
-                        Paragraph('nicht abgegeben', styles['cell_missing']), '—',
+                        Paragraph(self._fehlt_text(status), styles['cell_missing']), '—',
                     ])
                     continue
                 raw_time = status.get('submission_time')
                 if not raw_time:
-                    if cutoff:
+                    if cutoff and not self._ist_unbekannt(status):
                         continue
                     rows.append([
                         Paragraph(title, styles['cell']),
-                        Paragraph('nicht abgegeben', styles['cell_missing']), '—',
+                        Paragraph(self._fehlt_text(status), styles['cell_missing']), '—',
                     ])
                 else:
                     if cutoff:
@@ -670,11 +687,11 @@ class ReportGenerator:
                 all_quiz = {q['id']: q.get('status', {}) for q in activities.get('quizzes', [])}
                 status = all_quiz.get(item_id)
                 if not self._is_quiz_submitted(status):
-                    if cutoff:
+                    if cutoff and not self._ist_unbekannt(status):
                         continue  # nicht abgegeben → bei Datumsfilter ausblenden
                     rows.append([
                         Paragraph(display_name, styles['cell']), '—',
-                        Paragraph('nicht abgegeben', styles['cell_missing']), klasse,
+                        Paragraph(self._fehlt_text(status), styles['cell_missing']), klasse,
                     ])
                 else:
                     raw_time = status.get('submission_time')
@@ -694,11 +711,11 @@ class ReportGenerator:
                 status = all_assign.get(item_id)
                 raw_time = status.get('submission_time') if status else None
                 if not status or not raw_time:
-                    if cutoff:
+                    if cutoff and not self._ist_unbekannt(status):
                         continue
                     rows.append([
                         Paragraph(display_name, styles['cell']), '—',
-                        Paragraph('nicht abgegeben', styles['cell_missing']), klasse,
+                        Paragraph(self._fehlt_text(status), styles['cell_missing']), klasse,
                     ])
                 else:
                     if cutoff:
@@ -803,9 +820,10 @@ class ReportGenerator:
             sub_time = self._format_submission_time(raw_time) if raw_time else None
 
             if raw_time is None:
+                fehlt = 'Stand unbekannt' if grade_display == 'Stand unbekannt' else 'nicht abgegeben'
                 rows.append([
                     Paragraph(display_name, styles['cell']), '—',
-                    Paragraph('nicht abgegeben', styles['cell_missing']), klasse,
+                    Paragraph(fehlt, styles['cell_missing']), klasse,
                 ])
             else:
                 rows.append([

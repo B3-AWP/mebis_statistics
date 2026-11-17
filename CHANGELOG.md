@@ -2,6 +2,192 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [Unreleased] - 2026-11-17 — Prüfbericht statt Dateigröße
+
+### 🔗 Dashboard: Links öffnen grundsätzlich im neuen Tab
+
+`dashboard.html` setzt `<base target="_blank">`. Die vorhandenen Links
+(Aufgaben, „bewertbar", Checklisten, „Bewertung überschreiben") hatten das
+schon einzeln; neu gilt es zentral auch für jeden künftigen Link ohne eigenes
+`target`. Der CSV-Download setzt ausdrücklich `target="_self"`, damit kein
+leerer Tab aufgeht.
+
+### 🛡️ Export: unbekannt statt still „nicht abgegeben"
+
+Fiel eine Bewertungsseite aus (Zeitüberschreitung, fehlende Spalte, Fehler im
+Thread), lieferte der Export eine leere Liste — die ganze Klasse stand bei
+dieser Aufgabe als „nicht abgegeben" da. Die Validierung schlug dabei nie an,
+weil das Status-Wörterbuch den Schlüssel trotzdem enthielt. Jetzt wird die
+Seite bis zu dreimal versucht; bleibt sie unlesbar, ist der Status
+**unbekannt** (`"unbekannt": true`, `"grund": …`).
+
+Dasselbe gilt für Personen, die laut Gruppe zur Klasse gehören, aber in einer
+sonst vollständig gelesenen Bewertungstabelle oder in der Bewerterübersicht
+fehlen, und für Pflicht-Tests ohne Spalte in der Bewerterübersicht.
+
+### 🛡️ Export: aufgeteilte Seiten werden nachgeladen
+
+Bewerterübersicht, Bewertungsseite, Testbericht und Fortschrittsbericht
+(Gruppenmitglieder) teilen ihre Tabellen je nach den im Moodle-Konto
+gespeicherten Einstellungen auf. Der Export las bisher nur die erste Seite;
+Personen jenseits davon fehlten in jedem Lauf gleich — auch für den
+Größenvergleich unsichtbar. Neu: `lade_alle_seiten()` folgt der Seitenleiste
+(`page=`/`start=`), übernimmt aber nur die Nummer, nie den Link, damit kein
+Filter (Buchstabenleiste) in der Sitzung hängen bleibt.
+
+### 🛡️ Export: Prüfbericht ersetzt den Größenvergleich
+
+Der Vergleich der Dateigröße mit dem Vorlauf (und das automatische Verwerfen
+einer >1 % kleineren Datei) entfällt. An seine Stelle tritt ein Vergleich der
+Zählwerte je Aufgabe und Klasse (abgegeben, bewertet) — ein Rückgang ist eine
+Warnung mit Ort („Quiz HTML, IFA12A: abgegeben 23 → 0"), kein Abbruch. Lücken,
+Rückgänge, fehlende Kurse und Hinweise stehen im Export unter `pruefbericht`,
+am Ende des Logs und im Dashboard über der Tabelle.
+
+### 🐛 Export: Abgaben späterer Kurse gingen verloren
+
+`main()` übernahm die Gruppen samt Personendaten nur vom ersten Kurs; die
+Abgaben aller weiteren Kurse wurden verworfen. Solange das 2. Halbjahr gesperrt
+war, fiel das nicht auf — ab dessen Freischaltung hätte dort jede Person 0 %
+gehabt. `fuehre_gruppen_zusammen()` legt die Aktivitäten je Person über alle
+Kurse zusammen.
+
+### 📊 Dashboard, CSV, Bericht: vorläufige Noten
+
+- Übersicht: Quantität als Untergrenze („mind. 45 %"), Note und
+  Mitarbeitsnote mit der Marke **vorl.**, Tooltip nennt die betroffenen
+  Aufgaben. Im Klassenvergleich trägt die Klasse die Marke, sobald eine
+  Person betroffen ist.
+- Aufgabentabellen: **?** statt ❌, Grund im Tooltip.
+- CSV: neue Spalte „Vorläufig", Aufgabenzellen „unbekannt".
+- Schülerbericht (PDF): „Stand unbekannt" statt „nicht abgegeben"; der
+  Datumsfilter blendet unbekannte Einträge nicht aus.
+
+### ⚠️ Exportformat: Schema 3
+
+`EXPORT_SCHEMA_VERSION` 2 → 3 in Exporter, Backend und Bericht. Schema-2-Exporte
+werden abgelehnt — sie hätten jede Lücke als „nicht abgegeben" geführt.
+**Nach dem Update einen neuen Export erzeugen.**
+
+### 🧭 ByCS: Machbarkeitstest als ZIP
+
+Neu unter `bycs/probe/`: eine Seite, die — als Aktivität „Datei" in ByCS
+hochgeladen — dieselben Moodle-Seiten abruft wie der Export und meldet, ob sie
+lesbar sind, ob die Tabellen da sind und ob Moodle sie aufteilt. Nur
+Zählwerte, keine Namen. Gebaut mit `python scripts/build_bycs_zip.py` nach
+`data/bycs/` (neu in `.gitignore`). Vorstufe für einen Export direkt im
+Browser ohne Python und Selenium.
+
+### 🧭 ByCS: Machbarkeitstest bestanden — Lücke bestätigt
+
+Der Test in ByCS (Kurs 2491549) zeigt: Alle Seiten sind aus einer
+hochgeladenen Seite lesbar. Er bestätigt zugleich die Lücke im bisherigen
+Export: Der Fortschrittsbericht teilt mit `page=` nach 25 Personen auf. Im
+Export vom 17.11.2026 hatten alle vier Klassen **genau 25** Personen (Summe
+104), die Bewerterübersicht kennt 115 — rund 11 Schüler:innen fehlten im
+Dashboard ganz. Der neue Export lädt die Folgeseiten nach.
+
+### 🚀 Export im Browser (`bycs/export/`)
+
+Erzeugt dieselbe Exportdatei (Schema 3) wie `scripts/export_data.py`, in der
+Moodle-Sitzung der angemeldeten Lehrkraft: Eins-zu-eins-Übertragung von
+`export_course`/`main` samt Prüfschichten nach JavaScript (`fetch` +
+`DOMParser`, 4 parallele Abrufe, 3 Versuche je Seite). Die Datei wird
+heruntergeladen und im bestehenden Dashboard über „Datei laden" geöffnet.
+ZIP: `python scripts/build_bycs_zip.py export` (enthält eine Kopie der
+`plan.json`). Für den Parallelbetrieb vergleicht
+`tests/vergleiche_exporte.py` zwei Exporte Feld für Feld.
+
+### 🐛 Bewerterübersicht im Bearbeitungsmodus
+
+Der erste Parallelvergleich (Python 12:48 gegen Browser 21:20) fand 2912
+abweichende Testbewertungen — alle mit derselben Ursache: Ist in Moodle der
+Bearbeitungsmodus an, trägt jede Zelle der Bewerterübersicht ein Eingabefeld
+und eine versteckte Beschriftung „Name, Aktivität, Bewertung". Leere
+Testzellen wurden so als bewertet gelesen. Beide Exporter entfernen jetzt
+versteckte Hilfstexte, lesen Eingabefelder über ihren Wert und werten eine
+leere Zelle als „-"; der Browser-Export vermerkt den Bearbeitungsmodus im
+Prüfbericht. Abgesehen davon waren die beiden Exporte Feld für Feld gleich
+(übrige Abweichungen: echte neue Abgaben zwischen den Läufen).
+`tests/vergleiche_exporte.py` maskiert jetzt lange Texte, damit kein Name in
+der Ausgabe landet.
+
+### 🚀 Dashboard in ByCS (`bycs/dashboard/`)
+
+Das komplette Dashboard läuft als ZIP in ByCS: Beim Öffnen liest es Moodle in
+der Sitzung der Lehrkraft und zeigt das Ergebnis sofort an.
+`aufbereitung.js` überträgt `_process_dashboard_data` samt Hilfsfunktionen
+eins zu eins nach JavaScript — einschließlich Pythons `round()` (Gleichstand
+zur geraden Ziffer auf dem exakten Binärwert) und `sum()` (Neumaier-Summation
+seit Python 3.12; ohne sie kippte ein Klassenschnitt von 66,59 auf 66,58).
+`tests/vergleiche_aufbereitung.py` vergleicht Python und JS; am echten Export
+vom 17.11.2026 und an den Testdaten identisch. `dashboard.js` bleibt
+unverändert und wird beim Bauen aus `src/dashboard/static/` übernommen; der
+Startcode `start.js` ersetzt nur die drei Serveraufrufe.
+
+### ⚡ Export: ein Abruf je Aufgabe weniger, Browser-Export paralleler
+
+- **Gruppenabfrage entfällt** (Python `get_assignment_groups`, JS
+  `aufgabenGruppen`). Für jede Aufgabe wurde zusätzlich die Aufgabenseite
+  geöffnet, um das Gruppen-Auswahlfeld zu lesen. Ergebnis in allen Exporten
+  vom 17.11.2026: 29 × „all"; gelesen hat das Feld außer dem Abgleich
+  niemand. Das Auswahlfeld zeigt zudem die gerade gewählte Gruppe der
+  Lehrkraft, keine Einschränkung der Aufgabe, und die Bewertungsseite wird
+  ohnehin mit `group=0` gelesen. Das Feld `groups` bleibt im Export („all"),
+  das Format ändert sich nicht. Spart rund 29 von ~157 Seitenabrufen je Kurs;
+  im Python-Export (Selenium rendert jede Seite) am deutlichsten.
+- **Browser-Export: 6 statt 4 gleichzeitige Abrufe.** Der Python-Export
+  bleibt bei 2 Chrome-Instanzen — jede weitere ist ein eigener Browser mit
+  eigener Anmeldung.
+
+### 🔄 ByCS-Dashboard: einzelne Pflichtaufgabe nachladen
+
+Im Reiter *Pflichtaufgaben* steht über jeder Aufgabe ein ⟳-Knopf. Er liest
+nur diese Aufgabe neu aus Moodle, trägt sie in den Export ein und rechnet das
+Dashboard neu — Klasse, Halbjahr und Reiter bleiben. Dafür ist
+`exportiereKurs` in `bycs/export/exporter.js` in Bausteine zerlegt
+(`liesAufgabe`, `liesTestzeiten`, `liesBewerteruebersichtKomplett`,
+`setzeStatus`); Gesamtexport und `aktualisiereAktivitaet` nutzen dieselben,
+der Gesamtexport liefert unverändert dasselbe Ergebnis. `dashboard.js` zeigt
+den Knopf nur, wenn `window.pflichtSync` existiert — also nur in ByCS.
+Funktioniert auch nach „Datei laden".
+
+### 🙈 Dashboard: Tab „Leistungsnachweise" ausgeblendet
+
+Der Tab erkennt Leistungsnachweise am Namen der Notenbuch-Kategorie
+(„Leistungsnachweise" oder „📊"). Der Kurs 2026/27 hat keine solche Kategorie,
+der Tab war leer. Der Schalter `SHOW_LEISTUNGSNACHWEISE` oben in
+`dashboard.js` steht auf `false`; mit `true` ist der Tab wieder da.
+`showTab('exam')` leitet auf die Übersicht um. Code, CSV-Spalten und
+PDF-Bericht bleiben unverändert.
+
+### 📐 Dashboard nutzt den ganzen Bildschirm
+
+- Die Seite war auf 1280 px Breite begrenzt (`--max-width`); jetzt keine
+  Obergrenze mehr — breite Klassentabellen nutzen große Bildschirme aus.
+- Tabellenkästen scrollten ab 70 % der Fensterhöhe; jetzt erst ab
+  `100vh − 120px`. Der Kasten bleibt, damit der Tabellenkopf beim Scrollen
+  stehen bleibt.
+- ByCS: Zeigt Moodle das Dashboard eingebettet oder im Pop-up, erscheint
+  oben „Im ganzen Fenster öffnen". Empfohlene Darstellung der Aktivität:
+  „Öffnen" oder „Im neuen Fenster".
+
+### 🐛 Dashboard: „Stand" der Datei wurde nie angezeigt
+
+`applyDashboardData` las `last_updated` und `environment` aus den Kursdaten
+statt aus der Gesamtantwort — seit der Umstellung auf mehrere Kurse blieb die
+Anzeige „Stand" in der Navigation leer. Behoben in `dashboard.js`, gilt lokal
+wie in ByCS.
+
+### 🧪 Tests
+
+- `tests/test_pruefung.py`: Seitenleisten, Nachladen (mit Browser- und
+  Sitzungsattrappen), Abgleich in `export_course` an einem simulierten Kurs,
+  Verlaufsvergleich, Zusammenführen der Kurse.
+- `tests/test_report_unbekannt.py`: Schülerbericht.
+- Testdaten um „Dora" mit unbekannter 10-Stunden-Aufgabe ergänzt; Frontend-
+  und API-Stufe prüfen Untergrenze, Marke und Prüfbericht.
+
 ## [Unreleased] - 2026-11-17 — Tabellen in einem Rutsch lesen
 
 ### 🙈 Dashboard: „Letzte Abgaben je Gruppe" ausgeblendet
