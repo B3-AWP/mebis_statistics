@@ -250,6 +250,9 @@ Nicht „aufräumen" ohne Rückfrage, aber auch nicht als Vorbild nehmen:
 - `EXPORT_CHECKLISTS = False` in [exporter.py:44](src/export/exporter.py#L44)
   schaltet den Checklisten-Export ab; die Auswertungspfade dafür existieren im
   Backend und Frontend weiterhin.
+- `SHOW_RECENT_SUBMISSIONS = false` in
+  [dashboard.js](src/dashboard/static/dashboard.js) blendet „Letzte Abgaben
+  je Gruppe" aus; `build_recent_submissions` im Backend rechnet weiter mit.
 
 ## Arbeitsweise
 

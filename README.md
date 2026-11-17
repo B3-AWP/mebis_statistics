@@ -238,7 +238,7 @@ LOG_LEVEL=INFO                # DEBUG/INFO/WARN/ERROR
 MODE_HEADLESS=True            # Browser beim Export unsichtbar
 MODE_WAITTIME=5               # Wartezeit in Sekunden
 MEBIS_IGNORED_GROUPS=IT_Lehrkraft, Verkuerzt
-RECENT_SUBMISSION_DAYS=5      # Zeitfenster "Letzte Abgaben"
+RECENT_SUBMISSION_DAYS=5      # Zeitfenster "Letzte Abgaben" (Sektion derzeit ausgeblendet)
 INACTIVE_THRESHOLD_DAYS=2     # ab wann eine Klasse als inaktiv gilt
 GRADE_MAPPING={"0": "* Nicht akzeptabel", "70": "** Verbesserungsbedarf", "90": "*** Solide Umsetzung", "100": "**** Exzellent"}
 ```
@@ -382,8 +382,10 @@ Das Dashboard ist auf wenige Zeilen verdichtet:
 3. **Kennzahlenleiste** — Ø Pflichtaufgaben, Durchschnittsnote, Ø Note
    Pflichtaufgaben, Quantität, Delta, Qualität und Mitarbeitsnote in
    einer geteilten Zeile.
-4. Darunter **Letzte Abgaben je Gruppe** und die Detailtabelle der
-   gewählten Klasse — welche das ist, bestimmt der Halbjahr-Umschalter.
+4. Darunter die Detailtabelle der gewählten Klasse — welche das ist,
+   bestimmt der Halbjahr-Umschalter. Die frühere Sektion **Letzte Abgaben
+   je Gruppe** ist ausgeblendet; `SHOW_RECENT_SUBMISSIONS = true` in
+   `dashboard.js` blendet sie wieder ein.
 
 ### Pflichtaufgaben-Tabelle
 

@@ -12,6 +12,10 @@ let mitarbeitsnoteConfig = null; // Mitarbeitsnoten-Konfiguration aus Backend
 let courseId = ''; // Moodle-Kurs-ID des aktiven Halbjahres
 let currentHalbjahr = null; // Aktiver Kurs: kurs_id aus plan.json oder 'gesamt'
 
+// "Letzte Abgaben je Gruppe" anzeigen (true = auf der Übersicht einblenden,
+// false = ausgeblendet). Code und Backend-Aggregation bleiben erhalten.
+const SHOW_RECENT_SUBMISSIONS = false;
+
 // Make variables available globally for csv_export.js
 window.dashboardData = dashboardData;
 window.currentGroup = currentGroup;
@@ -75,7 +79,7 @@ function showTab(tabName) {
     // Letzte-Abgaben-Sektion nur bei Übersicht-Tab anzeigen
     const recentSection = document.getElementById('recentSubmissionsSection');
     if (recentSection) {
-        recentSection.style.display = tabName === 'home' ? '' : 'none';
+        recentSection.style.display = SHOW_RECENT_SUBMISSIONS && tabName === 'home' ? '' : 'none';
     }
 
     // Gewählten Tab anzeigen
@@ -1993,6 +1997,11 @@ function generateRecentSubmissionsTable() {
     const container = document.getElementById('recentSubmissionsTable');
     const section = document.getElementById('recentSubmissionsSection');
     if (!container || !section) return;
+
+    if (!SHOW_RECENT_SUBMISSIONS) {
+        section.style.display = 'none';
+        return;
+    }
 
     const recentData = dashboardData && dashboardData.recent_submissions;
 

@@ -4,6 +4,13 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 
 ## [Unreleased] - 2026-11-17 — Tabellen in einem Rutsch lesen
 
+### 🙈 Dashboard: „Letzte Abgaben je Gruppe" ausgeblendet
+
+Die Sektion auf der Übersicht erscheint nicht mehr. Der Schalter
+`SHOW_RECENT_SUBMISSIONS` oben in `dashboard.js` steht auf `false`; mit
+`true` ist sie wieder da. Rendering-Code, Sortierung, Pflicht-Filter und
+die Backend-Aggregation (`build_recent_submissions`) bleiben unverändert.
+
 ### ⚡ Export: Batch-Auslesung statt zeilenweisem Selenium
 
 Ein Lauf über einen Kurs (29 Assignments, 28 Quizze, 104 Personen) dauerte
