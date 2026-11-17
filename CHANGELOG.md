@@ -125,6 +125,17 @@ vom 17.11.2026 und an den Testdaten identisch. `dashboard.js` bleibt
 unverändert und wird beim Bauen aus `src/dashboard/static/` übernommen; der
 Startcode `start.js` ersetzt nur die drei Serveraufrufe.
 
+### 🗑️ Exam-Teil entfernt
+
+Quiz-Versuche scrapen und individuelle Korrektur-PDFs erzeugen ist in einem
+anderen Projekt umgesetzt. Entfernt: `src/exam/` (Scraper, PDF-Generator,
+Hilfsfunktionen, README), `scripts/scrape_exams.py`, `scripts/generate_pdfs.py`
+samt `.bat`, dazu `config_manager.get_course_id()` (nur noch dort genutzt)
+und die tote Pfadangabe `quiz_data` im Berichtsgenerator. Der
+Schüler-Übersichtsbericht (`generate_reports.py`) hing nicht am Exam-Teil.
+Lokale Daten in `data/quiz_data/` und `data/LNW/` bleiben unberührt und
+weiterhin gitignored.
+
 ### ⚡ Export: ein Abruf je Aufgabe weniger, Browser-Export paralleler
 
 - **Gruppenabfrage entfällt** (Python `get_assignment_groups`, JS

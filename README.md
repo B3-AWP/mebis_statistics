@@ -13,7 +13,6 @@
 ## Idee
 Dieses Projekt bietet mehrere Tools für die Arbeit mit Mebis-Kursen:
 - **Dashboard**: Visualisiert den Lernfortschritt einer Klasse
-- **Exam Scraper**: Scrapt Quiz-Daten und generiert individuelle PDFs für Schüler
 - **Report-Generator**: Erstellt Schüler-Übersichtsberichte als PDF
 - **Export**: Exportiert Kursdaten als JSON
 
@@ -124,8 +123,6 @@ mebis_statistics/
 │   ├── export_data.py        # Daten-Export starten
 │   ├── start_dashboard.py    # Dashboard starten
 │   ├── generate_reports.py   # Schüler-Übersichtsberichte
-│   ├── scrape_exams.py       # Exam-Scraper starten
-│   ├── generate_pdfs.py      # PDF-Generator starten
 │   └── *.bat/*.cmd           # Windows-Shortcuts
 │
 ├── src/                   # Hauptcode
@@ -137,18 +134,12 @@ mebis_statistics/
 │   │   └── static/              # HTML/JS/CSS
 │   ├── export/               # Export-Module
 │   │   └── exporter.py
-│   ├── report/               # Schüler-Übersichtsberichte
-│   │   └── report_generator.py
-│   └── exam/                 # Exam-Scraper & PDF-Generator
-│       ├── scraper.py
-│       ├── pdf_generator.py
-│       ├── utils.py
-│       └── README.md
+│   └── report/               # Schüler-Übersichtsberichte
+│       └── report_generator.py
 │
 ├── data/                  # Alle Daten (nicht in Git)
-│   ├── quiz_data/            # Gescrapte Quiz-Daten
-│   ├── LNW/                  # Generierte Quiz-PDFs
-│   └── report/               # Schüler-Übersichtsberichte
+│   ├── report/               # Schüler-Übersichtsberichte
+│   └── bycs/                 # gebaute ZIPs für ByCS
 │
 ├── config/                # Konfiguration
 │   ├── .env                  # Credentials & Betrieb (nicht in Git)
@@ -470,23 +461,6 @@ python scripts/generate_reports.py --cutoff-date 2026-12-10
 Erzeugt je Schüler ein PDF unter `data/report/{Klasse}/`, dazu Übersichten
 je Pflichtaufgabe. `--cutoff-date` blendet Abgaben vor dem Stichtag aus.
 
-### 4. Exam-Scraper & PDF-Generator
-
-Details: [src/exam/README.md](src/exam/README.md)
-
-```bash
-# Quizzes scrapen (3 parallele Worker)
-python scripts/scrape_exams.py
-
-# Schneller mit mehr Workers
-python scripts/scrape_exams.py --max-workers 5
-
-# PDFs generieren (nur falsche Antworten)
-python scripts/generate_pdfs.py --only-incorrect
-```
-
-PDFs landen in `data/LNW/`, nach Klasse und Quiz sortiert.
-
 ### Workflow
 
 ```
@@ -716,8 +690,3 @@ Prozentwerte der Skala stehen zusätzlich in `plan.json` (`skalen.sterne4`).
 **ImportError beim Starten**
 - Vom Projekt-Root ausführen, nicht aus `scripts/`.
 
-**Exam-Scraper ist langsam**
-- `--max-workers 5` (mehr RAM nötig), Standard ist 3, bei wenig RAM 1–2.
-
-**Screenshots fehlen oder sind abgeschnitten**
-- `MODE_HEADLESS=False` setzen und den Browser beobachten.

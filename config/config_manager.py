@@ -106,18 +106,6 @@ class ConfigManager:
             courses['course_ifa12'] = course_id
         return courses
 
-    def get_course_id(self) -> str:
-        """
-        Holt die Mebis Course ID aus der Umgebungsvariable.
-
-        DEPRECATED: Die Kurse stehen seit 2026/27 in plan.json. Nur noch als
-        Rückfallebene für Skripte, die noch nicht auf den Plan umgestellt sind.
-
-        Returns:
-            Course ID als String
-        """
-        return os.getenv('MEBIS_COURSE_ID', '')
-
     def get_plan_json_path(self) -> str:
         """
         Holt den Pfad zur Planungsdatei plan.json.

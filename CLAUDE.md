@@ -5,14 +5,17 @@ Leitfaden für Claude Code in diesem Repository.
 ## Worum es geht
 
 Lehrkräfte-Werkzeuge für Mebis/BYCS-Moodle-Kurse an einer Berufsschule
-(Fachinformatik). Vier Teile, die sich denselben Stammdatensatz teilen:
+(Fachinformatik). Drei Teile, die sich denselben Stammdatensatz teilen:
 
 | Teil | Einstieg | Zweck |
 |---|---|---|
 | **Export** | `scripts/export_data.py` | Scrapet Moodle per Selenium → eine JSON-Datei je Lauf |
 | **Dashboard** | `scripts/start_dashboard.py` | Flask + Vanilla-JS-Frontend, wertet den Export aus |
 | **Report** | `scripts/generate_reports.py` | Schüler-Übersichts-PDFs aus dem Export |
-| **Exam** | `scripts/scrape_exams.py`, `scripts/generate_pdfs.py` | Quiz-Versuche scrapen → individuelle Korrektur-PDFs |
+
+Dazu dieselben Teile als ZIP für ByCS (`bycs/`, siehe unten). Der frühere
+Exam-Teil (Quiz-Versuche scrapen, Korrektur-PDFs) ist entfernt — er ist in
+einem anderen Projekt umgesetzt.
 
 Sprache: Code, Kommentare, Docstrings und Logs sind **deutsch** (mit
 englischen Fachbegriffen und teils englischen Bezeichnern in Altbeständen).
@@ -166,7 +169,6 @@ src/
   dashboard/    backend.py (Flask, ~1.8k Z.) + static/ (dashboard.js ~5.4k Z.)
   export/       exporter.py (Selenium-Scraper, ~2.5k Z.), pruefung.py (Prüfschichten)
   report/       report_generator.py (ReportLab)
-  exam/         scraper.py, pdf_generator.py, utils.py  → eigene README.md
 bycs/           Browser-Seiten zum Hochladen in ByCS (ZIP via scripts/build_bycs_zip.py)
   probe/        Machbarkeitstest: liest die Export-Seiten in der Lehrkraft-Sitzung
   export/       Browser-Export: exporter.js = JS-Gegenstück zu exporter.py (Schema 3)
@@ -175,7 +177,8 @@ bycs/           Browser-Seiten zum Hochladen in ByCS (ZIP via scripts/build_bycs
                 (Einzel-Nachladen) bereit; ZIP aus src/dashboard/static/
 config/         config_manager.py (nur .env), logger_config.py, .env (nicht in Git)
 tests/
-data/           quiz_data/, LNW/, report/, export/  — alles gitignored
+data/           report/, export/, bycs/  — gitignored (quiz_data/, LNW/ aus dem
+                früheren Exam-Teil bleiben ignoriert, falls lokal noch vorhanden)
 ```
 
 Datenfluss:
@@ -265,10 +268,8 @@ python scripts/export_data.py --test             # 5 Aktivitäten je Typ
 # Dashboard → http://localhost:5555
 python scripts/start_dashboard.py
 
-# Berichte / Exams
+# Berichte
 python scripts/generate_reports.py [--cutoff-date YYYY-MM-DD]
-python scripts/scrape_exams.py [--max-workers 5] [--since-date TT.MM.JJJJ]
-python scripts/generate_pdfs.py [--only-incorrect]
 ```
 
 ### Tests
@@ -303,10 +304,6 @@ Nicht „aufräumen" ohne Rückfrage, aber auch nicht als Vorbild nehmen:
   `python start_dashboard.py` bzw. `python ./export_data.py` ohne Pfad auf —
   das funktioniert nur, wenn das CWD `scripts/` ist, was den Imports
   widerspricht. Der Python-Aufruf vom Root aus ist der verlässliche Weg.
-- [src/exam/README.md](src/exam/README.md) ist lesenswert für die
-  Quiz-Datenstruktur, nennt in Beispielen aber noch alte Modulnamen
-  (`exam_scraper.py` statt `scripts/scrape_exams.py`) und die entfallene
-  Team-Ebene.
 - `EXPORT_CHECKLISTS = False` in [exporter.py:44](src/export/exporter.py#L44)
   schaltet den Checklisten-Export ab; die Auswertungspfade dafür existieren im
   Backend und Frontend weiterhin.

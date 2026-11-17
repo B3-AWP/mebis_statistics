@@ -5,7 +5,7 @@
 Schüler-Übersichtsbericht Generator
 
 Erstellt pro Schüler eine druckbare PDF-Übersicht mit:
-- Leistungsnachweisen (aus quiz_data/)
+- Leistungsnachweisen (aus dem neuesten Export-JSON)
 - Pflichtaufgaben (aus dem neuesten Export-JSON), A→Z sortiert
 """
 
@@ -61,7 +61,6 @@ class ReportGenerator:
 
     def __init__(self):
         self.project_root = _project_root
-        self.data_dir = os.path.join(self.project_root, 'data', 'quiz_data')
         # EXPORT_FOLDER aus .env (absoluter oder relativer Pfad)
         export_folder = config_manager.get_export_folder()
         self.export_dir = export_folder if os.path.isabs(export_folder) else os.path.join(self.project_root, export_folder)
@@ -196,7 +195,7 @@ class ReportGenerator:
     def _get_lnw_items(self, export_data: Dict) -> List[Dict]:
         """
         Gibt alle LNW-Items aus der Kategorie 'Zentrale Leistungsnachweise' zurück.
-        Enthält sowohl Quiz-Typen (mit Punkte/Note aus quiz_data) als auch
+        Enthält sowohl Quiz-Typen (Note aus dem Export) als auch
         Assignment-Typen (Code-Review, Review-Talk - mit Status aus Export).
 
         Items mit gleichem Titel werden zusammengeführt (mehrere IDs möglich,
