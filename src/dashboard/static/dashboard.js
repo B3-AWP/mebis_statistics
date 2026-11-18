@@ -645,7 +645,7 @@ function formatDateDe(iso) {
 // Konnte der Export eine Moodle-Seite nicht vollstaendig lesen, ist der
 // Stand der betroffenen Aufgaben unbekannt — nicht "nicht abgegeben".
 // Solche Aufgaben zaehlen nicht als erledigt; die Quantitaet ist dann
-// eine Untergrenze ("mind.") und die Mitarbeitsnote vorlaeufig. Der
+// eine Untergrenze ("unvollständig (mindestens) …") und die Mitarbeitsnote vorlaeufig. Der
 // wahre Wert kann nur hoeher liegen.
 
 // Ob die Werte einer Person auf unvollstaendigen Daten beruhen.
@@ -2041,7 +2041,7 @@ function generateGroupProgressTable(users) {
         // Unbekannter Stand einzelner Aufgaben: Quantitaet ist eine
         // Untergrenze, alle daraus folgenden Noten sind vorlaeufig.
         const vorlaeufig = istVorlaeufig(user);
-        const mind = vorlaeufig ? 'mind. ' : '';
+        const mind = vorlaeufig ? 'unvollständig (mindestens) ' : '';
 
         html += vorlaeufig ? '<tr class="zeile-vorlaeufig">' : '<tr>';
         html += `<td class="person-name"><strong>${user.name}</strong></td>`;
@@ -2217,7 +2217,7 @@ function generateRecentSubmissionsTable() {
         const fmtBewertbar = (sub, url, type, isBewertbar, gradeDisplay) => {
             const showBewertbar = type === 'assignment' && gradeDisplay == null;
             if (showBewertbar && url && groupId) {
-                return `<a href="${bewertungsUrl(url, groupId)}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                return `<a href="${bewertungsUrl(url, groupId, sub?.user_id)}" target="_blank" class="status-text-warning">bewertbar</a>`;
             }
             if (showBewertbar) {
                 return '<span class="status-text-warning">bewertbar</span>';
@@ -2683,23 +2683,28 @@ function getSchoolDaysDiff(fromDate, toDate) {
 // ============================================================================
 
 /**
- * Baut den Link auf die Bewertungsuebersicht einer Aufgabe.
+ * Baut den Link auf die Bewertungsansicht einer Aufgabe.
  *
  * `action=grader` oeffnet direkt die Korrekturansicht statt der
  * Aufgaben-Startseite; `group` schraenkt auf die gewaehlte Klasse ein.
- * Welche Abgaben dort gelistet werden, steuert Moodle ueber die
- * Nutzereinstellung `assign_filter` — die laesst sich nicht per URL
- * setzen, sie bleibt auf dem zuletzt gewaehlten Wert stehen.
+ * `userid` waehlt die Person aus, deren Zelle angeklickt wurde — ohne
+ * den Parameter zeigt Moodle die erste Person der gefilterten Liste,
+ * der Link fuehrte also zur falschen Abgabe. Welche Abgaben in der
+ * Liste stehen, steuert Moodle ueber die Nutzereinstellung
+ * `assign_filter` — die laesst sich nicht per URL setzen.
  *
  * \param {string} url - Basis-URL der Aufgabe (mod/assign/view.php?id=…)
  * \param {string} groupId - Moodle-Gruppen-ID der aktuellen Klasse
- * \returns {string} URL der Bewertungsuebersicht
+ * \param {string} [userId] - Moodle-Benutzer-ID der zu bewertenden Person
+ * \returns {string} URL der Bewertungsansicht
  */
-function bewertungsUrl(url, groupId) {
+function bewertungsUrl(url, groupId, userId) {
     if (!url) return '#';
-    const trenner = url.includes('?') ? '&' : '?';
-    const gruppe = groupId ? `${trenner}group=${groupId}` : '';
-    return `${url}${gruppe}${gruppe ? '&' : trenner}action=grader`;
+    const parameter = [];
+    if (groupId) parameter.push(`group=${encodeURIComponent(groupId)}`);
+    parameter.push('action=grader');
+    if (userId) parameter.push(`userid=${encodeURIComponent(userId)}`);
+    return `${url}${url.includes('?') ? '&' : '?'}${parameter.join('&')}`;
 }
 
 /**
@@ -2849,7 +2854,7 @@ function pflichtStatusZelle(status, aktivitaet, groupId) {
     } else if (status && status.status === 'Zur Bewertung abgegeben') {
         // Nur Aufgaben lassen sich direkt bewerten, Quizzes nicht.
         if (aktivitaet.activity_type !== 'quiz' && groupId) {
-            cellContent = `<a href="${bewertungsUrl(aktivitaet.url, groupId)}" target="_blank" class="status-text-warning">bewertbar</a>`;
+            cellContent = `<a href="${bewertungsUrl(aktivitaet.url, groupId, status.user_id)}" target="_blank" class="status-text-warning">bewertbar</a>`;
         } else {
             cellContent = '<span class="status-text-warning">bewertbar</span>';
         }
@@ -3126,7 +3131,7 @@ function generatePflichtTableFromActivities() {
                 // For assignments (type "Aufgabe"), create hyperlink with group parameter
                 // Only create link for non-quiz activities (i.e., assignments)
                 if (assignment.activity_type !== 'quiz' && groupId) {
-                    cellContent = `<a href="${bewertungsUrl(assignment.url, groupId)}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                    cellContent = `<a href="${bewertungsUrl(assignment.url, groupId, status.user_id)}" target="_blank" class="status-text-warning">bewertbar</a>`;
                 } else {
                     cellContent = '<span class="status-text-warning">bewertbar</span>';
                 }
@@ -3247,7 +3252,7 @@ function generatePflichtTableFromStructuredTables() {
                 // For assignments (type "Aufgabe"), create hyperlink with group parameter
                 // Only create link for non-quiz activities (i.e., assignments)
                 if (row.assignment_type !== 'quiz' && groupId) {
-                    cellContent = `<a href="${bewertungsUrl(row.assignment_url, groupId)}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                    cellContent = `<a href="${bewertungsUrl(row.assignment_url, groupId, status.user_id)}" target="_blank" class="status-text-warning">bewertbar</a>`;
                 } else {
                     cellContent = '<span class="status-text-warning">bewertbar</span>';
                 }
@@ -4327,10 +4332,7 @@ function generateExamTable() {
                 // Zur Bewertung abgegeben - zeige "bewertbar" als Link für Aufgaben
                 // Only create link for non-quiz activities (i.e., assignments)
                 if (activity.activity_type !== 'quiz' && groupId) {
-                    const assignmentUrl = activity.url.includes('?')
-                        ? `${activity.url}&group=${groupId}`
-                        : `${activity.url}?group=${groupId}`;
-                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning">bewertbar</a>`;
+                    cellContent = `<a href="${bewertungsUrl(activity.url, groupId, status.user_id || userId)}" target="_blank" class="status-text-warning">bewertbar</a>`;
                 } else {
                     cellContent = 'bewertbar';
                 }
@@ -4593,10 +4595,7 @@ function generateAllGroupsExamTable() {
             } else if (status.status === 'Zur Bewertung abgegeben' || status.status === 'Abgegeben') {
                 // For "all groups" view, use group=0
                 if (activity.activity_type !== 'quiz') {
-                    const assignmentUrl = activity.url.includes('?')
-                        ? `${activity.url}&group=0`
-                        : `${activity.url}?group=0`;
-                    cellContent = `<a href="${assignmentUrl}" target="_blank" class="status-text-warning" style="font-size: 0.8em;">bewertbar</a>`;
+                    cellContent = `<a href="${bewertungsUrl(activity.url, '0', status.user_id || user.userId)}" target="_blank" class="status-text-warning" style="font-size: 0.8em;">bewertbar</a>`;
                 } else {
                     cellContent = '<span style="font-size: 0.8em;">bewertbar</span>';
                 }

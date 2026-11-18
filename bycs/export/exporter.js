@@ -134,7 +134,35 @@ async function abrufen(url) {
     if (!antwort.ok) throw new SeiteUnvollstaendig(`HTTP ${antwort.status}`);
     const html = await antwort.text();
     statistik.seiten++;
-    return new DOMParser().parseFromString(html, 'text/html');
+    const dok = new DOMParser().parseFromString(html, 'text/html');
+    pruefeNamensfilter(dok);
+    return dok;
+}
+
+// Wie pruefung.ohne_namensfilter: Die Buchstabenleiste ist ein Filter, den
+// Moodle im Konto speichert. Jeder Abruf einer Personentabelle setzt ihn
+// leer — tifirst/tilast (Bewertungsseite, Testbericht, Fortschritt) und
+// sifirst/silast (Bewerteruebersicht, Singleview). Unbekannte Parameter
+// ignoriert Moodle.
+const NAMENSFILTER_PARAMETER = ['tifirst', 'tilast', 'sifirst', 'silast'];
+
+function ohneNamensfilter(url) {
+    const u = new URL(url);
+    NAMENSFILTER_PARAMETER.forEach(p => u.searchParams.set(p, ''));
+    return u.toString();
+}
+
+// Wie pruefung.pruefe_namensfilter: nur bei eindeutigem Befund — ein
+// ausgewaehlter Buchstabe — ist die Seite unvollstaendig.
+function pruefeNamensfilter(dok) {
+    const buchstaben = [...dok.querySelectorAll('.initialbar li.active')]
+        .filter(li => !li.classList.contains('initialbarall'))
+        .map(li => (li.textContent || '').trim())
+        .filter(t => t && !['alle', 'all'].includes(t.toLowerCase()));
+    if (buchstaben.length) {
+        throw new SeiteUnvollstaendig(`Namensfilter aktiv (${buchstaben.join(', ')}) — `
+            + 'in Moodle in der Buchstabenleiste „Alle“ wählen');
+    }
 }
 
 // Laedt eine Seite und liest sie; beides wird bei Fehlern wiederholt
@@ -174,8 +202,9 @@ function seitenUrl(url, param, wert) {
     return u.toString();
 }
 
-// Wie exporter.lade_alle_seiten
+// Wie exporter.lade_alle_seiten (samt Zuruecksetzen des Namensfilters)
 async function ladeAlleSeiten(url, lies) {
+    url = ohneNamensfilter(url);
     const ergebnisse = [];
     const erste = await ladeGeprueft(url, lies);
     ergebnisse.push(erste.wert);
@@ -545,8 +574,8 @@ async function liesAufgabe(a, kursId) {
         if (a.grade_item_id) {
             let daten = {};
             try {
-                daten = (await ladeGeprueft(`${BASIS}/grade/report/singleview/index.php?id=${kursId}`
-                    + `&userid=0&itemid=${a.grade_item_id}&item=grade&page=0&perpage=0`, liesSingleview)).wert;
+                daten = (await ladeGeprueft(ohneNamensfilter(`${BASIS}/grade/report/singleview/index.php?id=${kursId}`
+                    + `&userid=0&itemid=${a.grade_item_id}&item=grade&page=0&perpage=0`), liesSingleview)).wert;
             } catch (e) { /* Datum ist Ergaenzung */ }
             status.forEach(s => { if (daten[s.user_id]) s.submission_time = daten[s.user_id]; });
             for (const s of status) {
@@ -583,8 +612,8 @@ async function liesTestzeiten(q, kursId, hinweise) {
     }
     if (q.grade_item_id) {
         try {
-            const daten = (await ladeGeprueft(`${BASIS}/grade/report/singleview/index.php?id=${kursId}`
-                + `&userid=0&itemid=${q.grade_item_id}&item=grade&page=0&perpage=0`, liesSingleview)).wert;
+            const daten = (await ladeGeprueft(ohneNamensfilter(`${BASIS}/grade/report/singleview/index.php?id=${kursId}`
+                + `&userid=0&itemid=${q.grade_item_id}&item=grade&page=0&perpage=0`), liesSingleview)).wert;
             Object.entries(daten).forEach(([uid, d]) => { if (!zeiten[uid]) zeiten[uid] = d; });
         } catch (e) { /* Datum ist Ergaenzung */ }
     }
@@ -730,7 +759,8 @@ async function exportiereKurs(kurs, plan, melde) {
     const basisUrl = `${BASIS}/report/progress/index.php`;
 
     melde(`Kurs ${kurs.titel}: Aktivitäten und Gruppen`);
-    const fort = await ladeGeprueft(`${basisUrl}?course=${kursId}`, dok => {
+    // Ohne Namensfilter: Findet er niemanden, fehlt die Tabelle samt Aktivitaeten
+    const fort = await ladeGeprueft(ohneNamensfilter(`${basisUrl}?course=${kursId}`), dok => {
         if (!dok.querySelector('select[name="group"]')) throw new SeiteUnvollstaendig('Fortschrittsbericht nicht erkannt');
         return dok;
     });

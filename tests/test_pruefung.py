@@ -15,10 +15,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.export import pruefung  # noqa: E402
 from src.export.pruefung import (  # noqa: E402
-    SeiteUnvollstaendig, erste_seite, fuehre_gruppen_zusammen, gilt_fuer_gruppe,
-    ist_unbekannt, offene_seiten, seiten_url, seitenwerte, unbekannter_status,
-    vergleiche_zaehlwerte, zaehlwerte,
+    NAMENSFILTER_PARAMETER, SeiteUnvollstaendig, erste_seite, fuehre_gruppen_zusammen,
+    gilt_fuer_gruppe, ist_unbekannt, offene_seiten, ohne_namensfilter, pruefe_namensfilter,
+    seiten_url, seitenwerte, unbekannter_status, vergleiche_zaehlwerte, zaehlwerte,
 )
+from urllib.parse import parse_qs, urlsplit  # noqa: E402
 
 BASIS = 'https://lernplattform.bycs.de'
 
@@ -53,6 +54,48 @@ class TestSeitenwerte(unittest.TestCase):
         self.assertEqual(
             offene_seiten({'page': {0, 1, 2}}, {'page': {0}, 'start': {0}}),
             [('page', 1), ('page', 2)])
+
+
+class TestNamensfilter(unittest.TestCase):
+    """Ein in Moodle gespeicherter Buchstabenfilter darf den Export nicht kürzen."""
+
+    URL = f'{BASIS}/mod/assign/view.php?id=94824799&action=grading&status&quickgrading=0&group=0'
+
+    def _query(self, url):
+        return parse_qs(urlsplit(url).query, keep_blank_values=True)
+
+    def test_setzt_alle_filter_leer(self):
+        q = self._query(ohne_namensfilter(self.URL))
+        for p in NAMENSFILTER_PARAMETER:
+            self.assertEqual(q[p], [''], p)
+        # Uebrige Parameter bleiben, auch der leere Statusfilter
+        self.assertEqual(q['id'], ['94824799'])
+        self.assertEqual(q['status'], [''])
+        self.assertEqual(q['group'], ['0'])
+
+    def test_ersetzt_gesetzten_filter(self):
+        q = self._query(ohne_namensfilter(f'{self.URL}&tifirst=B&silast=M'))
+        self.assertEqual(q['tifirst'], [''])
+        self.assertEqual(q['silast'], [''])
+
+    def test_idempotent(self):
+        einmal = ohne_namensfilter(self.URL)
+        self.assertEqual(ohne_namensfilter(einmal), einmal)
+
+    def test_seitennummer_ueberlebt(self):
+        url = seiten_url(ohne_namensfilter(self.URL), 'page', 2)
+        q = self._query(url)
+        self.assertEqual(q['page'], ['2'])
+        self.assertEqual(q['tifirst'], [''])
+
+    def test_alle_ist_kein_filter(self):
+        pruefe_namensfilter([])
+        pruefe_namensfilter(['Alle', ' All ', '', None])
+
+    def test_buchstabe_ist_filter(self):
+        with self.assertRaises(SeiteUnvollstaendig) as ctx:
+            pruefe_namensfilter(['B'])
+        self.assertIn('Namensfilter aktiv (B)', str(ctx.exception))
 
 
 class TestUnbekannt(unittest.TestCase):
@@ -166,8 +209,17 @@ except ImportError as e:  # Selenium/requests fehlen
     _IMPORT_FEHLER = e
 
 
+def _ohne_filterparameter(url):
+    """URL ohne die Namensfilter-Parameter — für den Seitenvergleich der Attrappe."""
+    teile = url.split('?', 1)
+    if len(teile) < 2:
+        return url
+    rest = [p for p in teile[1].split('&') if p.split('=', 1)[0] not in NAMENSFILTER_PARAMETER]
+    return f"{teile[0]}?{'&'.join(rest)}"
+
+
 class FakeDriver:
-    """Liefert je URL eine Seite: (Ergebnis, Seitenlinks)."""
+    """Liefert je URL eine Seite: (Ergebnis, Seitenlinks[, aktive Buchstaben])."""
 
     def __init__(self, seiten, login_bei=None):
         self.seiten = seiten
@@ -181,14 +233,18 @@ class FakeDriver:
                             if self.login_bei and self.login_bei in url else url)
 
     def seite(self):
+        url = _ohne_filterparameter(self.current_url)
         for schluessel, inhalt in self.seiten.items():
-            if self.current_url.endswith(schluessel):
+            if url.endswith(schluessel):
                 return inhalt
         raise AssertionError(f'unerwartete URL {self.current_url}')
 
     def execute_script(self, skript):
         if skript is exporter._JS_SEITENLINKS:
             return self.seite()[1]
+        if skript is exporter._JS_NAMENSFILTER:
+            inhalt = self.seite()
+            return inhalt[2] if len(inhalt) > 2 else []
         raise AssertionError('unerwartetes Skript')
 
 
@@ -217,6 +273,24 @@ class TestLadeAlleSeiten(unittest.TestCase):
         with self.assertRaises(SeiteUnvollstaendig):
             exporter.lade_alle_seiten(drv, self.URL, lambda d: d.seite()[0])
 
+    def test_jeder_abruf_setzt_namensfilter_zurueck(self):
+        drv = FakeDriver({
+            'group=0': (['A'], [f'{self.URL}&page=1']),
+            'page=1': (['B'], []),
+        })
+        exporter.lade_alle_seiten(drv, self.URL, lambda d: d.seite()[0])
+        for url in drv.aufrufe:
+            q = parse_qs(urlsplit(url).query, keep_blank_values=True)
+            for p in NAMENSFILTER_PARAMETER:
+                self.assertEqual(q.get(p), [''], f'{p} fehlt in {url}')
+
+    def test_verbliebener_namensfilter_bricht_ab(self):
+        # Greift das Zuruecksetzen nicht, waere die Tabelle still gekuerzt.
+        drv = FakeDriver({'group=0': (['A'], [], ['B'])})
+        with self.assertRaises(SeiteUnvollstaendig) as ctx:
+            exporter.lade_alle_seiten(drv, self.URL, lambda d: d.seite()[0])
+        self.assertIn('Namensfilter', str(ctx.exception))
+
     def test_lesefehler_laeuft_durch(self):
         def lese(_):
             raise SeiteUnvollstaendig('Tabelle fehlt')
@@ -227,6 +301,8 @@ class TestLadeAlleSeiten(unittest.TestCase):
     def test_obergrenze(self):
         class Endlos(FakeDriver):
             def execute_script(self, skript):
+                if skript is exporter._JS_NAMENSFILTER:
+                    return []
                 n = int(self.current_url.rsplit('=', 1)[-1]) if 'page=' in self.current_url else 0
                 return [f'{BASIS}/x.php?page={n + 1}']
 
@@ -291,6 +367,32 @@ class TestGruppenmitglieder(unittest.TestCase):
         # Die Buchstabenleiste (start=999) wurde nicht verfolgt
         self.assertFalse(any('999' in u for u in session.aufrufe))
         self.assertFalse(any('sifirst=A' in u for u in session.aufrufe))
+
+    def test_namensfilter_wird_zurueckgesetzt(self):
+        session = FakeSession({0: _fortschrittsseite(range(1, 4), [])})
+        exporter.get_user_ids_from_group_fast(session, '5', self.BASIS_URL, '1')
+        q = parse_qs(urlsplit(session.aufrufe[0]).query, keep_blank_values=True)
+        for p in NAMENSFILTER_PARAMETER:
+            self.assertEqual(q.get(p), [''], p)
+
+    def test_verbliebener_namensfilter_wirft(self):
+        # Moodle-Markup der Buchstabenleiste mit ausgewähltem „B“
+        leiste = ('<div class="initialbar firstinitial"><nav><ul class="pagination">'
+                  '<li class="initialbarall page-item"><a class="page-link" href="#">Alle</a></li>'
+                  '<li class="page-item A"><a class="page-link" href="#">A</a></li>'
+                  '<li class="page-item B active"><a class="page-link">B</a></li>'
+                  '</ul></nav></div>')
+        session = FakeSession({0: leiste + _fortschrittsseite(range(1, 4), [])})
+        with self.assertRaises(SeiteUnvollstaendig):
+            exporter.get_user_ids_from_group_fast(session, '5', self.BASIS_URL, '1')
+
+    def test_alle_ausgewaehlt_ist_kein_filter(self):
+        leiste = ('<div class="initialbar firstinitial"><nav><ul class="pagination">'
+                  '<li class="initialbarall page-item active"><a class="page-link">Alle</a></li>'
+                  '<li class="page-item B"><a class="page-link" href="#">B</a></li>'
+                  '</ul></nav></div>')
+        session = FakeSession({0: leiste + _fortschrittsseite(range(1, 4), [])})
+        self.assertEqual(len(exporter.get_user_ids_from_group_fast(session, '5', self.BASIS_URL, '1')), 3)
 
     def test_leere_gruppe(self):
         session = FakeSession({0: '<select name="group"></select><p>Keine Teilnehmer</p>'})

@@ -79,7 +79,7 @@ einer sonst vollständigen Tabelle. Regeln:
   werfen `SeiteUnvollstaendig` ([pruefung.py](src/export/pruefung.py)); der
   Aufrufer macht daraus `unbekannter_status(...)`.
 - Unbekannt zählt nicht als erledigt. Die Quantität ist dann eine
-  **Untergrenze**, die Mitarbeitsnote **vorläufig** (Dashboard: „mind.",
+  **Untergrenze**, die Mitarbeitsnote **vorläufig** (Dashboard: „unvollständig (mindestens) …",
   Marke „vorl."; CSV-Spalte „Vorläufig"; Bericht: „Stand unbekannt").
   Bewusst so entschieden statt „keine Note": eine einzige ausgefallene Seite
   soll nicht der ganzen Klasse die Note nehmen.
@@ -87,6 +87,13 @@ einer sonst vollständigen Tabelle. Regeln:
   fehlt**, ist „nicht begonnen", nicht unbekannt.
 - Tabellen, die Moodle aufteilt, über `lade_alle_seiten()` lesen — nur die
   Seitennummer übernehmen, nie den Link (Filter bleiben sonst in der Sitzung).
+- **Jeder Abruf einer Personentabelle setzt den Namensfilter zurück**
+  (Buchstabenleiste, im Moodle-Konto gespeichert): `ohne_namensfilter(url)`
+  aus [pruefung.py](src/export/pruefung.py) bzw. `ohneNamensfilter` im
+  Browser-Export. `lade_alle_seiten`/`ladeAlleSeiten` tun das selbst; wer eine
+  Personentabelle anders lädt, ruft es ausdrücklich auf. Zeigt die Seite
+  trotzdem einen ausgewählten Buchstaben, wirft `pruefe_namensfilter`
+  `SeiteUnvollstaendig`.
 - Der frühere Größenvergleich der Exportdatei ist ersetzt durch den
   `pruefbericht` (Lücken, Zählwert-Vergleich mit dem Vorlauf). Ein Rückgang
   ist eine Warnung, kein Grund zum Verwerfen.

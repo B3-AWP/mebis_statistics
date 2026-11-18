@@ -7,7 +7,8 @@ wenn anderswo genug Abgaben hinzukamen. Stattdessen drei Ebenen:
 
 1. **Seite** — jede Moodle-Seite muss vollständig angekommen sein:
    keine Anmeldeseite, erwartete Tabelle vorhanden, aufgeteilte Seiten
-   nachgeladen (``seitenwerte``, ``seiten_url``). Schlägt das fehl, gilt
+   nachgeladen (``seitenwerte``, ``seiten_url``), kein Namensfilter
+   (``ohne_namensfilter``, ``pruefe_namensfilter``). Schlägt das fehl, gilt
    der Status als **unbekannt** — nie als „nicht abgegeben".
 2. **Abgleich** — wer laut Gruppen zum Kurs gehört, muss in jeder
    Bewertungstabelle stehen; fehlt jemand, ist der Status dieser Person
@@ -112,6 +113,60 @@ def offene_seiten(gefunden: Dict[str, Set[int]], geladen: Dict[str, Set[int]]) -
         for wert in werte - geladen.get(param, set()):
             offen.append((param, wert))
     return sorted(offen)
+
+
+# ---------------------------------------------------------------------------
+# Ebene 1: Namensfilter
+# ---------------------------------------------------------------------------
+
+# Die Buchstabenleiste („Vorname: A B C …“) ist ein Filter, den Moodle im
+# Konto bzw. in der Sitzung speichert. Wer auf der Bewertungsseite einmal
+# „B“ angeklickt hat, sieht dort — und der Export liest dort — nur noch
+# Personen mit B, bis jemand wieder „Alle“ wählt. Jeder Abruf einer
+# Personentabelle setzt den Filter deshalb ausdrücklich leer. Zwei
+# Parameterpaare, weil Moodle sie je Seite verschieden nennt: ``tifirst``/
+# ``tilast`` (Bewertungsseite, Testbericht, Fortschrittsbericht ab Moodle 4)
+# und ``sifirst``/``silast`` (Bewerterübersicht, Singleview, ältere
+# Fortschrittsberichte). Parameter, die eine Seite nicht kennt, ignoriert
+# Moodle.
+NAMENSFILTER_PARAMETER = ('tifirst', 'tilast', 'sifirst', 'silast')
+
+# Beschriftung der Schaltfläche ohne Filter in der Buchstabenleiste
+_OHNE_FILTER = ('alle', 'all')
+
+
+def ohne_namensfilter(url: str) -> str:
+    """Setzt alle Namensfilter-Parameter der URL auf leer (= „Alle“)."""
+    teile = urlsplit(url)
+    query = [(k, v) for k, v in parse_qsl(teile.query, keep_blank_values=True)
+             if k not in NAMENSFILTER_PARAMETER]
+    query.extend((p, '') for p in NAMENSFILTER_PARAMETER)
+    return urlunsplit((teile.scheme, teile.netloc, teile.path, urlencode(query), teile.fragment))
+
+
+def pruefe_namensfilter(aktive: Iterable[Optional[str]]) -> None:
+    """
+    Bricht ab, wenn die geladene Seite trotzdem einen Namensfilter zeigt.
+
+    Sicherheitsnetz zu ``ohne_namensfilter``: Greift das Zurücksetzen auf
+    einer Seite nicht, wäre die Tabelle still unvollständig. Gemeldet wird
+    nur bei eindeutigem Befund — ein ausgewählter Buchstabe in der
+    Buchstabenleiste. Sieht das Markup anders aus, bleibt die Prüfung stumm;
+    fehlende Personen fängt dann der Abgleich (Ebene 2).
+
+    Args:
+        aktive: Texte der ausgewählten Einträge der Buchstabenleiste(n)
+            (``.initialbar li.active`` ohne ``.initialbarall``)
+
+    Raises:
+        SeiteUnvollstaendig: ein Buchstabe ist ausgewählt
+    """
+    buchstaben = [t.strip() for t in aktive
+                  if t and t.strip() and t.strip().lower() not in _OHNE_FILTER]
+    if buchstaben:
+        raise SeiteUnvollstaendig(
+            f"Namensfilter aktiv ({', '.join(buchstaben)}) — "
+            "in Moodle in der Buchstabenleiste „Alle“ wählen")
 
 
 # ---------------------------------------------------------------------------

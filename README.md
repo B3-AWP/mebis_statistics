@@ -290,7 +290,7 @@ Ebenen ([src/export/pruefung.py](src/export/pruefung.py)):
 
 | Ebene | Prüft | Folge bei Befund |
 |---|---|---|
-| **Seite** | keine Anmeldeseite, erwartete Tabelle vorhanden, aufgeteilte Seiten vollständig nachgeladen | Status der Aufgabe **unbekannt** |
+| **Seite** | keine Anmeldeseite, kein Namensfilter, erwartete Tabelle vorhanden, aufgeteilte Seiten vollständig nachgeladen | Status der Aufgabe **unbekannt** |
 | **Abgleich** | Wer laut Gruppe zur Klasse gehört, muss in jeder Bewertungstabelle und in der Bewerterübersicht stehen | Status dieser Person **unbekannt** |
 | **Verlauf** | Abgegeben/bewertet je Aufgabe und Klasse gegenüber dem letzten `output_*.json` | Warnung im Prüfbericht |
 
@@ -302,10 +302,23 @@ dabei nur die Seitennummer, nie den Link: Filterlinks wie die Buchstabenleiste
 speichert Moodle in der Sitzung, und ein versehentlich gesetzter Filter würde
 alle folgenden Abrufe verfälschen.
 
+**Namensfilter.** Die Buchstabenleiste („Vorname: A B C …") merkt sich Moodle
+im Konto. Wer auf der Bewertungsseite einmal „B" angeklickt hat, sieht dort
+nur noch Personen mit B — bisher auch der Export. Deshalb setzt jeder Abruf
+einer Personentabelle (Bewertungsseite, Testbericht, Bewerterübersicht,
+Singleview, Fortschrittsbericht) den Filter ausdrücklich zurück
+(`tifirst=&tilast=&sifirst=&silast=`). Nebenwirkung: Nach einem Export ist ein
+in Moodle gesetzter Buchstabenfilter auch für die eigene Ansicht wieder auf
+„Alle". Zeigt eine Seite trotzdem einen ausgewählten Buchstaben, gilt sie als
+unvollständig („Namensfilter aktiv (B)" im Prüfbericht). Den Statusfilter der
+Bewertungsseite hebt `status=` auf; Bewertungs-Workflow- und
+Bewerterzuordnungsfilter setzt der Export nicht zurück — fehlt dadurch jemand,
+fängt das der Abgleich (Status dieser Person unbekannt).
+
 **Unbekannt ist nicht „nicht abgegeben".** Lässt sich eine Seite auch nach drei
 Versuchen nicht lesen, steht im Export `"unbekannt": true` samt Grund. Im
 Dashboard erscheint die Zelle als **?**, die Quantität als Untergrenze
-(„mind. 45 %") und die Mitarbeitsnote mit der Marke **vorl.** — der wahre Wert
+(„unvollständig (mindestens) 45 %") und die Mitarbeitsnote mit der Marke **vorl.** — der wahre Wert
 kann nur höher liegen. In der CSV steht dazu die Spalte „Vorläufig", im
 Schülerbericht „Stand unbekannt".
 
@@ -604,7 +617,8 @@ Text, bleibt nur die Zeit weg: „(Lernzielkontrolle, ~25 Min)" wird zu
 
 Ist eine Aufgabe abgegeben, aber noch nicht bewertet, steht in der Tabelle
 **„bewertbar"**. Der Link führt direkt in Moodles Korrekturansicht der
-gewählten Klasse (`…/mod/assign/view.php?id=…&group=…&action=grader`).
+gewählten Klasse und öffnet dort die Abgabe genau dieser Person
+(`…/mod/assign/view.php?id=…&group=…&action=grader&userid=…`).
 
 Welche Abgaben dort gelistet werden, steuert Moodle über die persönliche
 Einstellung *„Bewertung erforderlich"* — die lässt sich nicht über die URL
@@ -654,7 +668,9 @@ Prozentwerte der Skala stehen zusätzlich in `plan.json` (`skalen.sterne4`).
 - Der Export konnte den Stand dieser Aufgaben nicht lesen (Seite fehlte,
   Person nicht in der Tabelle). Der Prüfbericht über der Tabelle nennt
   Aufgabe und Grund. Meist genügt ein neuer Export; bleibt dieselbe Lücke,
-  lohnt ein Blick auf die genannte Moodle-Seite.
+  lohnt ein Blick auf die genannte Moodle-Seite. Fehlen auffallend viele
+  Personen derselben Anfangsbuchstaben, war vor dieser Version ein
+  Namensfilter in Moodle gesetzt — ein neuer Export setzt ihn zurück.
 
 **Warnung „N Aufgabe(n) aus plan.json fehlen im Kurs"**
 - Die genannten `cmid`s sind in Moodle nicht auffindbar. Entweder die Aufgabe

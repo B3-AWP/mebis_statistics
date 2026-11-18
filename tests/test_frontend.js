@@ -179,9 +179,9 @@ try {
     const doraZeile = html.split('<tr').find(z => z.includes('Dora Datenluecke')) || '';
     const berndZeile = html.split('<tr').find(z => z.includes('Bernd Beflissen')) || '';
     pruefe('Dora-Zeile markiert', doraZeile.includes('zeile-vorlaeufig'));
-    pruefe('Dora-Quantitaet als Untergrenze', doraZeile.includes('mind. '));
+    pruefe('Dora-Quantitaet als Untergrenze', doraZeile.includes('unvollständig (mindestens) '));
     pruefe('Dora-Note mit Marke', doraZeile.includes('vorlaeufig-marke'));
-    pruefe('Bernd-Zeile ohne Marke', !berndZeile.includes('vorlaeufig') && !berndZeile.includes('mind. '));
+    pruefe('Bernd-Zeile ohne Marke', !berndZeile.includes('vorlaeufig') && !berndZeile.includes('unvollständig'));
 
     const zelle = G('pflichtStatusZelle')({ unbekannt: true, grund: 'Tabelle fehlt' },
                                           { activity_type: 'assign', url: '#' }, '1');
@@ -238,6 +238,22 @@ try {
                elements['groupHalbjahresnotenTable'].innerHTML === '');
     });
 } catch (e) { pruefe('Einheitliche Tabelle', false, e.message); }
+
+// Der Link "bewertbar" muss die Person der angeklickten Zelle oeffnen.
+// Ohne userid zeigt Moodle die erste Person der Gruppe.
+console.log('\n== Bewertungslink je Person ==');
+try {
+    const url = 'https://lernplattform.bycs.de/mod/assign/view.php?id=94824799';
+    pruefe('Link mit Gruppe und Person',
+           G('bewertungsUrl')(url, '6072', '4711') === `${url}&group=6072&action=grader&userid=4711`,
+           G('bewertungsUrl')(url, '6072', '4711'));
+    pruefe('ohne Person kein userid',
+           G('bewertungsUrl')(url, '6072') === `${url}&group=6072&action=grader`);
+    const zelle = G('pflichtStatusZelle')(
+        { status: 'Zur Bewertung abgegeben', grade: '-', user_id: '4711' },
+        { activity_type: 'assignment', url }, '6072');
+    pruefe('Statuszelle verlinkt die Person', zelle.includes('userid=4711'), zelle.slice(0, 160));
+} catch (e) { pruefe('Bewertungslink', false, e.message); }
 
 console.log('\n== Wechsel auf gesperrtes Halbjahr ==');
 try {

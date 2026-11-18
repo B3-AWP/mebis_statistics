@@ -4,6 +4,36 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 
 ## [Unreleased] - 2026-11-17 — Prüfbericht statt Dateigröße
 
+### ✏️ Dashboard: „unvollständig (mindestens)" statt „mind." (2026-11-18)
+
+Die Quantität einer Person mit unbekanntem Stand hieß bisher knapp
+„mind. 45 %" — die Abkürzung erklärte nicht, *warum* der Wert eine
+Untergrenze ist. Jetzt steht dort „unvollständig (mindestens) 45 %".
+Rechnung, Marke „vorl." und Tooltip bleiben unverändert.
+
+### 🐛 Export: Namensfilter aus Moodle wird zurückgesetzt (2026-11-18)
+
+Die Buchstabenleiste („Vorname/Nachname: A B C …") speichert Moodle im
+Konto. War dort z.B. auf der Bewertungsseite „B" gewählt, las der Export nur
+diese Personen — alle übrigen fehlten in der Tabelle, galten im Abgleich als
+unbekannt, und das Dashboard zeigte „mind." und „vorl.". Jetzt setzt jeder
+Abruf einer Personentabelle den Filter leer (`tifirst`, `tilast`, `sifirst`,
+`silast`; `pruefung.ohne_namensfilter`): zentral in `lade_alle_seiten` bzw.
+`ladeAlleSeiten`, dazu Fortschrittsbericht und Singleview. Als
+Sicherheitsnetz meldet `pruefe_namensfilter` eine Seite mit trotzdem
+ausgewähltem Buchstaben als unvollständig („Namensfilter aktiv (B)"). Python
+und Browser-Export gleich; abgesichert in `tests/test_pruefung.py`.
+
+### 🐛 Dashboard: „bewertbar" öffnet die richtige Person
+
+Der Link „bewertbar" führte in Moodles Korrekturansicht ohne `userid` —
+Moodle zeigte dann die erste Person der Gruppe statt der, deren Zelle
+angeklickt wurde. `bewertungsUrl()` hängt jetzt die Moodle-ID der Person an
+(`…&action=grader&userid=…`); die ID steht bereits je Status im Export.
+Die (ausgeblendeten) Leistungsnachweis-Tabellen nutzen dieselbe Funktion
+statt eines eigenen Links auf die Aufgaben-Startseite. Abgesichert in
+`tests/test_frontend.js` („Bewertungslink je Person").
+
 ### 🔗 Dashboard: Links öffnen grundsätzlich im neuen Tab
 
 `dashboard.html` setzt `<base target="_blank">`. Die vorhandenen Links

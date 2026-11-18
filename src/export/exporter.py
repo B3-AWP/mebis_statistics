@@ -35,8 +35,8 @@ from config.logger_config import get_logger
 from src.common.plan_loader import PlanFehler, get_plan
 from src.export.pruefung import (
     MAX_SEITEN, SeiteUnvollstaendig, erste_seite, fuehre_gruppen_zusammen,
-    gilt_fuer_gruppe, offene_seiten, seiten_url, seitenwerte,
-    unbekannter_status, vergleiche_zaehlwerte, zaehlwerte,
+    gilt_fuer_gruppe, offene_seiten, ohne_namensfilter, pruefe_namensfilter,
+    seiten_url, seitenwerte, unbekannter_status, vergleiche_zaehlwerte, zaehlwerte,
 )
 
 logger = get_logger('exporter')
@@ -261,6 +261,18 @@ _JS_SEITENLINKS = """
     return out;
 """
 
+# Ausgewaehlte Buchstaben der Buchstabenleiste(n) — ein aktiver
+# Namensfilter (pruefung.pruefe_namensfilter). "Alle" traegt die Klasse
+# .initialbarall und zaehlt nicht.
+_JS_NAMENSFILTER = """
+    var out = [];
+    document.querySelectorAll('.initialbar li.active').forEach(function(li) {
+        if (li.classList.contains('initialbarall')) return;
+        out.push(li.textContent || '');
+    });
+    return out;
+"""
+
 # Zaehlt nachgeladene Folgeseiten fuer den Pruefbericht (Threads teilen ihn).
 _seiten_statistik = {"nachgeladen": 0}
 _seiten_lock = threading.Lock()
@@ -282,6 +294,10 @@ def lade_alle_seiten(driver, url, lese_seite):
     jedem Lauf gleich, also auch fuer einen Vergleich mit dem Vorlauf
     unsichtbar.
 
+    Jeder Abruf setzt den Namensfilter (Buchstabenleiste) zurück, den
+    Moodle sonst aus dem Konto übernimmt — sonst fehlten alle Personen
+    ausserhalb des gewählten Buchstabens (``pruefung.ohne_namensfilter``).
+
     Args:
         driver: WebDriver
         url: Basis-URL der ersten Seite
@@ -292,10 +308,13 @@ def lade_alle_seiten(driver, url, lese_seite):
         Liste der Seitenergebnisse, erste Seite zuerst
 
     Raises:
-        SeiteUnvollstaendig: Anmeldeseite, fehlende Tabelle, zu viele Seiten
+        SeiteUnvollstaendig: Anmeldeseite, Namensfilter, fehlende Tabelle,
+            zu viele Seiten
     """
+    url = ohne_namensfilter(url)
     driver.get(url)
     pruefe_angemeldet(driver)
+    pruefe_namensfilter(driver.execute_script(_JS_NAMENSFILTER) or [])
     ergebnisse = [lese_seite(driver)]
 
     geladen = erste_seite(url)
@@ -308,6 +327,7 @@ def lade_alle_seiten(driver, url, lese_seite):
         param, wert = offen[0]
         driver.get(seiten_url(url, param, wert))
         pruefe_angemeldet(driver)
+        pruefe_namensfilter(driver.execute_script(_JS_NAMENSFILTER) or [])
         ergebnisse.append(lese_seite(driver))
         geladen.setdefault(param, set()).add(wert)
         with _seiten_lock:
@@ -463,6 +483,8 @@ def _lies_gruppenseite(session, url):
     if "login" in resp.url:
         raise SeiteUnvollstaendig("Anmeldeseite statt Fortschrittsbericht")
     soup = BeautifulSoup(resp.text, 'html.parser')
+    pruefe_namensfilter(li.get_text() for li in soup.select('.initialbar li.active')
+                        if 'initialbarall' not in (li.get('class') or []))
 
     tabelle = soup.select_one('#completion-progress')
     if tabelle is None:
@@ -496,7 +518,7 @@ def get_user_ids_from_group_fast(session, group_value, base_url, course_id):
     Raises:
         SeiteUnvollstaendig, requests.RequestException
     """
-    url = f"{base_url}?course={course_id}&group={group_value}"
+    url = ohne_namensfilter(f"{base_url}?course={course_id}&group={group_value}")
     users, links = _lies_gruppenseite(session, url)
 
     geladen = erste_seite(url)
@@ -809,6 +831,7 @@ def get_assignment_status(driver, assignment_url, waittime):
     # status: alle Benutzer anzeigen, auch die ohne Abgaben
     # quickgrading=0: vollständige Bewertungsansicht
     # group=0: alle Gruppen
+    # Namensfilter (tifirst/tilast) setzt lade_alle_seiten zurueck
     grading_url = f"{assignment_url}&action=grading&status&quickgrading=0&group=0"
 
     def lese_seite(drv):
@@ -1062,7 +1085,9 @@ def get_singleview_grades(driver, course_id, item_id, base_url, waittime):
     Gibt {vollständiger_name: bewertung_str} zurück.
     """
     domain = base_url.split('/report/')[0]
-    url = f"{domain}/grade/report/singleview/index.php?id={course_id}&userid=&itemid={item_id}&item=grade&page=0&perpage=0&group=0"
+    url = ohne_namensfilter(
+        f"{domain}/grade/report/singleview/index.php?id={course_id}&userid=&itemid={item_id}"
+        f"&item=grade&page=0&perpage=0&group=0")
     driver.get(url)
 
     try:
@@ -1342,7 +1367,7 @@ def get_singleview_feedback_dates(driver, course_id, grade_item_id, waittime):
     Gibt ein Dict {user_id: feedback_date_iso} zurück.
     Nur Einträge mit tatsächlichem Datum werden aufgenommen.
     """
-    url = (
+    url = ohne_namensfilter(
         f"https://lernplattform.bycs.de/grade/report/singleview/index.php"
         f"?id={course_id}&userid=0&itemid={grade_item_id}&item=grade&page=0&perpage=0"
     )
@@ -1763,8 +1788,10 @@ def export_course(driver, course_id, course_title, base_url, username, password,
 
     # Kurs-Kontext setzen: die Fortschrittsseite dieses Kurses oeffnen,
     # damit die folgenden Select-Optionen zum richtigen Kurs gehoeren.
+    # Ohne Namensfilter: Findet der Filter niemanden, zeigt Moodle keine
+    # Tabelle — und damit auch keine Aktivitaetenspalten.
     timer.start("Kurskontext setzen")
-    driver.get(f"{base_url}?course={course_id}")
+    driver.get(ohne_namensfilter(f"{base_url}?course={course_id}"))
     timer.stop()
 
     timer.start("Gruppen & Optionen laden")
