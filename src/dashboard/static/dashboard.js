@@ -1290,90 +1290,167 @@ function calculateStatsForGroup(groupName, groupData) {
     };
 }
 
-// Gruppen-Vergleichstabelle generieren (für "Alle Gruppen" Ansicht)
+// Laufende Blockwoche einer Schiene, auf den Zeitraum des aktiven
+// Halbjahres geklammert — dieselbe Regel wie in updateWeekSlider().
+function laufendeWocheImScope(track) {
+    const wochen = getSchulwochenForScope(track);
+    if (wochen.length === 0) return 0;
+    const min = wochen[0].woche;
+    const max = wochen[wochen.length - 1].woche;
+    const jetzt = getCurrentReferenceWeekForTrack(track);
+    return (jetzt >= min && jetzt <= max) ? jetzt : max;
+}
+
+/**
+ * Klassenschnitte fuer den Klassenvergleich. Je Person dieselbe Rechnung
+ * wie in generateGroupProgressTable, danach der Mittelwert ueber die
+ * Klasse. Jede Klasse steht in ihrer eigenen laufenden Woche: die
+ * Schienen beginnen zu verschiedenen Terminen, eine gemeinsame
+ * Wochennummer meinte je Klasse ein anderes Datum.
+ *
+ * \param {string} groupName - Klasse
+ * \param {Array} users - Personen der Klasse
+ * \returns {Object} Schnitte; null, wo keine Person einen Wert hat
+ */
+function berechneKlassenschnitt(groupName, users) {
+    const track = getTrackForGroup(groupName);
+    const raster = getRasterForGroup(groupName);
+    const wochen = getSchulwochenForScope(track);
+    const woche = track ? laufendeWocheImScope(track) : null;
+    const soll = track
+        ? Math.round(sollAnteil(wochen, woche, raster,
+                                raster ? getStichtagForWeek(wochen, woche) : null) * 1000) / 10
+        : null;
+
+    const mittel = werte => {
+        const da = werte.filter(v => v !== null && v !== undefined && !Number.isNaN(v));
+        return da.length ? da.reduce((a, b) => a + b, 0) / da.length : null;
+    };
+
+    const quant = [], delta = [], qual = [], ma = [], eingereicht = [];
+    users.forEach(user => {
+        eingereicht.push(user.assignments ? user.assignments.submitted_count || 0 : 0);
+        const ergebnis = calculateMitarbeitsnote(user, groupName, woche);
+        qual.push(ergebnis ? ergebnis.qualitaet : null);
+        // Ohne Schiene kein Soll: Quantitaet, Delta und Mitarbeitsnote
+        // entfallen (wie im Backend, das solche Klassen ueberspringt).
+        if (!track) return;
+        // user.group: calculatePflichtaufgabenProgressGesamt sucht damit die
+        // Schiene — in der Gesamtansicht ist currentGroup "all".
+        const fortschritt = calculatePflichtaufgabenProgressGesamt(
+            { ...user, group: groupName }, woche, raster);
+        const q = fortschritt ? fortschritt.value : null;
+        quant.push(q);
+        delta.push(ergebnis ? ergebnis.deltaStunden : null);
+        // Mitarbeitsnote wie in der Personentabelle: Quantitaet bei 100 % gekappt
+        const teile = [q !== null ? Math.min(q, 100) : null, ergebnis ? ergebnis.qualitaet : null]
+            .filter(v => v !== null && v !== undefined);
+        ma.push(teile.length ? teile.reduce((a, b) => a + b, 0) / teile.length : null);
+    });
+
+    return {
+        track, woche, wochenAnzahl: wochen.length, soll,
+        quantitaet: mittel(quant),
+        delta: mittel(delta),
+        qualitaet: mittel(qual),
+        mitarbeit: mittel(ma),
+        eingereicht: mittel(eingereicht)
+    };
+}
+
+// Klassenvergleich (Ansicht "Alle Klassen"): je Klasse der Schnitt der
+// Spalten aus der Personentabelle. Frueher rechnete die Tabelle mit
+// Checklisten — die werden seit 2026/27 nicht mehr exportiert, daher
+// standen dort nur noch Nullen.
 function generateGroupComparisonTable() {
     const container = document.getElementById('groupProgressTable');
     if (!container || !dashboardData || !dashboardData.groups) return;
 
-    // Titel aktualisieren
     const titleElement = document.getElementById('groupDetailTitle');
     if (titleElement) {
-        const kursTitel = currentHalbjahr && currentHalbjahr !== 'gesamt'
-            ? (getCourse(currentHalbjahr)?.titel || 'Schuljahr') : 'Schuljahr';
-        titleElement.textContent = `Klassenvergleich – ${kursTitel}`;
+        const kurs = currentHalbjahr && currentHalbjahr !== 'gesamt' ? getCourse(currentHalbjahr) : null;
+        titleElement.textContent = `Klassenvergleich – ${kurs ? kurs.titel : 'Alle Kurse'}`;
     }
 
-    // Gruppen basierend auf aktueller Gruppierung filtern
-    let groupsToShow = [];
-    groupsToShow = Object.keys(dashboardData.groups);
-
+    const groupsToShow = Object.keys(dashboardData.groups).sort((a, b) => a.localeCompare(b, 'de'));
     if (groupsToShow.length === 0) {
         container.innerHTML = '<p><em>Keine Gruppen verfügbar.</em></p>';
         return;
     }
 
-    let html = '<table id="groupComparisonTable" class="info-table dashboard-table overview-table">';
+    const leer = '<td class="text-center status-text-muted">–</td>';
+    let html = '<div class="stats-group-title" style="margin-bottom: 8px;">'
+             + '<span>Jede Klasse in ihrer laufenden Blockwoche — Schnitt über die Personen</span></div>';
+    html += '<table id="groupComparisonTable" class="info-table dashboard-table overview-table">';
     html += '<thead><tr class="sticky-header">';
-    html += '<th class="group-name-cell">Gruppe</th>';
+    html += '<th class="group-name-cell">Klasse</th>';
     html += '<th>Personen</th>';
-    html += '<th>Ø Pflicht (%)</th>';
-    html += '<th>Ø Note</th>';
-    html += '<th>Ø Gesamt (%)</th>';
+    html += '<th title="Laufende Blockwoche der Schiene und Soll-Anteil zu diesem Stichtag">Woche (Soll)</th>';
+    html += '<th title="Ø erreichte Stunden gemessen am Soll — über 100 % heißt: dem Plan voraus">Ø Quantität Pflicht (%)</th>';
+    html += '<th title="Ø Vorsprung bzw. Rückstand in Unterrichtsstunden">Ø Delta (Std.)</th>';
+    html += '<th title="Note aus der Ø Quantität (Schwellen 92/81/67/50/30 %)">Note</th>';
+    html += '<th title="Ø ungewichteter Durchschnitt der Bewertungen">Ø Qualität (%)</th>';
     html += '<th>Ø Eingereichte Aufgaben</th>';
     html += '<th>Ø Note Pflichtaufgaben</th>';
-    html += '</tr></thead>';
-    html += '<tbody>';
+    html += '<th title="Ø aus (Quantität + Qualität) / 2 je Person, Quantität bei 100 % gekappt">Ø Mitarbeitsnote</th>';
+    html += '</tr></thead><tbody>';
 
-    // Zeitprojektion für Gruppenwerte anwenden
-
-    // Statistiken für jede Gruppe berechnen und anzeigen
     groupsToShow.forEach(groupName => {
-        const groupData = dashboardData.groups[groupName];
-        const stats = calculateStatsForGroup(groupName, groupData);
-
-        // Verwende die bereits berechneten tatsächlichen Fortschrittswerte für die ausgewählte Woche
-        const displayRequiredProgress = stats.avgRequiredProgress;
-
-        // Berechne Note basierend auf Gruppendurchschnitt Pflicht %
-        const gradeText = calculateGradeFromPflichtProgress(displayRequiredProgress);
-
-        // Berechne Pflichtaufgaben-Note für die ganze Gruppe
-        const groupPflichtGrade = calculatePflichtaufgabenGradeForGroup(groupName);
-        let pflichtGradeText = '-';
-        let pflichtGradeColor = '#6C757D';
-        if (groupPflichtGrade && groupPflichtGrade.grade !== null) {
-            pflichtGradeText = `${groupPflichtGrade.grade.toFixed(0)}<br>(${groupPflichtGrade.percent.toFixed(1)}%)`;
-            pflichtGradeColor = getGradeColor(groupPflichtGrade.grade);
-        }
-
-        // Zeige die gleichen Werte wie in den Cards:
-        // "Ø Checklisten 100%" = avgCompletedChecklists (wie completedCount in der Card)
-        // "Ø Pflichtaufgaben eingereicht" = avgCompletedPflichtaufgaben (wie pflichtCompletedCount in der Card)
+        const users = dashboardData.groups[groupName].users || [];
+        const k = berechneKlassenschnitt(groupName, users);
 
         // Personen mit unbekanntem Stand machen den Klassenschnitt vorlaeufig
-        const vorlaeufigAnzahl = (groupData.users || []).filter(istVorlaeufig).length;
-        const gruppenMarke = vorlaeufigAnzahl > 0
+        const vorlaeufigAnzahl = users.filter(istVorlaeufig).length;
+        const marke = vorlaeufigAnzahl > 0
             ? ` <span class="vorlaeufig-marke" title="${vorlaeufigAnzahl} Person(en) mit unbekanntem Stand einzelner Aufgaben — Schnitte sind vorläufig">vorl.</span>`
             : '';
 
         html += '<tr>';
-        html += `<td class="group-name-cell"><strong>${stats.groupName}</strong>${gruppenMarke}</td>`;
-        html += `<td class="text-center">${stats.userCount}</td>`;
-        html += `<td class="progress-cell progress-color-info" style="--progress-width: ${displayRequiredProgress}%;">${displayRequiredProgress.toFixed(1)}%</td>`;
-        html += `<td class="text-center text-bold">${gradeText}</td>`;
-        html += `<td class="progress-cell progress-color-secondary" style="--progress-width: ${stats.avgAllProgress}%;">${stats.avgAllProgress.toFixed(1)}%</td>`;
-        html += `<td class="progress-cell progress-color-warning" style="--progress-width: ${Math.min(stats.avgCompletedPflichtaufgaben * 10, 100)}%;">${stats.avgCompletedPflichtaufgaben.toFixed(1)}</td>`;
-        html += `<td class="text-center text-bold" style="color: ${pflichtGradeColor};" title="Durchschnitt von ${groupPflichtGrade ? groupPflichtGrade.count : 0} Personen mit bewerteten Pflichtaufgaben">${pflichtGradeText}</td>`;
+        html += `<td class="group-name-cell"><strong>${escapeHtml(groupName)}</strong>${marke}</td>`;
+        html += `<td class="text-center">${users.length}</td>`;
+
+        if (!k.track) {
+            html += '<td class="text-center status-text-muted" title="Klasse steht nicht in klassenZuSchiene — kein Soll">keine Schiene</td>';
+        } else {
+            html += `<td class="text-center">${k.woche} / ${k.wochenAnzahl} (${k.soll.toFixed(1)} %)</td>`;
+        }
+
+        if (k.quantitaet === null) {
+            html += leer;
+        } else {
+            html += `<td class="progress-cell progress-color-info" style="--progress-width: ${Math.min(k.quantitaet, 100)}%;">${k.quantitaet.toFixed(0)}%</td>`;
+        }
+
+        if (k.delta === null) {
+            html += leer;
+        } else {
+            const farbe = k.delta >= 0 ? 'var(--success-color)' : 'var(--danger-color)';
+            html += `<td class="text-center text-bold" style="color:${farbe};">${k.delta >= 0 ? '+' : ''}${k.delta.toFixed(1)}</td>`;
+        }
+
+        html += k.quantitaet === null ? leer
+            : `<td class="text-center text-bold">${calculateGradeFromPflichtProgress(k.quantitaet)}</td>`;
+        html += renderPctCell(k.qualitaet, 'progress-color-warning', null, 1);
+        html += `<td class="progress-cell progress-color-secondary" style="--progress-width: ${Math.min(k.eingereicht * 10, 100)}%;">${k.eingereicht.toFixed(1)}</td>`;
+
+        const pflichtNote = calculatePflichtaufgabenGradeForGroup(groupName);
+        if (pflichtNote && pflichtNote.grade !== null) {
+            html += `<td class="text-center text-bold" style="color: ${getGradeColor(pflichtNote.grade)};" `
+                  + `title="Durchschnitt von ${pflichtNote.count} Personen mit bewerteten Pflichtaufgaben">`
+                  + `${pflichtNote.grade.toFixed(0)} (${pflichtNote.percent.toFixed(1)}%)</td>`;
+        } else {
+            html += leer;
+        }
+
+        html += k.mitarbeit === null ? leer
+            : renderGradeCell(convertPercentToIHKGrade(k.mitarbeit), k.mitarbeit);
         html += '</tr>';
     });
 
     html += '</tbody></table>';
     container.innerHTML = html;
 
-    // Tabelle sortierbar machen
     makeTableSortable('groupComparisonTable');
-    
-    // Scroll-Wrapper anwenden
     setTimeout(() => wrapTableWithScrollContainer('groupProgressTable'), 50);
 }
 

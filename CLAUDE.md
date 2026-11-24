@@ -151,7 +151,10 @@ Delta = (Ist − Soll) × Σ Stunden gesamt        → Unterrichtsstunden
   Halbjahr zeigt genau seinen Kurs — in allen drei Stellungen dieselbe
   Tabelle mit denselben sieben Spalten (Quantität Pflicht, Delta, Note,
   Qualität, Eingereichte Aufgaben, Note Pflichtaufgaben, Mitarbeitsnote).
-  Bei „Alle Klassen" steht unabhängig davon der Klassenvergleich. Alles in
+  Bei „Alle Klassen" steht unabhängig davon der Klassenvergleich: Schnitte
+  derselben Werte je Klasse (`berechneKlassenschnitt`), jede Klasse in der
+  laufenden Woche ihrer Schiene — nicht nach dem Slider, weil gleiche
+  Wochennummern je Schiene andere Daten meinen. Alles in
   [`generateGroupProgressTable`](src/dashboard/static/dashboard.js), per
   Test abgesichert.
 - **Gruppe = Klasse.** Seit 2026/27 gibt es keine Team-Ebene mehr. Moodle

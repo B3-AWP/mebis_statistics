@@ -239,6 +239,30 @@ try {
     });
 } catch (e) { pruefe('Einheitliche Tabelle', false, e.message); }
 
+// "Alle Klassen": Schnitte derselben Werte wie in der Personentabelle.
+// Frueher Checklisten-Rechnung -> ohne Checklisten-Export ueberall 0 %.
+console.log('\n== Klassenvergleich (Alle Klassen) ==');
+try {
+    G('selectCourseScope')('halbjahr-1');
+    setG('currentGroup', 'all');
+    const k = G('berechneKlassenschnitt')('IFA12A', G('dashboardData').groups['IFA12A'].users);
+    // Anna 10 h, Bernd 7.5 h, Clara 0 h (Entwurf), Dora 7.5 h -> Schnitt > 0
+    pruefe('Schiene und Woche gesetzt', !!k.track && k.woche > 0, `${k.track}, Woche ${k.woche}`);
+    pruefe('Ø Quantitaet > 0', k.quantitaet > 0, `${k.quantitaet && k.quantitaet.toFixed(1)} %`);
+    pruefe('Ø Delta vorhanden', typeof k.delta === 'number', String(k.delta));
+    const klasse = G('dashboardData').groups['IFA12A'].users;
+    const erwartet = klasse.reduce((s, u) => s + u.assignments.submitted_count, 0) / klasse.length;
+    pruefe('Ø Eingereicht = Mittel der Personen', Math.abs(k.eingereicht - erwartet) < 1e-9,
+           `${k.eingereicht} / ${erwartet}`);
+    G('generateGroupProgressTable')([]);
+    const html = elements['groupProgressTable'].innerHTML;
+    pruefe('Vergleichstabelle erzeugt', html.includes('groupComparisonTable'));
+    pruefe('neue Spalten', ['Ø Quantität Pflicht', 'Ø Delta', 'Ø Qualität', 'Ø Mitarbeitsnote']
+           .every(sp => html.includes(sp)));
+    pruefe('keine 0.0%-Zeile', !html.includes('>0.0%<'));
+    setG('currentGroup', 'IFA12A');
+} catch (e) { pruefe('Klassenvergleich', false, e.stack || e.message); }
+
 // Der Link "bewertbar" muss die Person der angeklickten Zelle oeffnen.
 // Ohne userid zeigt Moodle die erste Person der Gruppe.
 console.log('\n== Bewertungslink je Person ==');

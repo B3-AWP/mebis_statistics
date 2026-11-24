@@ -24,6 +24,20 @@ Sicherheitsnetz meldet `pruefe_namensfilter` eine Seite mit trotzdem
 ausgewähltem Buchstaben als unvollständig („Namensfilter aktiv (B)"). Python
 und Browser-Export gleich; abgesichert in `tests/test_pruefung.py`.
 
+### 🐛 Klassenvergleich zeigt wieder Werte
+
+Die Ansicht „Alle Klassen" rechnete „Ø Pflicht", „Ø Note" und „Ø Gesamt"
+noch aus Checklisten. Seit `EXPORT_CHECKLISTS = False` gibt es keine — die
+Spalten standen bei jeder Klasse auf 0,0 %. Der Klassenvergleich bildet
+jetzt den Schnitt über die Personen für dieselben Werte wie die
+Personentabelle (`berechneKlassenschnitt` in `dashboard.js`): Ø Quantität,
+Ø Delta, Note, Ø Qualität, Ø eingereichte Aufgaben, Ø Note Pflichtaufgaben,
+Ø Mitarbeitsnote. Jede Klasse steht in der laufenden Woche ihrer Schiene
+(Spalte „Woche (Soll)"); Klassen ohne Schiene bleiben ohne Soll-Werte.
+`calculateStatsForGroup` und `calculateActualProgressForWeek` (Checklisten)
+werden vom Klassenvergleich nicht mehr genutzt. Test: „Klassenvergleich"
+in `tests/test_frontend.js`.
+
 ### 🐛 Entwurf zählt nicht mehr als Abgabe
 
 Eine Aufgabe, die nur als Entwurf gespeichert und nicht eingereicht war,

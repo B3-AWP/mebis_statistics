@@ -606,8 +606,16 @@ Daten, zeigt es eben nur dessen Zahlen. Sobald beide Halbjahre Daten haben,
 ergibt sich ihre Gewichtung von selbst aus der Stundensumme.
 
 In der Ansicht **„Alle Klassen"** steht unabhängig davon der
-Klassenvergleich. Der Wochen-Slider folgt dem Zeitraum des aktiven
-Halbjahres.
+**Klassenvergleich**: je Klasse der Schnitt über ihre Personen für dieselben
+Werte wie in der Personentabelle (Quantität, Delta, Note, Qualität,
+eingereichte Aufgaben, Note Pflichtaufgaben, Mitarbeitsnote). Jede Klasse
+steht dabei in der **laufenden Blockwoche ihrer Schiene** — die Spalte
+„Woche (Soll)" zeigt, welche. Der Wochen-Slider wirkt hier nicht: Die
+Schienen beginnen zu verschiedenen Terminen, dieselbe Wochennummer wäre je
+Klasse ein anderes Datum. Klassen ohne Schiene erscheinen mit „keine
+Schiene" und ohne Soll-Werte.
+
+Der Wochen-Slider folgt dem Zeitraum des aktiven Halbjahres.
 
 Die Schienen starten zu unterschiedlichen Terminen — mit der Klasse ändert
 sich daher auch die laufende Woche.
