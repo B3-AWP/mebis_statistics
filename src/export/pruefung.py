@@ -199,6 +199,34 @@ def ist_unbekannt(status: Optional[Dict]) -> bool:
     return bool(status) and bool(status.get('unbekannt'))
 
 
+# Moodle-Status einer Aufgabe, die als Entwurf gespeichert, aber nicht
+# eingereicht ist. Die Bewertungsseite traegt dafuer ein Datum
+# ("Zuletzt geändert"), deshalb reicht submission_time allein nicht, um
+# "abgegeben" zu erkennen.
+STATUS_ENTWURF = 'Entwurf (nicht abgegeben)'
+
+
+def ist_entwurf(status: Optional[Dict]) -> bool:
+    """True, wenn ein Status-Eintrag ein nicht eingereichter Entwurf ist."""
+    return bool(status) and status.get('status') == STATUS_ENTWURF
+
+
+def zaehlt_als_abgabe(status: Optional[Dict]) -> bool:
+    """
+    Ist-Regel: abgegeben, bewertet oder mit Note — Entwurf und unbekannt nicht.
+
+    Ein Test mit offener Freitextbewertung hat ein Datum, aber keine Note;
+    er zaehlt. Ein Aufgaben-Entwurf hat ebenfalls ein Datum, zaehlt aber
+    nicht, solange er nicht bewertet ist.
+    """
+    if not status or ist_unbekannt(status):
+        return False
+    hat_note = status.get('grade') not in (None, '', '-', 'Nicht bewertet',
+                                           'Nicht eingereicht', 'Keine Bewertung')
+    hat_abgabe = bool(status.get('submission_time')) and not ist_entwurf(status)
+    return hat_abgabe or hat_note or status.get('status2') == 'Bewertet'
+
+
 def gilt_fuer_gruppe(aufgaben_gruppen: Optional[str], gruppenname: str) -> bool:
     """
     Ob eine Aufgabe für eine Gruppe vorgesehen ist.
@@ -219,11 +247,7 @@ def gilt_fuer_gruppe(aufgaben_gruppen: Optional[str], gruppenname: str) -> bool:
 
 def _hat_abgabe(status: Dict) -> bool:
     """Spiegelt die Ist-Regel des Backends: abgegeben, bewertet oder mit Note."""
-    if ist_unbekannt(status):
-        return False
-    hat_note = status.get('grade') not in (None, '', '-', 'Nicht bewertet',
-                                           'Nicht eingereicht', 'Keine Bewertung')
-    return bool(status.get('submission_time')) or hat_note or status.get('status2') == 'Bewertet'
+    return zaehlt_als_abgabe(status)
 
 
 def zaehlwerte(export: Dict) -> Dict[str, Dict[str, Dict[str, int]]]:

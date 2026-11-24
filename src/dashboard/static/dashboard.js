@@ -2825,6 +2825,25 @@ function findeUserStatus(aktivitaet, userId, userName) {
 }
 
 /**
+ * Moodle-Status einer Aufgabe, die als Entwurf gespeichert, aber nicht
+ * eingereicht ist (wie pruefung.STATUS_ENTWURF). Die Zeile hat ein Datum,
+ * zaehlt aber nicht als Abgabe und ist nicht "bewertbar".
+ */
+const STATUS_ENTWURF = 'Entwurf (nicht abgegeben)';
+
+/** Zelleninhalt fuer einen Entwurf; der Tooltip erklaert, warum er nicht zaehlt. */
+const ENTWURF_ZELLE = '<span class="zelle-entwurf"'
+    + ' title="Entwurf gespeichert, aber nicht eingereicht – zählt nicht">Entwurf</span>';
+
+/**
+ * \param {Object|null} status - Status einer Person zu einer Aufgabe
+ * \returns {boolean} true, wenn es ein nicht eingereichter Entwurf ist
+ */
+function istEntwurf(status) {
+    return !!status && status.status === STATUS_ENTWURF;
+}
+
+/**
  * Baut eine Statuszelle der Pflichtaufgaben-Tabelle.
  * \param {Object|null} status - Status der Person zu dieser Aufgabe
  * \param {Object} aktivitaet - Aufgabe oder Quiz
@@ -2851,6 +2870,9 @@ function pflichtStatusZelle(status, aktivitaet, groupId) {
     } else if (status && status.score && status.score !== '-') {
         cellContent = `<strong>${status.score}</strong>`;
         bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+    } else if (istEntwurf(status)) {
+        cellContent = ENTWURF_ZELLE;
+        bgColor = '--progress-width: 0%;';
     } else if (status && status.status === 'Zur Bewertung abgegeben') {
         // Nur Aufgaben lassen sich direkt bewerten, Quizzes nicht.
         if (aktivitaet.activity_type !== 'quiz' && groupId) {
@@ -3127,6 +3149,8 @@ function generatePflichtTableFromActivities() {
                 // Alternative: Score field for assignments
                 cellContent = `<strong>${status.score}</strong>`;
                 bgColor = '--progress-width: 100%; --progress-color: #28a745;';
+            } else if (istEntwurf(status)) {
+                cellContent = ENTWURF_ZELLE;
             } else if (status && status.status === 'Zur Bewertung abgegeben') {
                 // For assignments (type "Aufgabe"), create hyperlink with group parameter
                 // Only create link for non-quiz activities (i.e., assignments)

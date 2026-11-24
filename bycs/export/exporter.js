@@ -25,6 +25,7 @@ const VERSUCHE = 3;          // wie @retry(max_retries=3) im Exporter
 const TIMEOUT_MS = 30000;
 const MAX_SEITEN = 50;       // wie pruefung.MAX_SEITEN
 const STATUS_UNBEKANNT = 'Unbekannt';
+const STATUS_ENTWURF = 'Entwurf (nicht abgegeben)';   // wie pruefung.STATUS_ENTWURF
 const ZAEHLWERTE_SCHLUESSEL = 'mebis-export-zaehlwerte';
 
 class SeiteUnvollstaendig extends Error {}
@@ -348,6 +349,7 @@ function liesBewertungsseite(dok) {
     return [...dok.querySelector('tbody').querySelectorAll('tr')].map(row => ({
         cls: row.getAttribute('class') || '',
         status: feld(row, 'div.submissionstatussubmitted'),
+        entwurf: !!row.querySelector('div.submissionstatusdraft'),
         status2: feld(row, 'div.submissiongraded'),
         submission: feld(row, 'div.assignsubmission_onlinetext .no-overflow p'),
         grade: feld(row, 'td.cell.' + gradeCol),
@@ -363,11 +365,12 @@ function bewertungszeilenAuswerten(zeilen) {
         const m = row.cls.match(/user(\d+)/);
         if (!m || gesehen.has(m[1])) continue;
         gesehen.add(m[1]);
-        let status = row.status ?? 'Nicht eingereicht';
+        // Entwurf: gespeichert, nicht eingereicht — hat trotzdem ein Datum
+        let status = row.status ?? (row.entwurf ? STATUS_ENTWURF : 'Nicht eingereicht');
         let status2 = row.status2 ?? 'Nicht bewertet';
         const grade = row.grade ?? 'Keine Bewertung';
         if (grade && !OHNE_NOTE.includes(grade)) {
-            if (status === 'Nicht eingereicht') status = 'Zur Bewertung abgegeben';
+            if (status === 'Nicht eingereicht' || status === STATUS_ENTWURF) status = 'Zur Bewertung abgegeben';
             if (status2 === 'Nicht bewertet') status2 = 'Bewertet';
         }
         ergebnis.push({
@@ -497,7 +500,8 @@ function giltFuerGruppe(aufgabenGruppen, gruppenname) {
 function hatAbgabe(s) {
     if (s.unbekannt) return false;
     const mitNote = ![null, undefined, '', '-', 'Nicht bewertet', 'Nicht eingereicht', 'Keine Bewertung'].includes(s.grade);
-    return Boolean(s.submission_time) || mitNote || s.status2 === 'Bewertet';
+    const abgabe = Boolean(s.submission_time) && s.status !== STATUS_ENTWURF;
+    return abgabe || mitNote || s.status2 === 'Bewertet';
 }
 
 function zaehlwerte(exp) {

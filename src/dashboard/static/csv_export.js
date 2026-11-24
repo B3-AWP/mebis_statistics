@@ -273,6 +273,10 @@ function getGradeFromActivitiesByCategory(userName, assignmentId) {
                     if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
                     }
+                    // Entwurf hat ein Datum, ist aber nicht eingereicht
+                    if (userStatus.status === 'Entwurf (nicht abgegeben)') {
+                        return 'Entwurf';
+                    }
                     if (userStatus.submission_time) {
                         return 'nicht bewertet';
                     }
@@ -290,6 +294,10 @@ function getGradeFromActivitiesByCategory(userName, assignmentId) {
                     const hasGrade = userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
                     if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
+                    }
+                    // Entwurf hat ein Datum, ist aber nicht eingereicht
+                    if (userStatus.status === 'Entwurf (nicht abgegeben)') {
+                        return 'Entwurf';
                     }
                     if (userStatus.submission_time) {
                         return 'nicht bewertet';
@@ -333,6 +341,10 @@ function getGradeFromLeistungsnachweise(userName, assignmentId) {
                     if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
                     }
+                    // Entwurf hat ein Datum, ist aber nicht eingereicht
+                    if (userStatus.status === 'Entwurf (nicht abgegeben)') {
+                        return 'Entwurf';
+                    }
                     if (userStatus.submission_time) {
                         return 'nicht bewertet';
                     }
@@ -350,6 +362,10 @@ function getGradeFromLeistungsnachweise(userName, assignmentId) {
                     const hasGrade = userStatus.grade && userStatus.grade !== '-' && userStatus.grade !== 'Nicht eingereicht';
                     if (hasGrade) {
                         return convertGradeToPercentage(userStatus.grade);
+                    }
+                    // Entwurf hat ein Datum, ist aber nicht eingereicht
+                    if (userStatus.status === 'Entwurf (nicht abgegeben)') {
+                        return 'Entwurf';
                     }
                     if (userStatus.submission_time) {
                         return 'nicht bewertet';

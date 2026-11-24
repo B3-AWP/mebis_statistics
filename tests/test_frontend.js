@@ -255,6 +255,21 @@ try {
     pruefe('Statuszelle verlinkt die Person', zelle.includes('userid=4711'), zelle.slice(0, 160));
 } catch (e) { pruefe('Bewertungslink', false, e.message); }
 
+// Entwurf: Datum ja, aber weder ❌ noch "bewertbar" — und kein Fortschritt
+console.log('\n== Entwurf ==');
+try {
+    const zelle = G('pflichtStatusZelle')(
+        { status: 'Entwurf (nicht abgegeben)', grade: '-', user_id: '3',
+          submission_time: '2026-11-17T14:31:00' },
+        { activity_type: 'assignment', url: '#' }, '1001');
+    pruefe('Zelle zeigt Entwurf', zelle.includes('zelle-entwurf') && zelle.includes('Entwurf'));
+    pruefe('kein ❌, kein bewertbar', !zelle.includes('❌') && !zelle.includes('bewertbar'));
+    pruefe('Datum steht dabei', zelle.includes('17.11.2026'), zelle.slice(-120));
+    const q = byName['Clara Caeruleus'];
+    pruefe('Clara: Entwurf zaehlt nicht', q && q.stundenErledigt === 0,
+           q && `${q.stundenErledigt}/${q.stundenGesamt}`);
+} catch (e) { pruefe('Entwurf', false, e.message); }
+
 console.log('\n== Wechsel auf gesperrtes Halbjahr ==');
 try {
     G('selectHalbjahr')('halbjahr-2');

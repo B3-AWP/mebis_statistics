@@ -35,6 +35,8 @@ dora, bernd = nutzer['Dora Datenluecke'], nutzer['Bernd Beflissen']
 stunden = next(a['stunden'] for k in d['plan']['kurse'] for a in k['aufgaben'] if a['cmid'] == '94824799')
 assert dora['stunden_unbekannt'] == stunden, dora
 assert dora['stunden_erledigt'] == bernd['stunden_erledigt'], (dora, bernd)
+# Entwurf: Clara hat die 10-Stunden-Aufgabe nur gespeichert -> zaehlt nicht
+assert nutzer['Clara Caeruleus']['stunden_erledigt'] == 0, nutzer['Clara Caeruleus']
 print('  unbekannt: Dora', dora['stunden_unbekannt'], 'Std. unbekannt,', dora['stunden_erledigt'], 'Std. erledigt')
 print('  Kurse:', list(d['kurse'].keys()))
 " 2>&1 | grep -v ' - INFO - \|Configuration loaded\|EXCLUD\|^====\|Excluded'

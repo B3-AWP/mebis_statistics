@@ -2012,6 +2012,14 @@ h3 {
     cursor: help;
 }
 
+/* Entwurf: gespeichert, aber nicht eingereicht — zaehlt nicht, ist aber
+   auch kein "nichts da". Neutral statt rot oder gelb. */
+.zelle-entwurf {
+    color: var(--text-light);
+    font-style: italic;
+    cursor: help;
+}
+
 /* Marke hinter vorlaeufigen Werten (Quantitaet ist Untergrenze) */
 .vorlaeufig-marke {
     display: inline-block;

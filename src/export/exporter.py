@@ -34,7 +34,7 @@ from config.config_manager import config_manager
 from config.logger_config import get_logger
 from src.common.plan_loader import PlanFehler, get_plan
 from src.export.pruefung import (
-    MAX_SEITEN, SeiteUnvollstaendig, erste_seite, fuehre_gruppen_zusammen,
+    MAX_SEITEN, STATUS_ENTWURF, SeiteUnvollstaendig, erste_seite, fuehre_gruppen_zusammen,
     gilt_fuer_gruppe, offene_seiten, ohne_namensfilter, pruefe_namensfilter,
     seiten_url, seitenwerte, unbekannter_status, vergleiche_zaehlwerte, zaehlwerte,
 )
@@ -879,6 +879,8 @@ def _lies_bewertungstabelle(driver):
             rows.push({
                 cls: row.getAttribute('class') || '',
                 status: feld(row, 'div.submissionstatussubmitted'),
+                // Entwurf: gespeichert, aber nicht eingereicht
+                entwurf: !!row.querySelector('div.submissionstatusdraft'),
                 status2: feld(row, 'div.submissiongraded'),
                 submission: feld(row, 'div.assignsubmission_onlinetext .no-overflow p'),
                 grade: feld(row, 'td.cell.' + gradeCol),
@@ -905,7 +907,15 @@ def _bewertungszeilen_auswerten(zeilen):
             continue  # Zeile auf zwei Teilseiten
         gesehen.add(user_id)
 
-        status = row["status"] if row["status"] is not None else "Nicht eingereicht"
+        if row["status"] is not None:
+            status = row["status"]
+        elif row.get("entwurf"):
+            # Gespeichert, nicht eingereicht. Die Zeile hat trotzdem ein
+            # Datum ("Zuletzt geändert") — ohne eigenen Status sähe der
+            # Entwurf wie eine Abgabe aus.
+            status = STATUS_ENTWURF
+        else:
+            status = "Nicht eingereicht"
         status2 = row["status2"] if row["status2"] is not None else "Nicht bewertet"
         submission = row["submission"] if row["submission"] is not None else "Keine Abgabe"
         grade = row["grade"] if row["grade"] is not None else "Keine Bewertung"
@@ -919,8 +929,8 @@ def _bewertungszeilen_auswerten(zeilen):
         # Korrigiere Status basierend auf der Bewertung
         # Wenn eine gültige Bewertung vorhanden ist, sollte der Status nicht "Nicht eingereicht" sein
         if grade and grade not in ["Keine Bewertung", "-", ""]:
-            # Es gibt eine Bewertung
-            if status == "Nicht eingereicht":
+            # Es gibt eine Bewertung — auch ein bewerteter Entwurf zählt
+            if status in ("Nicht eingereicht", STATUS_ENTWURF):
                 status = "Zur Bewertung abgegeben"
             if status2 == "Nicht bewertet":
                 status2 = "Bewertet"

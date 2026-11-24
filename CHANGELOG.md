@@ -24,6 +24,34 @@ Sicherheitsnetz meldet `pruefe_namensfilter` eine Seite mit trotzdem
 ausgewähltem Buchstaben als unvollständig („Namensfilter aktiv (B)"). Python
 und Browser-Export gleich; abgesichert in `tests/test_pruefung.py`.
 
+### 🐛 Entwurf zählt nicht mehr als Abgabe
+
+Eine Aufgabe, die nur als Entwurf gespeichert und nicht eingereicht war,
+verlor im Export ihren Status: Gelesen wurde nur
+`div.submissionstatussubmitted`, Moodle schreibt einen Entwurf aber in
+`div.submissionstatusdraft`. Übrig blieb „Nicht eingereicht" — mit Datum,
+weil die Spalte „Zuletzt geändert" auch beim Entwurf gefüllt ist. Folgen:
+Die Tabelle zeigte ❌ mit Datum, und die **Quantität zählte den Entwurf mit**,
+weil sie ein vorhandenes Datum als Abgabe wertet (nötig für Tests, deren
+Freitextantworten noch nicht bewertet sind).
+
+- Beide Exporter (`exporter.py`, `bycs/export/exporter.js`) setzen jetzt den
+  Status `Entwurf (nicht abgegeben)` (`pruefung.STATUS_ENTWURF`). Ein
+  bewerteter Entwurf wird wie bisher zu „Zur Bewertung abgegeben".
+- Die Ist-Regel steht einmal in `pruefung.zaehlt_als_abgabe()` und gilt für
+  Backend-Quantität und Verlaufsvergleich; `aufbereitung.js` und der
+  Browser-Export bilden sie nach. Damit zählt ein Entwurf wie im
+  Schüler-Dashboard (`ZUSTAND.ENTWURF`) nicht.
+- Dashboard: Zelle „Entwurf" mit Datum, neutral, ohne „bewertbar"-Link.
+  CSV: „Entwurf" statt „nicht bewertet". Bericht: „Entwurf – noch nicht
+  eingereicht".
+- Das Exportformat bleibt Schema 3: Es kommt nur ein Statuswert hinzu, den
+  ältere Leser als „nicht abgegeben" behandeln. Bestehende Exporte enthalten
+  Entwürfe noch als „Nicht eingereicht" — wirksam wird die Korrektur mit dem
+  nächsten Export.
+- Testfixture: Clara hat die 10-Stunden-Aufgabe als Entwurf und bleibt bei
+  0 Stunden; dazu Prüfungen in `test_pruefung` und `test_frontend.js`.
+
 ### 🐛 Dashboard: „bewertbar" öffnet die richtige Person
 
 Der Link „bewertbar" führte in Moodles Korrekturansicht ohne `userid` —

@@ -545,6 +545,23 @@ Tabelle sonst unlesbar breit. Deshalb:
 Ganz rechts steht je Person die Durchschnittsnote aus ihren bewerteten
 Pflichtaufgaben. Die Personenspalte bleibt beim seitlichen Scrollen stehen.
 
+Was in einer Zelle steht:
+
+| Zelle | Bedeutung | zählt für die Quantität |
+|---|---|---|
+| Note / Sterne | bewertet | ja |
+| **bewertbar** (Link) | eingereicht, Bewertung offen | ja |
+| **Entwurf** + Datum | in Moodle gespeichert, aber nicht eingereicht | **nein** |
+| ❌ | nichts abgegeben | nein |
+| **?** | Stand unbekannt (Seite im Export nicht lesbar) | nein, Note vorläufig |
+
+Ein **Entwurf** ist meist ein vergessener Klick auf „Abgabe einreichen".
+Das Datum ist Moodles „zuletzt geändert", kein Abgabezeitpunkt. Entwürfe
+zählen nicht mit, auch im Schüler-Dashboard nicht; die Zelle zeigt sie
+trotzdem an, damit Sie die Person ansprechen können. Bewerten Sie einen
+Entwurf, zählt er ab dann als abgegeben. Im CSV steht „Entwurf", im
+Schülerbericht „Entwurf – noch nicht eingereicht".
+
 Die Filter (Status, Typ, Abgabezeitraum) blenden **Aufgabenspalten** aus;
 die Klassenliste in den Zeilen bleibt dabei vollständig.
 

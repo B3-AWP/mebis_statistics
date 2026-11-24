@@ -112,6 +112,17 @@ class TestUnbekannt(unittest.TestCase):
         self.assertFalse(ist_unbekannt({'status': 'Nicht eingereicht'}))
         self.assertFalse(ist_unbekannt(None))
 
+    def test_zaehlt_als_abgabe(self):
+        entwurf = dict(OFFEN, status=pruefung.STATUS_ENTWURF,
+                       submission_time='2026-10-01T10:00:00')
+        # Test mit offener Freitextbewertung: Datum, keine Note -> zaehlt
+        test_offen = dict(OFFEN, submission_time='2026-10-01T10:00:00')
+        self.assertFalse(pruefung.zaehlt_als_abgabe(entwurf))
+        self.assertTrue(pruefung.zaehlt_als_abgabe(test_offen))
+        self.assertTrue(pruefung.zaehlt_als_abgabe(ABGEGEBEN))
+        self.assertFalse(pruefung.zaehlt_als_abgabe(OFFEN))
+        self.assertFalse(pruefung.zaehlt_als_abgabe(unbekannter_status('1', 'x')))
+
     def test_gilt_fuer_gruppe(self):
         self.assertTrue(gilt_fuer_gruppe('all', 'K - IFA12A (6072)'))
         self.assertTrue(gilt_fuer_gruppe(None, 'IFA12A'))
@@ -417,6 +428,22 @@ class TestBewertungszeilen(unittest.TestCase):
         ergebnis = exporter._bewertungszeilen_auswerten([zeile, dict(zeile)])
         self.assertEqual(len(ergebnis), 1)
         self.assertEqual(ergebnis[0]['status'], 'Nicht eingereicht')
+
+    def test_entwurf_wird_erkannt(self):
+        # Moodle: div.submissionstatusdraft statt ...submitted, aber mit Datum
+        zeile = {'cls': 'user8', 'status': None, 'entwurf': True, 'status2': None,
+                 'submission': None, 'grade': '-', 'time': '17.11.2026 14:31'}
+        ergebnis = exporter._bewertungszeilen_auswerten([zeile])
+        self.assertEqual(ergebnis[0]['status'], pruefung.STATUS_ENTWURF)
+        self.assertIsNotNone(ergebnis[0]['submission_time'])
+        self.assertFalse(pruefung.zaehlt_als_abgabe(ergebnis[0]))
+
+    def test_bewerteter_entwurf_zaehlt(self):
+        zeile = {'cls': 'user9', 'status': None, 'entwurf': True, 'status2': None,
+                 'submission': None, 'grade': '70,00', 'time': '17.11.2026 14:31'}
+        ergebnis = exporter._bewertungszeilen_auswerten([zeile])
+        self.assertEqual(ergebnis[0]['status'], 'Zur Bewertung abgegeben')
+        self.assertTrue(pruefung.zaehlt_als_abgabe(ergebnis[0]))
 
     def test_note_ohne_abgabe_zaehlt_als_abgegeben(self):
         zeile = {'cls': 'user7', 'status': None, 'status2': None,

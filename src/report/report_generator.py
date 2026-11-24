@@ -31,6 +31,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 
 from src.common.group_utils import extract_group_prefix
 from src.common.plan_loader import PlanFehler, get_plan
+from src.export.pruefung import ist_entwurf
 from config.logger_config import get_logger
 from config.config_manager import config_manager
 
@@ -38,6 +39,10 @@ logger = get_logger('report_generator')
 
 # Gruppen die keine Schülerklassen sind
 IGNORED_GROUP_PATTERNS = ['Lehrkraft', 'Lehrer', 'Admin']
+
+# Hinweis im Bericht fuer einen gespeicherten, aber nicht eingereichten
+# Entwurf — fuer Lernende der Anstoss, "Abgabe einreichen" zu klicken.
+ENTWURF_TEXT = 'Entwurf – noch nicht eingereicht'
 
 # Deutsche Umlaut-Normalisierung für korrekte alphabetische Sortierung
 _UMLAUT_TABLE = str.maketrans({'ä': 'a', 'ö': 'o', 'ü': 'u',
@@ -295,6 +300,8 @@ class ReportGenerator:
                 return ('Stand unbekannt', None)
             if not status or not status.get('submission_time'):
                 return ('—', None)
+            if ist_entwurf(status):
+                return (ENTWURF_TEXT, status.get('submission_time'))
             grade_val = status.get('grade', '')
             bewertung = grade_val if (status.get('status2') == 'Bewertet' and grade_val) else 'Bewertung offen'
             return (bewertung, status.get('submission_time'))
@@ -452,7 +459,10 @@ class ReportGenerator:
                 else:
                     sub_time = self._format_submission_time(status['submission_time'])
                     grade_val = status.get('grade', '')
-                    note = grade_val if (status.get('status2') == 'Bewertet' and grade_val) else 'Bewertung offen'
+                    if ist_entwurf(status):
+                        note = Paragraph(ENTWURF_TEXT, styles['cell_missing'])
+                    else:
+                        note = grade_val if (status.get('status2') == 'Bewertet' and grade_val) else 'Bewertung offen'
                     rows.append([Paragraph(title, styles['cell']), sub_time, note])
 
         if len(rows) == 1:
@@ -531,6 +541,11 @@ class ReportGenerator:
                         except (ValueError, TypeError):
                             pass
                     sub_time = self._format_submission_time(raw_time)
+                    if ist_entwurf(status):
+                        # Datum ist "zuletzt geändert", nicht die Abgabe
+                        rows.append([Paragraph(title, styles['cell']), sub_time,
+                                     Paragraph(ENTWURF_TEXT, styles['cell_missing'])])
+                        continue
                     grade_val = status.get('grade', '')
                     bewertung = grade_val if (status.get('status2') == 'Bewertet' and grade_val) else 'Bewertung offen'
                     rows.append([Paragraph(title, styles['cell']), sub_time, bewertung])

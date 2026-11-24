@@ -5,7 +5,8 @@ Vier Schueler mit unterschiedlichem Abgabeverhalten, damit die
 stundengewichtete Rechnung sichtbar wird:
   - Anna:  nur die grosse 10-Stunden-Aufgabe        -> wenige Aufgaben, viele Stunden
   - Bernd: vier kleine Quizze (2+2.5+2.5+2 = 9 h)   -> viele Aufgaben, wenig Stunden
-  - Clara: nichts
+  - Clara: nichts abgegeben, aber die 10-Stunden-Aufgabe als ENTWURF
+           gespeichert (Datum, kein Einreichen) -> zaehlt nicht, 0 h
   - Dora:  wie Bernd, aber die 10-Stunden-Aufgabe ist UNBEKANNT
            (Bewertungsseite nicht lesbar) -> Note vorlaeufig, 9 h als Untergrenze
 """
@@ -16,7 +17,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.common.plan_loader import get_plan  # noqa: E402
-from src.export.pruefung import unbekannter_status  # noqa: E402
+from src.export.pruefung import STATUS_ENTWURF, unbekannter_status  # noqa: E402
 
 plan = get_plan()
 kurs = plan.get_kurs('halbjahr-1')
@@ -32,7 +33,7 @@ print('Anna  :', sorted(anna_cmids), '=', sum(plan.get_stunden(c) for c in anna_
 print('Bernd :', sorted(bernd_cmids), '=', sum(plan.get_stunden(c) for c in bernd_cmids), 'h')
 
 
-def build_user(uid, name, done_cmids, unbekannt_cmids=frozenset()):
+def build_user(uid, name, done_cmids, unbekannt_cmids=frozenset(), entwurf_cmids=frozenset()):
     assignments, quizzes = [], []
     for a in aufgaben:
         done = a['cmid'] in done_cmids
@@ -47,6 +48,9 @@ def build_user(uid, name, done_cmids, unbekannt_cmids=frozenset()):
         }
         if a['cmid'] in unbekannt_cmids:
             status = unbekannter_status(uid, "Bewertungstabelle nicht gefunden")
+        if a['cmid'] in entwurf_cmids:
+            # Gespeichert, nicht eingereicht: Datum ja, Abgabe nein
+            status.update(status=STATUS_ENTWURF, submission_time="2026-10-06T09:00:00")
         entry = {"id": a['cmid'], "status": status,
                  "category_id": "cg1", "category_name": "🎯Pflichtaufgaben"}
         (assignments if a['typ'] == 'assign' else quizzes).append(entry)
@@ -82,7 +86,7 @@ export = {
         "users": [
             build_user("1", "Anna Abgabe", anna_cmids),
             build_user("2", "Bernd Beflissen", bernd_cmids),
-            build_user("3", "Clara Caeruleus", set()),
+            build_user("3", "Clara Caeruleus", set(), entwurf_cmids=anna_cmids),
             build_user("4", "Dora Datenluecke", bernd_cmids, unbekannt_cmids=anna_cmids),
         ],
     }],

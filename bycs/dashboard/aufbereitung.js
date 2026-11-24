@@ -308,7 +308,9 @@ function calculateUserProgress(user, details, kategorien, currentWeek, totalWeek
         const id = String(a.id ?? '').trim();
         if (s.unbekannt) { unbekannt.add(id); continue; }
         const mitNote = ![null, undefined, '', '-', 'Nicht bewertet', 'Nicht eingereicht', 'Keine Bewertung'].includes(s.grade);
-        if (s.submission_time || mitNote || s.status2 === 'Bewertet') erledigt.add(id);
+        // Entwurf: hat ein Datum, ist aber nicht eingereicht (wie pruefung.zaehlt_als_abgabe)
+        const abgabe = Boolean(s.submission_time) && s.status !== 'Entwurf (nicht abgegeben)';
+        if (abgabe || mitNote || s.status2 === 'Bewertet') erledigt.add(id);
     }
     const stundenErledigt = pySum(geplante.filter(a => erledigt.has(a.cmid)).map(a => a.stunden));
     const offen = geplante.filter(a => unbekannt.has(a.cmid));

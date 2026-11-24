@@ -37,6 +37,7 @@ from config.logger_config import get_logger, backend_logger, api_logger, data_lo
 from src.common import plan_loader
 from src.common.group_utils import extract_group_prefix
 from src.common.plan_loader import PlanFehler, get_plan
+from src.export.pruefung import zaehlt_als_abgabe
 
 # Erwartete Version des Exportformats (siehe exporter.EXPORT_SCHEMA_VERSION).
 # 3 = Status kann "unbekannt" sein; dazu ein "pruefbericht".
@@ -1151,10 +1152,9 @@ def calculate_user_progress(user, assignment_details, categories, current_week, 
             if status.get('unbekannt'):
                 unbekannte_ids.add(str(activity.get('id', '')).strip())
                 continue
-            hat_abgabe = bool(status.get('submission_time'))
-            hat_note = status.get('grade') not in (None, '', '-', 'Nicht bewertet',
-                                                   'Nicht eingereicht', 'Keine Bewertung')
-            if hat_abgabe or hat_note or status.get('status2') == 'Bewertet':
+            # Ein Entwurf hat ein Datum, ist aber nicht eingereicht — er
+            # zählt nicht (wie ZUSTAND.ENTWURF im Schüler-Dashboard).
+            if zaehlt_als_abgabe(status):
                 erledigte_ids.add(str(activity.get('id', '')).strip())
 
         stunden_erledigt = sum(a['stunden'] for a in geplante if a['cmid'] in erledigte_ids)

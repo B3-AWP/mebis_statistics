@@ -85,6 +85,13 @@ einer sonst vollständigen Tabelle. Regeln:
   soll nicht der ganzen Klasse die Note nehmen.
 - Getrennt halten von der Planregel: Eine **Plan-Aufgabe, die in Moodle
   fehlt**, ist „nicht begonnen", nicht unbekannt.
+- **Ein Entwurf ist keine Abgabe.** Status `Entwurf (nicht abgegeben)`
+  (`pruefung.STATUS_ENTWURF`, aus `div.submissionstatusdraft`) hat ein
+  Datum, zählt aber nicht — wie `ZUSTAND.ENTWURF` im Schüler-Dashboard.
+  Deshalb ist ein vorhandenes `submission_time` allein kein Beleg für
+  „abgegeben"; die Ist-Regel steht in `pruefung.zaehlt_als_abgabe()`
+  (nachgebildet in `aufbereitung.js` und `hatAbgabe` im Browser-Export).
+  Ein Test mit Datum, aber offener Freitextbewertung zählt dagegen.
 - Tabellen, die Moodle aufteilt, über `lade_alle_seiten()` lesen — nur die
   Seitennummer übernehmen, nie den Link (Filter bleiben sonst in der Sitzung).
 - **Jeder Abruf einer Personentabelle setzt den Namensfilter zurück**
